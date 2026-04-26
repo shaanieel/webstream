@@ -454,8 +454,9 @@ async function adminDriveTest(request, env) {
   const gdiBase = (env.GDI_WORKER_URL || '').replace(/\/$/, '');
   if (!gdiBase) return err('GDI_WORKER_URL belum di-set', 500);
   const drivePath = normalizeDrivePath(path, gdiBase);
+  const fullUrl = `${gdiBase}${drivePath}`;
   try {
-    const r = await fetch(`${gdiBase}${drivePath}`, {
+    const r = await fetch(fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -468,11 +469,13 @@ async function adminDriveTest(request, env) {
       gdi_ok: r.ok,
       gdi_status: r.status,
       drive_path: drivePath,
+      gdi_url_called: fullUrl,
+      gdi_base: gdiBase,
       data: data || text.slice(0, 500),
       stream_url: data && data.link ? gdiBase + data.link : null,
     });
   } catch (e) {
-    return err('GDI error: ' + e.message, 502);
+    return err('GDI error: ' + e.message + ' (url=' + fullUrl + ')', 502);
   }
 }
 
