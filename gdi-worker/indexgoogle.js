@@ -39,7 +39,7 @@ const authConfig = {
   "service_account_json": randomserviceaccount,
   "files_list_page_size": 100,
   "search_result_list_page_size": 100,
-  "enable_cors_file_down": false,
+  "enable_cors_file_down": true,
   "enable_password_file_verify": false,
   "direct_link_protection": false,
   "disable_anonymous_download": false,
