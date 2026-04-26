@@ -6,10 +6,10 @@ Platform streaming film & series eksklusif dengan UI mirip [streamex.net](https:
 - **Auth** — Supabase (email + password), VIP gating
 - **Video** — Google Drive Index (Cloudflare Worker terpisah)
 - **Subtitle** — Subsource API (search by judul + pilih bahasa, auto-load ke player)
-- **Admin Panel** — Manage film, user, dan VIP akses
+- **Admin Panel terpisah** di repo [`shaanieel/adminweb1`](https://github.com/shaanieel/adminweb1) — manage film, user, VIP akses lewat domain sendiri (cross-origin, panggil `/api/admin/*` di sini)
 - **Hanya menampilkan film yang admin tambahkan** (curated catalog di Supabase)
 
-URL produksi: <https://nonton.zaeinstream.workers.dev>
+URL produksi: <https://webstream.zaeinstreamx.workers.dev>
 
 ---
 
@@ -18,8 +18,7 @@ URL produksi: <https://nonton.zaeinstream.workers.dev>
 ```
 webstream/
 ├── public/                    # Static assets (di-serve di "/")
-│   ├── index.html             # Frontend utama (streamex-style)
-│   └── admin.html             # Admin panel (di "/admin")
+│   └── index.html             # Frontend utama (streamex-style)
 │
 ├── worker/
 │   └── worker.js              # Main Cloudflare Worker
@@ -28,7 +27,7 @@ webstream/
 │                              #   • /api/subsource/* (proxy + key di env)
 │                              #   • /api/drive/resolve (resolve drive link)
 │                              #   • /api/catalog (public read, filter by tier)
-│                              #   • /api/admin/* (auth required, admin only)
+│                              #   • /api/admin/* (auth required, admin only — dipanggil dari adminweb1)
 │
 ├── gdi-worker/                # Worker terpisah untuk Drive Index
 │   ├── indexgoogle.js         # GDI-JS (Parveen Bhadoo) — proxy ke Drive
@@ -176,27 +175,27 @@ Worker → fetch SRT dari Subsource → return text/plain
   ↓ Browser: SRT → VTT → addRemoteTextTrack ke VideoJS
 ```
 
-### B. Admin tambah film
+### B. Admin tambah film  (dari repo `adminweb1`)
 
 ```
-Browser → /admin
+adminweb1 (https://adminweb1.zaeinstreamx.workers.dev)
   ↓ login (Supabase)
-  ↓ POST /api/admin/films { judul, drive_link, tier, ... }
+  ↓ POST https://webstream.zaeinstreamx.workers.dev/api/admin/films
     Headers: Authorization: Bearer JWT
-Worker
+webstream worker
   ↓ verifikasi JWT → cek email di ADMIN_EMAILS env
   ↓ INSERT ke films via Supabase Service Key
 Supabase → return film row
-  ↓ Browser auto-refresh tabel
+  ↓ adminweb1 auto-refresh tabel
 ```
 
 ### C. Admin manage VIP
 
 ```
-Browser → /admin → tab "VIP Akses"
+adminweb1 → tab "VIP Akses"
   ↓ klik "Beri VIP" untuk user
-  ↓ PATCH /api/admin/users/{user_id} { is_vip: true }
-Worker → verifikasi admin → UPDATE users_profile via service key
+  ↓ PATCH https://webstream.zaeinstreamx.workers.dev/api/admin/users/{user_id} { is_vip: true }
+webstream worker → verifikasi admin → UPDATE users_profile via service key
   ↓ User reload → sekarang bisa lihat film tier=vip
 ```
 
@@ -253,6 +252,10 @@ curl "http://localhost:8787/api/subsource/search?q=Avengers&year=2019"
 - Cek GDI worker masih hidup: <https://indexgoogle.zaeinstream.workers.dev/>.
 - Cek expiry refresh token Google OAuth (perlu re-auth setiap beberapa bulan).
 
-**"Forbidden" saat akses admin panel**
-- Email kamu belum terdaftar di `ADMIN_EMAILS` (di `wrangler.toml` → vars).
+**"Forbidden" saat akses admin panel (di `adminweb1`)**
+- Email kamu belum terdaftar di `ADMIN_EMAILS` (di `wrangler.toml` → vars di repo ini).
 - Update lalu `wrangler deploy` ulang.
+
+**Admin panel "Network error / CORS"**
+- Pastikan `webstream` sudah di-deploy.
+- Worker sudah `Access-Control-Allow-Origin: *`, jadi domain `adminweb1.*.workers.dev` boleh akses tanpa perlu setting tambahan.
