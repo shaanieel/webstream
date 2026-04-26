@@ -111,22 +111,31 @@ async function subsourceFetch(env, path, opts = {}) {
   return r;
 }
 
-// GET /api/subsource/search?q=Stranger+Things&year=2026&type=tv
+// GET /api/subsource/search?q=Stranger+Things&year=2026&type=series&imdb=tt...
+// Subsource real params: searchType (required), q | imdb, year, type=all|movie|series, season
 async function subsourceSearch(request, env) {
   const u = new URL(request.url);
   const q = u.searchParams.get('q');
-  if (!q) return err('Parameter q wajib');
+  const imdb = u.searchParams.get('imdb');
+  if (!q && !imdb) return err('Parameter q atau imdb wajib');
   const year = u.searchParams.get('year');
-  const type = u.searchParams.get('type'); // 'movie' | 'tv'
+  let type = u.searchParams.get('type'); // 'movie' | 'tv' | 'series' | 'all'
+  if (type === 'tv') type = 'series';
+  const season = u.searchParams.get('season');
 
-  const params = new URLSearchParams({ query: q });
+  const params = new URLSearchParams();
+  params.set('searchType', imdb ? 'imdb' : 'text');
+  if (q) params.set('q', q);
+  if (imdb) params.set('imdb', imdb);
   if (year) params.set('year', year);
-  if (type) params.set('type', type);
+  if (type && ['movie', 'series', 'all'].includes(type)) params.set('type', type);
+  if (season) params.set('season', season);
 
   try {
     const r = await subsourceFetch(env, `/movies/search?${params.toString()}`);
-    if (!r.ok) return err(`Subsource search ${r.status}`, 502);
-    const data = await r.json();
+    const text = await r.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (!r.ok) return err(`Subsource search ${r.status}: ${typeof data === 'string' ? data.slice(0,200) : (data && (data.error || data.message)) || ''}`, 502);
     return json({ ok: true, data });
   } catch (e) {
     return err('Subsource error: ' + e.message, 502);
@@ -134,22 +143,26 @@ async function subsourceSearch(request, env) {
 }
 
 // GET /api/subsource/subtitles?movie_id=123&lang=indonesian&season=1&episode=1
+// Subsource real params: movieId, language, productionType, releaseType, page, limit
 async function subsourceSubtitles(request, env) {
   const u = new URL(request.url);
-  const movieId = u.searchParams.get('movie_id');
+  const movieId = u.searchParams.get('movie_id') || u.searchParams.get('movieId');
   if (!movieId) return err('Parameter movie_id wajib');
-  const params = new URLSearchParams({ movie_id: movieId });
-  const lang = u.searchParams.get('lang');
+  const params = new URLSearchParams({ movieId });
+  const lang = u.searchParams.get('lang') || u.searchParams.get('language');
   if (lang) params.set('language', lang);
-  const season = u.searchParams.get('season');
-  if (season) params.set('season', season);
-  const episode = u.searchParams.get('episode');
-  if (episode) params.set('episode', episode);
+  const productionType = u.searchParams.get('productionType');
+  if (productionType) params.set('productionType', productionType);
+  const releaseType = u.searchParams.get('releaseType');
+  if (releaseType) params.set('releaseType', releaseType);
+  const limit = u.searchParams.get('limit') || '100';
+  params.set('limit', limit);
 
   try {
     const r = await subsourceFetch(env, `/subtitles?${params.toString()}`);
-    if (!r.ok) return err(`Subsource subtitles ${r.status}`, 502);
-    const data = await r.json();
+    const text = await r.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (!r.ok) return err(`Subsource subtitles ${r.status}: ${typeof data === 'string' ? data.slice(0,200) : (data && (data.error || data.message)) || ''}`, 502);
     return json({ ok: true, data });
   } catch (e) {
     return err('Subsource error: ' + e.message, 502);
@@ -178,34 +191,113 @@ async function subsourceDownload(request, env, id) {
 }
 
 // ───────────────────────────────────────────────────────────────────
-// Drive helper — extract file id, build stream URL via GDI worker
+// TMDB helpers — proxy ke api.themoviedb.org pakai key di env (server-side)
 // ───────────────────────────────────────────────────────────────────
-
-function extractDriveId(link) {
-  if (!link) return null;
-  // Format umum: /file/d/{id}/, ?id={id}, /folders/{id}, /open?id=...
-  const patterns = [
-    /\/file\/d\/([a-zA-Z0-9_-]{10,})/,
-    /\/folders\/([a-zA-Z0-9_-]{10,})/,
-    /[?&]id=([a-zA-Z0-9_-]{10,})/,
-    /^([a-zA-Z0-9_-]{20,})$/,
-  ];
-  for (const p of patterns) {
-    const m = link.match(p);
-    if (m) return m[1];
-  }
-  return null;
+async function tmdbFetch(env, path) {
+  const key = env.TMDB_API_KEY;
+  if (!key) throw new Error('TMDB_API_KEY belum di-set di env');
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `https://api.themoviedb.org/3${path}${sep}api_key=${encodeURIComponent(key)}&language=en-US`;
+  return fetch(url);
 }
 
-// GET /api/drive/resolve?link=...  → return { stream_url, file_id }
+// GET /api/tmdb/search?type=movie|tv&query=The%20Matrix
+async function tmdbSearch(request, env) {
+  const u = new URL(request.url);
+  const type = u.searchParams.get('type') || 'movie';
+  const query = u.searchParams.get('query') || '';
+  if (!query) return err('Parameter query wajib');
+  if (!['movie', 'tv'].includes(type)) return err('type harus movie atau tv');
+  try {
+    const r = await tmdbFetch(env, `/search/${type}?query=${encodeURIComponent(query)}&include_adult=false`);
+    const data = await r.json();
+    if (!r.ok) return err(`TMDB ${r.status}: ${data.status_message || ''}`, 502);
+    return json({ ok: true, data });
+  } catch (e) {
+    return err('TMDB error: ' + e.message, 502);
+  }
+}
+
+// GET /api/tmdb/movie/:id  atau  /api/tmdb/tv/:id
+async function tmdbDetail(request, env, type, id) {
+  if (!['movie', 'tv'].includes(type)) return err('type harus movie atau tv');
+  if (!/^\d+$/.test(id)) return err('id TMDB harus angka');
+  try {
+    const r = await tmdbFetch(env, `/${type}/${id}`);
+    const data = await r.json();
+    if (!r.ok) return err(`TMDB ${r.status}: ${data.status_message || ''}`, 502);
+    return json({ ok: true, data });
+  } catch (e) {
+    return err('TMDB error: ' + e.message, 502);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Drive helper — call GDI worker to resolve path → signed stream URL
+// ───────────────────────────────────────────────────────────────────
+//
+// Admin masukin "drive path" di Drive Index, contoh:
+//   /Movies/One Piece/S02E01.mp4
+// Worker ini POST ke GDI worker dengan path itu → GDI return JSON
+// dengan field `link` = path /download.aspx?file=...&expiry=...&mac=...
+// (signed, expired, encrypted dengan secret GDI). Kita bikin URL absolute
+// dari GDI worker URL, ini yang dipakai <video src=...>.
+//
+// Frontend tetap bisa kirim link Drive lama → kita coba ekstrak path
+// dari "link" param. Kalau yang dikirim sudah absolute URL ke GDI worker,
+// kita parse path-nya.
+
+function normalizeDrivePath(input, gdiBase) {
+  if (!input) return null;
+  let s = String(input).trim();
+  // Buang base URL GDI kalau ada
+  try {
+    const u = new URL(s);
+    if (gdiBase && u.origin === new URL(gdiBase).origin) {
+      s = u.pathname + (u.search || '');
+    }
+  } catch { /* not a URL, treat as path */ }
+  // Pastikan ada leading slash
+  if (!s.startsWith('/')) s = '/' + s;
+  return s;
+}
+
+// GET /api/drive/resolve?path=/Movies/Foo.mp4  (atau ?link=full-url)
 async function driveResolve(request, env) {
   const u = new URL(request.url);
-  const link = u.searchParams.get('link');
-  const fileId = extractDriveId(link);
-  if (!fileId) return err('Link Drive tidak valid');
-  // GDI worker punya endpoint /down yang stream langsung
-  const streamUrl = `${env.GDI_WORKER_URL}/down/${fileId}`;
-  return json({ ok: true, file_id: fileId, stream_url: streamUrl });
+  const raw = u.searchParams.get('path') || u.searchParams.get('link');
+  if (!raw) return err('Parameter path atau link wajib');
+  const gdiBase = (env.GDI_WORKER_URL || '').replace(/\/$/, '');
+  if (!gdiBase) return err('GDI_WORKER_URL belum di-set di env worker', 500);
+  const drivePath = normalizeDrivePath(raw, gdiBase);
+  if (!drivePath) return err('Path drive tidak valid');
+  // Path file (bukan folder) → POST ke GDI dengan body kosong, GDI return { link: '/download.aspx?...' }
+  try {
+    const r = await fetch(`${gdiBase}${drivePath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const text = await r.text();
+    let data; try { data = JSON.parse(text); } catch { data = null; }
+    if (!r.ok || !data) {
+      return err(`GDI ${r.status}: ${text.slice(0, 200)}`, 502);
+    }
+    if (!data.link) {
+      return err('File tidak ditemukan di Drive Index', 404);
+    }
+    const streamUrl = `${gdiBase}${data.link}`;
+    return json({
+      ok: true,
+      drive_path: drivePath,
+      stream_url: streamUrl,
+      mime_type: data.mimeType || null,
+      size: data.size || null,
+      name: data.name || null,
+    });
+  } catch (e) {
+    return err('GDI error: ' + e.message, 502);
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -249,7 +341,8 @@ async function adminFilmCreate(request, env) {
   const row = {
     judul: body.judul,
     tipe: body.tipe || 'movie',
-    drive_link: body.drive_link,
+    drive_link: body.drive_link || body.drive_path || null,
+    drive_path: body.drive_path || body.drive_link || null,
     tahun: body.tahun || null,
     tmdb_id: body.tmdb_id || null,
     episode: body.episode || null,
@@ -341,14 +434,41 @@ async function adminUserUpdate(request, env, userId) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
   const body = await request.json();
-  const patch = {};
-  if (body.expired_at !== undefined) patch.expired_at = body.expired_at;
-  if (body.is_vip !== undefined) patch.is_vip = !!body.is_vip;
-  const r = await supabaseRest(env, `/users_profile?user_id=eq.${userId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  });
-  if (!r.ok) return err('Gagal update', 500);
+
+  // 1. Update users_profile (vip / expired_at / email cache)
+  const profilePatch = {};
+  if (body.expired_at !== undefined) profilePatch.expired_at = body.expired_at;
+  if (body.is_vip !== undefined) profilePatch.is_vip = !!body.is_vip;
+  if (body.email !== undefined) profilePatch.email = body.email;
+  if (Object.keys(profilePatch).length) {
+    const r = await supabaseRest(env, `/users_profile?user_id=eq.${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(profilePatch),
+    });
+    if (!r.ok) return err('Gagal update profile: ' + JSON.stringify(r.data), 500);
+  }
+
+  // 2. Update auth (email / password) via Admin API
+  const authPatch = {};
+  if (body.email !== undefined) authPatch.email = body.email;
+  if (body.password) authPatch.password = body.password;
+  if (body.email !== undefined) authPatch.email_confirm = true;
+  if (Object.keys(authPatch).length) {
+    const ar = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(authPatch),
+    });
+    if (!ar.ok) {
+      const t = await ar.text();
+      return err('Gagal update auth: ' + t.slice(0, 200), 500);
+    }
+  }
+
   return json({ ok: true });
 }
 
@@ -413,6 +533,21 @@ export default {
     // === Catalog (public read) ===
     if (pathname === '/api/catalog' && request.method === 'GET') {
       return catalogList(request, env);
+    }
+
+    // === TMDB (admin only — auth via JWT) ===
+    if (pathname === '/api/tmdb/search' && request.method === 'GET') {
+      const admin = await requireAdmin(request, env);
+      if (!admin) return err('Forbidden', 403);
+      return tmdbSearch(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/tmdb\/(movie|tv)\/(\d+)$/);
+      if (m && request.method === 'GET') {
+        const admin = await requireAdmin(request, env);
+        if (!admin) return err('Forbidden', 403);
+        return tmdbDetail(request, env, m[1], m[2]);
+      }
     }
 
     // === Admin: films ===

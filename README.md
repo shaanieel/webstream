@@ -60,8 +60,9 @@ create table if not exists films (
   id bigserial primary key,
   judul text not null,
   tipe text default 'movie' check (tipe in ('movie','series')),
-  drive_link text not null,
-  tahun text,
+  drive_link text,
+  drive_path text,           -- path ke file di Drive Index, ex: /Movies/Foo.mp4
+  tahun int,
   tmdb_id text,
   episode int,
   season int,
@@ -93,7 +94,7 @@ create policy "anyone can read films" on films
 -- Catatan: write ke films & users_profile dilakukan worker (pakai service key, bypass RLS).
 ```
 
-Kalau tabel `users_profile` & `films` sudah ada dari sebelumnya, jalankan **migration tier**:
+Kalau tabel `users_profile` & `films` sudah ada dari sebelumnya, jalankan **migration**:
 
 ```sql
 alter table films add column if not exists tier text default 'free' check (tier in ('free','vip'));
@@ -102,7 +103,12 @@ alter table films add column if not exists poster_url text;
 alter table films add column if not exists backdrop_url text;
 alter table films add column if not exists overview text;
 alter table films add column if not exists genre text;
+alter table films add column if not exists drive_path text;
 update films set tier='free' where tier is null;
+-- Backfill drive_path dari drive_link kalau drive_link berisi path "/Movies/..." (bukan URL)
+update films set drive_path = drive_link
+  where drive_path is null and drive_link is not null
+    and drive_link like '/%';
 ```
 
 ---
@@ -127,6 +133,14 @@ wrangler secret put SUPABASE_SERVICE_KEY
 
 # Supabase anon key (publik, OK kalau di-expose)
 wrangler secret put SUPABASE_ANON_KEY
+
+# TMDB API key (https://www.themoviedb.org/settings/api → API Read Access (v3 auth))
+wrangler secret put TMDB_API_KEY
+
+# Daftar email admin (comma-separated). Worker pakai ini untuk verify
+# JWT.email ∈ ADMIN_EMAILS sebelum boleh hit /api/admin/* dan /api/tmdb/*
+wrangler secret put ADMIN_EMAILS
+# Contoh value: sholehhuddin21@gmail.com,admin2@example.com
 ```
 
 ### 3. Deploy main worker
@@ -150,6 +164,26 @@ cd ..
 
 ---
 
+## 🎬 Cara isi Drive Path saat tambah film
+
+Di admin panel (`adminweb1`), saat tambah film, kamu **tidak masukin link Drive biasa**. Kamu masukin **path file di dalam Drive Index**.
+
+Contoh: kalau di Drive Index kamu ada file di `https://indexgoogle.zaeinstream.workers.dev/Movies/Avengers Endgame.mp4`, maka kamu cukup isi:
+
+```
+/Movies/Avengers Endgame.mp4
+```
+
+Path harus diawali `/`. Untuk series:
+
+```
+/Series/One Piece/S01E01.mp4
+```
+
+Worker akan otomatis POST ke GDI worker untuk dapat URL download bersignatur.
+
+---
+
 ## 🔄 Alur sistem
 
 ### A. User login → tonton film
@@ -163,8 +197,8 @@ Worker → return { supabase_url, supabase_anon_key, gdi_worker_url }
   ↓ GET /api/catalog (Authorization: Bearer JWT)
 Worker → cek tier user → query Supabase films → return films sesuai tier
   ↓ user klik film
-  ↓ GET /api/drive/resolve?link=...
-Worker → extract file_id → return stream_url (GDI worker)
+  ↓ GET /api/drive/resolve?path=/Movies/Foo.mp4
+Worker → POST {path} → GDI worker → return signed download.aspx URL → bungkus jadi stream_url absolute
   ↓ VideoJS load video
   ↓ user klik "Subs" → cari di Subsource
   ↓ GET /api/subsource/search?q=...&type=movie&year=...

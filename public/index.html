@@ -114,6 +114,127 @@ img{display:block;max-width:100%;}
 .profile-tier{font-size:.7rem;color:var(--muted);}
 .profile-tier.vip{color:var(--gold);font-weight:700;}
 
+/* Profile detail page */
+.profile-page{max-width:760px;margin:0 auto;}
+.profile-card{
+  background:linear-gradient(135deg,var(--surface) 0%,var(--surface-2) 100%);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:32px;
+  margin-bottom:20px;
+}
+.profile-head{display:flex;align-items:center;gap:18px;margin-bottom:24px;}
+.profile-avatar-lg{
+  width:80px;height:80px;border-radius:50%;
+  background:linear-gradient(135deg,#0ea5e9,#38bdf8);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:2rem;color:#fff;
+}
+.profile-head h2{font-size:1.4rem;font-weight:700;margin-bottom:4px;}
+.profile-head .profile-email{color:var(--muted);font-size:.92rem;word-break:break-all;}
+.profile-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 0;border-top:1px solid var(--border);
+}
+.profile-row:first-of-type{border-top:none;}
+.profile-row-label{color:var(--muted);font-size:.88rem;}
+.profile-row-val{font-weight:600;font-size:.95rem;}
+.expiry-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 14px;border-radius:999px;font-weight:700;font-size:.85rem;
+}
+.expiry-badge.green{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);}
+.expiry-badge.yellow{background:rgba(234,179,8,.15);color:#facc15;border:1px solid rgba(234,179,8,.3);}
+.expiry-badge.red{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3);}
+.expiry-badge.gold{background:rgba(245,197,24,.15);color:var(--gold);border:1px solid rgba(245,197,24,.3);}
+.profile-progress{
+  width:100%;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;
+  margin-top:8px;
+}
+.profile-progress-bar{
+  height:100%;border-radius:4px;transition:width .6s ease;
+}
+.profile-progress-bar.green{background:linear-gradient(90deg,#22c55e,#16a34a);}
+.profile-progress-bar.yellow{background:linear-gradient(90deg,#facc15,#eab308);}
+.profile-progress-bar.red{background:linear-gradient(90deg,#ef4444,#dc2626);}
+
+/* VIP page — gold theme */
+.vip-page{position:relative;}
+.vip-hero{
+  position:relative;border-radius:16px;overflow:hidden;
+  margin-bottom:30px;padding:50px 40px;
+  background:
+    radial-gradient(ellipse at 30% 30%,rgba(245,197,24,.18) 0%,transparent 60%),
+    radial-gradient(ellipse at 80% 70%,rgba(245,197,24,.12) 0%,transparent 60%),
+    linear-gradient(135deg,#1a1612 0%,#0d0a05 100%);
+  border:1px solid rgba(245,197,24,.3);
+  text-align:center;
+}
+.vip-crown{
+  font-size:4rem;display:inline-block;
+  filter:drop-shadow(0 0 10px rgba(245,197,24,.6));
+  animation:crownBlink 2.4s ease-in-out infinite;
+}
+@keyframes crownBlink{
+  0%,100%{filter:drop-shadow(0 0 10px rgba(245,197,24,.6));opacity:1;}
+  50%{filter:drop-shadow(0 0 24px rgba(245,197,24,1));opacity:.85;}
+}
+.vip-hero h1{
+  font-size:2.4rem;font-weight:800;margin:14px 0 6px;
+  background:linear-gradient(135deg,#f5c518 0%,#fff5cc 50%,#f5c518 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  letter-spacing:1px;
+}
+.vip-hero p{color:#d4a850;max-width:540px;margin:0 auto;font-size:.98rem;}
+.vip-card .card-poster{box-shadow:0 0 0 1px rgba(245,197,24,.4);}
+.vip-card .card-poster:hover{box-shadow:0 0 0 2px var(--gold),0 12px 40px rgba(245,197,24,.3);}
+.vip-locked-modal{
+  position:fixed;inset:0;background:rgba(0,0,0,.85);
+  display:none;align-items:center;justify-content:center;z-index:200;padding:20px;
+}
+.vip-locked-modal.show{display:flex;}
+.vip-locked-box{
+  background:linear-gradient(135deg,#1a1612 0%,#15151f 100%);
+  border:1px solid rgba(245,197,24,.4);border-radius:16px;
+  padding:36px 28px;max-width:440px;width:100%;text-align:center;
+  position:relative;
+}
+.vip-locked-box .lock-icon{font-size:3rem;margin-bottom:14px;}
+.vip-locked-box h2{
+  background:linear-gradient(135deg,#f5c518,#fff5cc);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  font-size:1.5rem;font-weight:800;margin-bottom:10px;
+}
+.vip-locked-box p{color:var(--muted);margin-bottom:20px;font-size:.95rem;}
+.vip-locked-box .btn-vip{
+  background:linear-gradient(135deg,#f5c518,#daa520);
+  color:#1a1612;font-weight:700;padding:12px 28px;border-radius:10px;
+  display:inline-block;cursor:pointer;
+}
+.vip-locked-box .btn-close{
+  position:absolute;top:12px;right:12px;
+  width:32px;height:32px;border-radius:50%;
+  background:var(--surface-2);color:var(--muted);
+  display:flex;align-items:center;justify-content:center;font-size:1.2rem;
+}
+
+/* Audio track button in player */
+.tool-btn.audio-btn{display:none;}
+.tool-btn.audio-btn.show{display:inline-flex;align-items:center;gap:6px;}
+.audio-panel{
+  position:absolute;top:60px;right:14px;
+  background:rgba(15,15,23,.95);border:1px solid var(--border-2);border-radius:10px;
+  padding:8px;min-width:180px;display:none;z-index:30;
+  backdrop-filter:blur(8px);
+}
+.audio-panel.open{display:block;}
+.audio-panel-item{
+  padding:8px 12px;border-radius:6px;cursor:pointer;font-size:.86rem;
+  display:flex;align-items:center;gap:8px;
+}
+.audio-panel-item:hover{background:var(--surface);}
+.audio-panel-item.active{background:var(--accent-2);color:#fff;}
+
 /* ── Main content ── */
 .main{
   flex:1;
@@ -633,12 +754,20 @@ img{display:block;max-width:100%;}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           Watchlist
         </button>
+        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
+          VIP Zone
+        </button>
+        <button class="nav-item" data-action="logout" onclick="confirmLogout()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Logout
+        </button>
       </div>
 
     </nav>
 
     <div class="sidebar-footer">
-      <div class="profile-chip" onclick="toggleLogoutConfirm()">
+      <div class="profile-chip" onclick="goPage('profile')" title="Lihat detail akun">
         <div class="profile-avatar" id="profileAvatar">Z</div>
         <div class="profile-info">
           <div class="profile-name" id="profileName">user@…</div>
@@ -767,7 +896,83 @@ img{display:block;max-width:100%;}
         <p>Tambah film favoritmu dengan klik tombol "+" di kartu film.</p>
       </div>
     </section>
+
+    <!-- ════ VIP ════ -->
+    <section class="page vip-page" id="page-vip">
+      <div class="vip-hero">
+        <div class="vip-crown">👑</div>
+        <h1>VIP ZONE</h1>
+        <p id="vipHeroDesc">Akses eksklusif ke koleksi premium ZAEINSTREAM.</p>
+      </div>
+      <div class="page-title" style="color:var(--gold);">Koleksi VIP</div>
+      <div class="grid" id="vipGrid"></div>
+      <div id="vipEmpty" class="empty-state" style="display:none;">
+        <div class="emoji">👑</div>
+        <h3>Belum ada film VIP</h3>
+        <p>Admin belum menambahkan koleksi VIP. Cek lagi nanti.</p>
+      </div>
+    </section>
+
+    <!-- ════ PROFILE ════ -->
+    <section class="page" id="page-profile">
+      <div class="profile-page">
+        <div class="page-title">Akun Saya</div>
+        <div class="profile-card">
+          <div class="profile-head">
+            <div class="profile-avatar-lg" id="profileAvatarLg">Z</div>
+            <div>
+              <h2 id="profileFullName">User</h2>
+              <div class="profile-email" id="profileEmail">—</div>
+            </div>
+          </div>
+
+          <div class="profile-row">
+            <span class="profile-row-label">Status Akun</span>
+            <span class="profile-row-val" id="profileStatusVal">—</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-row-label">Bergabung</span>
+            <span class="profile-row-val" id="profileJoinedVal">—</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-row-label">Tanggal Berakhir</span>
+            <span class="profile-row-val" id="profileExpiredVal">—</span>
+          </div>
+          <div class="profile-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span class="profile-row-label">Sisa Masa Berlaku</span>
+              <span id="profileDaysBadge" class="expiry-badge green">— hari</span>
+            </div>
+            <div class="profile-progress">
+              <div id="profileProgressBar" class="profile-progress-bar green" style="width:100%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-card">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <button class="btn-primary" onclick="goPage('vip')" style="flex:1;min-width:140px;background:linear-gradient(135deg,#f5c518,#daa520);color:#1a1612;font-weight:700;padding:12px;border-radius:8px;">
+              👑 Buka VIP Zone
+            </button>
+            <button class="btn-primary" onclick="confirmLogout()" style="flex:1;min-width:140px;background:var(--surface-2);color:var(--red);padding:12px;border-radius:8px;border:1px solid var(--border-2);">
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <!-- VIP Locked Modal (untuk non-VIP yang coba akses film VIP) -->
+  <div class="vip-locked-modal" id="vipLockedModal">
+    <div class="vip-locked-box">
+      <button class="btn-close" onclick="closeVipLocked()">×</button>
+      <div class="lock-icon">🔒</div>
+      <h2>Konten VIP</h2>
+      <p id="vipLockedMsg">Film ini hanya tersedia untuk member VIP. Upgrade akun kamu untuk akses tanpa batas.</p>
+      <a class="btn-vip" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">Hubungi Admin untuk Upgrade</a>
+    </div>
+  </div>
 
   <!-- ── Mobile bottom nav ── -->
   <nav class="mobile-bottomnav">
@@ -809,8 +1014,13 @@ img{display:block;max-width:100%;}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM5 18V6h14v12H5zm2-7h2v2H7v-2zm0 4h6v-2H7v2zm8 0h2v-2h-2v2zm-4-4h6V9h-6v2z"/></svg>
             Subs
           </button>
+          <button class="tool-btn audio-btn" onclick="togglePanel('audio')" id="toolBtnAudio">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+            <span id="toolBtnAudioLabel">Audio</span>
+          </button>
           <button class="tool-btn" onclick="cyclePlaybackRate()" id="toolBtnSpeed">1x</button>
         </div>
+        <div class="audio-panel" id="audioPanel"></div>
 
         <video id="videoPlayer" class="video-js vjs-default-skin vjs-fluid" controls preload="auto" crossorigin="anonymous" playsinline></video>
 
@@ -956,6 +1166,8 @@ async function onAuthSuccess(session){
 
   showApp();
   await loadCatalog();
+  // After data is ready, navigate to whatever hash is in the URL (or home)
+  hashRoute();
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -998,10 +1210,109 @@ async function doLogin(){
   }
 }
 
-async function toggleLogoutConfirm(){
+async function confirmLogout(){
   if(!confirm('Yakin mau logout?')) return;
   await sb.auth.signOut();
+  location.hash = '';
   location.reload();
+}
+// Backward-compat alias
+const toggleLogoutConfirm = confirmLogout;
+
+/* ════════════════════════════════════════════════════════════════════
+   PROFILE PAGE
+   ════════════════════════════════════════════════════════════════════ */
+function renderProfilePage(){
+  const email = (currentUser && currentUser.email) || '—';
+  document.getElementById('profileEmail').textContent = email;
+  document.getElementById('profileFullName').textContent = email.split('@')[0] || 'User';
+  document.getElementById('profileAvatarLg').textContent = (email[0]||'Z').toUpperCase();
+
+  // Joined
+  const joinedAt = currentUser?.created_at ? new Date(currentUser.created_at) : null;
+  document.getElementById('profileJoinedVal').textContent = joinedAt
+    ? joinedAt.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'})
+    : '—';
+
+  // Status
+  const statusEl = document.getElementById('profileStatusVal');
+  if(currentTier==='vip'){
+    statusEl.innerHTML = '<span class="expiry-badge gold">👑 VIP Member</span>';
+  } else {
+    statusEl.innerHTML = '<span class="expiry-badge green">Free Member</span>';
+  }
+
+  // Expiry
+  const expiredAt = currentProfile?.expired_at ? new Date(currentProfile.expired_at) : null;
+  const expiredEl = document.getElementById('profileExpiredVal');
+  const badgeEl = document.getElementById('profileDaysBadge');
+  const barEl = document.getElementById('profileProgressBar');
+
+  if(!expiredAt){
+    expiredEl.textContent = 'Tidak ada batas';
+    badgeEl.textContent = '∞';
+    badgeEl.className = 'expiry-badge green';
+    barEl.style.width = '100%';
+    barEl.className = 'profile-progress-bar green';
+    return;
+  }
+
+  expiredEl.textContent = expiredAt.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'});
+  const now = new Date();
+  const msLeft = expiredAt.getTime() - now.getTime();
+  const daysLeft = Math.max(0, Math.ceil(msLeft / (1000*60*60*24)));
+
+  // Color thresholds: >14 hari ijo, 4-14 kuning, <=3 merah, 0 expired
+  let color = 'green';
+  if(daysLeft <= 0) color = 'red';
+  else if(daysLeft <= 3) color = 'red';
+  else if(daysLeft <= 14) color = 'yellow';
+
+  badgeEl.textContent = daysLeft <= 0 ? 'Expired' : (daysLeft + ' hari lagi');
+  badgeEl.className = 'expiry-badge ' + color;
+
+  // Progress: 30 hari = full bar
+  const pct = Math.min(100, Math.max(0, (daysLeft / 30) * 100));
+  barEl.style.width = pct + '%';
+  barEl.className = 'profile-progress-bar ' + color;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   VIP PAGE
+   ════════════════════════════════════════════════════════════════════ */
+function renderVipPage(){
+  const vipFilms = allFilms.filter(f=>f.tier==='vip');
+  const grid = document.getElementById('vipGrid');
+  const empty = document.getElementById('vipEmpty');
+  const heroDesc = document.getElementById('vipHeroDesc');
+
+  if(currentTier!=='vip'){
+    heroDesc.innerHTML = `<strong style="color:#facc15">Kamu belum jadi VIP.</strong><br>Kamu bisa lihat poster, tapi nonton perlu upgrade akun. Hubungi admin untuk upgrade.`;
+  } else {
+    heroDesc.textContent = 'Selamat datang VIP — semua film premium sudah unlock.';
+  }
+
+  if(!vipFilms.length){
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    grid.innerHTML = vipFilms.map(f=>cardHTML(f, /*vipStyle=*/true)).join('');
+    grid.querySelectorAll('[data-film-id]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.dataset.filmId;
+        const film = allFilms.find(x=>String(x.id)===String(id));
+        if(film) openFilm(film);
+      });
+    });
+  }
+}
+
+function showVipLocked(film){
+  document.getElementById('vipLockedModal').classList.add('show');
+}
+function closeVipLocked(){
+  document.getElementById('vipLockedModal').classList.remove('show');
 }
 
 document.addEventListener('keydown',(e)=>{
@@ -1013,7 +1324,12 @@ document.addEventListener('keydown',(e)=>{
 /* ════════════════════════════════════════════════════════════════════
    NAVIGATION
    ════════════════════════════════════════════════════════════════════ */
-function goPage(name){
+const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','vip','profile'];
+let _currentPage = 'home';
+
+function goPage(name, opts){
+  if(!VALID_PAGES.includes(name)) name = 'home';
+  _currentPage = name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
   document.querySelectorAll('.bottom-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
@@ -1026,8 +1342,27 @@ function goPage(name){
   if(name==='browse') renderBrowsePage();
   if(name==='watchlist') renderWatchlistPage();
   if(name==='search') renderSearchInitial();
+  if(name==='vip') renderVipPage();
+  if(name==='profile') renderProfilePage();
+
+  // Update URL hash for shareable links + browser history
+  const expectedHash = name==='home' ? '#/' : '#/'+name;
+  if(!opts || !opts.fromHashChange){
+    if(location.hash !== expectedHash) location.hash = expectedHash;
+  }
+  // Update mobile topbar URL
+  const top = document.getElementById('mobileUrl');
+  if(top) top.textContent = 'zaeinstream.net' + (name==='home' ? '/' : '/'+name);
+
   window.scrollTo({top:0});
 }
+
+function hashRoute(){
+  const h = (location.hash || '').replace(/^#\/?/,'');
+  const name = (h.split('/')[0] || 'home').toLowerCase();
+  goPage(name, { fromHashChange:true });
+}
+window.addEventListener('hashchange', hashRoute);
 
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');
@@ -1140,17 +1475,18 @@ function renderGrid(id, items){
   });
 }
 
-function cardHTML(f){
+function cardHTML(f, vipStyle){
   const poster = f.poster_url || '';
   const year = f.tahun || '—';
   const type = (f.tipe==='series'?'TV':'MOVIE');
   const rating = f.rating ? `<div class="rating-badge"><span>★</span>${f.rating}</div>` : '';
-  const tier = (f.tier==='vip') ? '<div class="tier-badge">VIP</div>' : '';
+  const tier = (f.tier==='vip') ? '<div class="tier-badge">👑 VIP</div>' : '';
+  const cls = 'card' + (vipStyle ? ' vip-card' : '');
   const posterHTML = poster
     ? `<img src="${poster}" loading="lazy" alt="${escapeHtml(f.judul||'')}"/>`
     : `<div class="card-poster placeholder">${escapeHtml(f.judul||'No image')}</div>`;
   return `
-    <div class="card" data-film-id="${f.id}">
+    <div class="${cls}" data-film-id="${f.id}">
       <div class="card-poster">
         ${rating}${tier}
         <div class="type-badge">${type}</div>
@@ -1250,9 +1586,9 @@ function toggleWatchlist(id){
    PLAYER
    ════════════════════════════════════════════════════════════════════ */
 async function openFilm(film){
-  // Tier check
+  // Tier check — show fancy locked modal instead of toast
   if(film.tier==='vip' && currentTier!=='vip'){
-    showToast('Film ini khusus VIP. Hubungi admin untuk upgrade.', 'error');
+    showVipLocked(film);
     return;
   }
 
@@ -1321,18 +1657,70 @@ async function loadVideo(film){
       preload:'auto',
       fluid:true,
     });
+    videoPlayer.on('loadedmetadata', renderAudioTracks);
   }
 
-  // Resolve drive link via worker
-  let streamUrl = film.drive_link;
-  try{
-    const r=await fetch('/api/drive/resolve?link='+encodeURIComponent(film.drive_link));
-    const d=await r.json();
-    if(d.ok) streamUrl = d.stream_url;
-  }catch{}
+  // Reset audio panel
+  document.getElementById('toolBtnAudio').classList.remove('show');
+  document.getElementById('audioPanel').classList.remove('open');
 
-  videoPlayer.src({ src: streamUrl, type: 'video/mp4' });
+  // Resolve via worker — kirim drive_path (kolom baru) atau drive_link (kompatibilitas lama)
+  const driveRef = film.drive_path || film.drive_link;
+  if(!driveRef){
+    showToast('Film ini belum punya path Drive. Hubungi admin.', 'error');
+    return;
+  }
+  let streamUrl = '';
+  let mime = 'video/mp4';
+  try{
+    const param = film.drive_path ? 'path='+encodeURIComponent(film.drive_path) : 'link='+encodeURIComponent(film.drive_link);
+    const r = await fetch('/api/drive/resolve?'+param);
+    const d = await r.json();
+    if(!d.ok){
+      showToast('Drive: '+(d.error||'gagal resolve'), 'error');
+      return;
+    }
+    streamUrl = d.stream_url;
+    if(d.mime_type) mime = d.mime_type;
+  }catch(e){
+    showToast('Drive resolve error: '+e.message, 'error');
+    return;
+  }
+
+  videoPlayer.src({ src: streamUrl, type: mime });
   videoPlayer.load();
+}
+
+function renderAudioTracks(){
+  if(!videoPlayer) return;
+  const tracks = videoPlayer.audioTracks ? videoPlayer.audioTracks() : null;
+  const btn = document.getElementById('toolBtnAudio');
+  const panel = document.getElementById('audioPanel');
+  if(!tracks || tracks.length<=1){
+    btn.classList.remove('show');
+    panel.innerHTML='';
+    return;
+  }
+  btn.classList.add('show');
+  // Build picker
+  const items = [];
+  for(let i=0;i<tracks.length;i++){
+    const t = tracks[i];
+    const label = t.label || t.language || ('Audio '+(i+1));
+    items.push(`<div class="audio-panel-item${t.enabled?' active':''}" data-idx="${i}">${escapeHtml(label)}</div>`);
+  }
+  panel.innerHTML = items.join('');
+  panel.querySelectorAll('.audio-panel-item').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const idx = Number(el.dataset.idx);
+      for(let i=0;i<tracks.length;i++){ tracks[i].enabled = (i===idx); }
+      panel.querySelectorAll('.audio-panel-item').forEach(x=>x.classList.remove('active'));
+      el.classList.add('active');
+      panel.classList.remove('open');
+      const lbl = el.textContent;
+      document.getElementById('toolBtnAudioLabel').textContent = lbl.length>10 ? lbl.slice(0,10)+'…' : lbl;
+    });
+  });
 }
 
 function closePlayer(){
@@ -1352,6 +1740,13 @@ function togglePanel(name){
     const p=document.getElementById('subsPanel');
     p.classList.toggle('open');
     document.getElementById('toolBtnSubs').classList.toggle('active', p.classList.contains('open'));
+    // Tutup panel lain
+    document.getElementById('audioPanel').classList.remove('open');
+  } else if(name==='audio'){
+    const p=document.getElementById('audioPanel');
+    p.classList.toggle('open');
+    document.getElementById('subsPanel').classList.remove('open');
+    document.getElementById('toolBtnSubs').classList.remove('active');
   }
 }
 
@@ -1394,25 +1789,29 @@ async function subsourceSearch(){
   status.textContent='Mencari subtitle…';
   list.innerHTML='';langPick.innerHTML='';
 
-  const type = currentFilm?.tipe==='series' ? 'tv' : 'movie';
+  const type = currentFilm?.tipe==='series' ? 'series' : 'movie';
   const year = currentFilm?.tahun || '';
   try{
     const r = await fetch(`/api/subsource/search?q=${encodeURIComponent(q)}${year?`&year=${year}`:''}&type=${type}`);
     const d = await r.json();
     if(!d.ok){ throw new Error(d.error||'gagal'); }
-    const movies = (d.data && (d.data.results || d.data.movies || d.data || [])) || [];
-    const list0 = Array.isArray(movies) ? movies : [];
-    if(!list0.length){
+    // Response Subsource: { data: [ {movieId, title, type, releaseYear, season, posters{...}}, ... ] }
+    const arr = (d.data && (d.data.data || d.data.results || d.data.movies || (Array.isArray(d.data)?d.data:[]))) || [];
+    if(!arr.length){
       status.className='subs-status error';
       status.textContent='Tidak ada hasil. Coba ganti kata kunci.';
       _subsLastSearch=null;
       return;
     }
-    // Pilih hasil pertama yang paling cocok
-    const best = list0[0];
+    // Pilih hasil paling match — kalau series & ada season, prioritaskan yg cocok
+    let best = arr[0];
+    if(currentFilm?.tipe==='series' && currentFilm?.season){
+      const m = arr.find(x => Number(x.season) === Number(currentFilm.season));
+      if(m) best = m;
+    }
     _subsLastSearch = best;
-    _subsCurrentMovieId = best.id || best.movie_id || best._id;
-    // Load list bahasa
+    _subsCurrentMovieId = best.movieId || best.id || best.movie_id || best._id;
+    // Load list subtitle
     await subsourceLoadSubtitles();
     status.textContent='';
   }catch(e){
@@ -1428,15 +1827,12 @@ async function subsourceLoadSubtitles(){
   if(!_subsCurrentMovieId){ return; }
   status.textContent='Memuat daftar subtitle…';
   try{
-    const params = new URLSearchParams({ movie_id: _subsCurrentMovieId });
-    if(currentFilm?.tipe==='series'){
-      if(currentFilm?.season) params.set('season', currentFilm.season);
-      if(currentFilm?.episode) params.set('episode', currentFilm.episode);
-    }
+    const params = new URLSearchParams({ movie_id: _subsCurrentMovieId, limit: '200' });
     const r = await fetch(`/api/subsource/subtitles?${params.toString()}`);
     const d = await r.json();
     if(!d.ok) throw new Error(d.error||'gagal');
-    const subs = (d.data && (d.data.results || d.data.subtitles || d.data || [])) || [];
+    // Subsource pagination: { data: [...], pagination: {...} } atau { results: [...] }
+    const subs = (d.data && (d.data.data || d.data.results || d.data.subtitles || (Array.isArray(d.data)?d.data:[]))) || [];
     if(!Array.isArray(subs) || !subs.length){
       status.className='subs-status error';
       status.textContent='Tidak ada subtitle untuk judul ini.';
@@ -1445,7 +1841,12 @@ async function subsourceLoadSubtitles(){
     // Build language picker
     const langs = Array.from(new Set(subs.map(s=>(s.language||s.lang||'').toLowerCase()))).filter(Boolean);
     _subsAvailableLangs = langs;
-    if(!langs.includes(_subsSelectedLang)) _subsSelectedLang = langs[0]||'';
+    // default ke Indonesia kalau ada, kalau tidak Inggris, kalau tidak yang pertama
+    if(!langs.includes(_subsSelectedLang)){
+      _subsSelectedLang = langs.includes('indonesian') ? 'indonesian'
+                       : langs.includes('english') ? 'english'
+                       : (langs[0] || '');
+    }
     renderLangPicker(langs, subs);
     renderSubList(subs.filter(s=>(s.language||s.lang||'').toLowerCase()===_subsSelectedLang));
     status.textContent = `${subs.length} subtitle ditemukan.`;
@@ -1486,16 +1887,21 @@ function renderSubList(subs){
     return;
   }
   list.innerHTML = subs.map(s=>{
-    const id = s.id || s._id;
-    const release = s.release_name || s.release || s.title || 'Subtitle';
-    const author = s.uploader || s.user || s.author || '';
+    const id = s.subtitleId || s.id || s._id;
+    const releaseArr = Array.isArray(s.releaseInfo) ? s.releaseInfo : [];
+    const release = releaseArr[0] || s.release_name || s.release || s.title || 'Subtitle';
+    const otherReleases = releaseArr.length>1 ? `+${releaseArr.length-1}` : '';
+    const dl = s.downloads ? `${s.downloads.toLocaleString('id-ID')} ⬇` : '';
+    const hi = s.hearingImpaired ? '🎧' : '';
     const flag = LANG_FLAGS[(s.language||'').toLowerCase()] || '🌐';
+    const fps = s.framerate ? `${s.framerate}fps` : '';
+    const meta = [dl, fps, hi, s.releaseType].filter(Boolean).join(' · ');
     return `
       <div class="subs-list-item" data-id="${id}" data-name="${escapeHtml(release)}">
         <span class="subs-flag">${flag}</span>
         <div class="subs-list-item-info">
-          <div class="subs-list-item-title">${escapeHtml(release)}</div>
-          <div class="subs-list-item-meta">${author?'by '+escapeHtml(author):''}</div>
+          <div class="subs-list-item-title">${escapeHtml(release)} ${otherReleases?`<span style="color:var(--muted-2);font-size:.78rem;">${otherReleases}</span>`:''}</div>
+          <div class="subs-list-item-meta">${meta}</div>
         </div>
         <span class="subs-tag">SRT</span>
       </div>
