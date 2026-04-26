@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0a0f" />
 <title>ZAEINSTREAM</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230ea5e9'/><polygon points='38,28 38,72 72,50' fill='white'/></svg>" type="image/svg+xml" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://vjs.zencdn.net/8.16.1/video-js.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -23,13 +23,14 @@
   --text:#f5f5fa;
   --muted:#8b8b9d;
   --muted-2:#5a5a6e;
-  --accent:#ffffff;
-  --accent-2:#0ea5e9;
+  --accent:#0ea5e9;
+  --accent-2:#38bdf8;
+  --accent-w:#ffffff;
   --gold:#f5c518;
   --green:#22c55e;
   --red:#ef4444;
   --sidebar-w:240px;
-  --sidebar-w-collapsed:0px;
+  --sidebar-w-collapsed:64px;
   --bottom-nav-h:64px;
   --topbar-h:56px;
 }
@@ -38,7 +39,7 @@ html,body{height:100%;}
 body{
   background:var(--bg);
   color:var(--text);
-  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;
   font-size:14px;
   line-height:1.45;
   overflow-x:hidden;
@@ -68,15 +69,50 @@ img{display:block;max-width:100%;}
   top:0;bottom:0;left:0;
   display:flex;flex-direction:column;
   z-index:50;
-  transition:transform .25s ease;
+  transition:width .35s cubic-bezier(.4,0,.2,1),transform .25s ease;
 }
+.sidebar.collapsed{ width:var(--sidebar-w-collapsed); }
+.sidebar.collapsed .sidebar-logo-text,
+.sidebar.collapsed .nav-item-label,
+.sidebar.collapsed .nav-section-title,
+.sidebar.collapsed .profile-info{ display:none; }
+.sidebar.collapsed .nav-item{ justify-content:center; padding:11px 0; }
+.sidebar.collapsed .sidebar-logo{ padding:18px 0; justify-content:center; }
+.sidebar.collapsed .sidebar-logo-img{ width:32px;height:32px; }
+.sidebar.collapsed .profile-chip{ justify-content:center; padding:8px 0; }
+
+/* Sidebar collapse toggle button (vertically centered, on right edge of sidebar) */
+.sidebar-toggle{
+  position:fixed; top:50%; left:var(--sidebar-w);
+  transform:translate(-50%,-50%);
+  width:24px;height:48px;
+  background:var(--bg-2); border:1px solid var(--border); border-left:none;
+  border-radius:0 8px 8px 0;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--muted); cursor:pointer; z-index:51;
+  transition:left .35s cubic-bezier(.4,0,.2,1),background .15s,color .15s;
+}
+.sidebar-toggle:hover{ background:var(--surface); color:var(--text); }
+.sidebar-toggle svg{ width:14px;height:14px; transition:transform .35s; }
+.sidebar.collapsed ~ .sidebar-toggle{ left:var(--sidebar-w-collapsed); }
+.sidebar.collapsed ~ .sidebar-toggle svg{ transform:rotate(180deg); }
+@media(max-width:768px){ .sidebar-toggle{ display:none; } }
+
 .sidebar-logo{
-  padding:24px 20px 28px;
+  padding:18px 20px 22px;
   font-weight:800;
-  font-size:1.5rem;
+  display:flex;align-items:center;gap:10px;
+  font-size:1.45rem;
   letter-spacing:.5px;
+}
+.sidebar-logo-img{
+  width:36px; height:36px; object-fit:contain; flex-shrink:0;
+  transition:width .25s,height .25s;
+}
+.sidebar-logo-text{
   background:linear-gradient(135deg,#fff,#0ea5e9);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  white-space:nowrap;
 }
 .sidebar-nav{flex:1;overflow-y:auto;padding:0 12px;}
 .nav-section{margin-bottom:24px;}
@@ -243,13 +279,39 @@ img{display:block;max-width:100%;}
 .stream-ext-item:last-child{border-bottom:0;}
 .stream-ext-item:hover{background:var(--surface,#0a1628);color:var(--accent,#0ea5e9);}
 
+/* Download button — cool style */
+.stream-dl-btn{
+  display:inline-flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);
+  color:#fff; padding:11px 22px; border-radius:10px;
+  font-weight:700; font-size:.82rem; letter-spacing:1px;
+  text-decoration:none; position:relative; overflow:hidden;
+  box-shadow:0 4px 14px rgba(14,165,233,.35), inset 0 1px 0 rgba(255,255,255,.18);
+  transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.stream-dl-btn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 20px rgba(14,165,233,.55), inset 0 1px 0 rgba(255,255,255,.25);
+  filter:brightness(1.08);
+}
+.stream-dl-btn:active{ transform:translateY(0); filter:brightness(.95); }
+.stream-dl-btn svg{ flex-shrink:0; }
+.stream-dl-btn::before{
+  content:""; position:absolute; inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent);
+  transform:translateX(-100%); transition:transform .6s;
+}
+.stream-dl-btn:hover::before{ transform:translateX(100%); }
+
 /* ── Main content ── */
 .main{
   flex:1;
   margin-left:var(--sidebar-w);
   min-height:100vh;
   padding-bottom:env(safe-area-inset-bottom);
+  transition:margin-left .35s cubic-bezier(.4,0,.2,1);
 }
+body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
 .page{display:none;padding:32px 5%;max-width:1800px;margin:0 auto;}
 .page.active{display:block;}
 .page-title{font-size:1.7rem;font-weight:700;margin-bottom:24px;letter-spacing:-.3px;}
@@ -755,44 +817,48 @@ img{display:block;max-width:100%;}
 
   <!-- ── Sidebar ── -->
   <aside class="sidebar" id="sidebar">
-    <div class="sidebar-logo">ZAEINSTREAM</div>
+    <div class="sidebar-logo">
+      <img src="https://iili.io/BPFTO6x.md.png" alt="StreameX" class="sidebar-logo-img"
+           onerror="this.style.display='none'"/>
+      <span class="sidebar-logo-text">StreameX</span>
+    </div>
     <nav class="sidebar-nav">
       <div class="nav-section">
-        <button class="nav-item active" data-page="home" onclick="goPage('home')">
+        <button class="nav-item active" data-page="home" onclick="goPage('home')" title="Home">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
-          Home
+          <span class="nav-item-label">Home</span>
         </button>
-        <button class="nav-item" data-page="search" onclick="goPage('search')">
+        <button class="nav-item" data-page="search" onclick="goPage('search')" title="Search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
-          Search
+          <span class="nav-item-label">Search</span>
         </button>
-        <button class="nav-item" data-page="browse" onclick="goPage('browse')">
+        <button class="nav-item" data-page="browse" onclick="goPage('browse')" title="Browse">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-          Browse
+          <span class="nav-item-label">Browse</span>
         </button>
       </div>
 
       <div class="nav-section">
         <div class="nav-section-title">Media</div>
-        <button class="nav-item" data-page="movies" onclick="goPage('movies')">
+        <button class="nav-item" data-page="movies" onclick="goPage('movies')" title="Movies">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
-          Movies
+          <span class="nav-item-label">Movies</span>
         </button>
-        <button class="nav-item" data-page="tv" onclick="goPage('tv')">
+        <button class="nav-item" data-page="tv" onclick="goPage('tv')" title="TV Shows">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          TV Shows
+          <span class="nav-item-label">TV Shows</span>
         </button>
-        <button class="nav-item" data-page="watchlist" onclick="goPage('watchlist')">
+        <button class="nav-item" data-page="watchlist" onclick="goPage('watchlist')" title="Watchlist">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          Watchlist
+          <span class="nav-item-label">Watchlist</span>
         </button>
-        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);">
+        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);" title="VIP Zone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
-          VIP Zone
+          <span class="nav-item-label">VIP Zone</span>
         </button>
-        <button class="nav-item" data-action="logout" onclick="confirmLogout()">
+        <button class="nav-item" data-action="logout" onclick="confirmLogout()" title="Logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          Logout
+          <span class="nav-item-label">Logout</span>
         </button>
       </div>
 
@@ -808,6 +874,11 @@ img{display:block;max-width:100%;}
       </div>
     </div>
   </aside>
+
+  <!-- Sidebar collapse toggle (arrow on sidebar right edge) -->
+  <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebarCollapse()" aria-label="Toggle sidebar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
 
   <!-- ── Main ── -->
   <main class="main">
@@ -1109,10 +1180,9 @@ img{display:block;max-width:100%;}
       <!-- ── Stream actions: download + external player + URL copy ── -->
       <div id="streamActions" style="margin-top:14px;display:none;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <a id="streamDlBtn" href="#" download
-             style="display:inline-flex;align-items:center;gap:6px;background:var(--accent,#0ea5e9);color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;text-decoration:none;font-size:.88rem;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download
+          <a id="streamDlBtn" href="#" download class="stream-dl-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>DOWNLOAD</span>
           </a>
           <div style="position:relative;">
             <button id="streamExtBtn" type="button" onclick="toggleStreamExtMenu()"
@@ -1516,6 +1586,23 @@ function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebarOverlay').classList.remove('show');
 }
+
+// ── Sidebar collapse (desktop) ──
+function toggleSidebarCollapse(){
+  const sb = document.getElementById('sidebar');
+  const collapsed = sb.classList.toggle('collapsed');
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  try{ localStorage.setItem('ui.sidebar.collapsed', collapsed ? '1' : '0'); }catch{}
+}
+// Restore on load
+(function restoreSidebarState(){
+  try{
+    if(localStorage.getItem('ui.sidebar.collapsed') === '1'){
+      document.getElementById('sidebar')?.classList.add('collapsed');
+      document.body.classList.add('sidebar-collapsed');
+    }
+  }catch{}
+})();
 
 /* ════════════════════════════════════════════════════════════════════
    CATALOG (films)
