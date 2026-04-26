@@ -354,7 +354,7 @@ async function meHandler(request, env) {
 async function adminMeHandler(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden — bukan admin', 403);
-  return json({ ok: true, email: admin.email, id: admin.id });
+  return json({ ok: true, is_admin: true, email: admin.email, id: admin.id });
 }
 
 // GET /api/admin/health — cek status integrasi (subsource, GDI, supabase, tmdb)
@@ -520,6 +520,7 @@ async function adminFilmCreate(request, env) {
     poster_url: body.poster_url || null,
     overview: body.overview || null,
     genre: body.genre || null,
+    trailer_url: body.trailer_url || null,
   };
   const r = await supabaseRest(env, '/films', {
     method: 'POST',

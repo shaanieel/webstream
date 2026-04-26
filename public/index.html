@@ -1957,21 +1957,38 @@ async function loadFilmExtras(film){
       }
     }catch{}
   }
-  if(!tmdbId) return;
+  // Helper untuk fallback trailer manual saja (kalau gak ada tmdb_id atau TMDB fail)
+  const showManualTrailerOnly = () => {
+    if(!film.trailer_url) return;
+    const m = film.trailer_url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/);
+    if(!m) return;
+    currentTrailerKey = m[1];
+    document.getElementById('trailerBox').style.display='block';
+    document.getElementById('trailerIframe').style.display='none';
+    document.getElementById('trailerPlayBtn').style.display='flex';
+  };
+
+  if(!tmdbId){ showManualTrailerOnly(); return; }
 
   try{
     const r = await fetch(`${apiBase()}/api/tmdb/${mediaType}/${tmdbId}`, {
       headers: { Authorization: 'Bearer '+session.access_token },
     });
     const d = await r.json();
-    if(!d.ok) return;
+    if(!d.ok){ showManualTrailerOnly(); return; }
     currentTmdbExtras = d.data;
 
-    // Trailer
+    // Trailer — coba TMDB dulu, fallback ke film.trailer_url (YouTube link manual dari admin)
     const videos = (d.data.videos && d.data.videos.results) || [];
     const trailer = videos.find(v=>v.site==='YouTube' && v.type==='Trailer') || videos.find(v=>v.site==='YouTube');
     if(trailer){
       currentTrailerKey = trailer.key;
+    } else if(film.trailer_url){
+      // Extract YouTube key dari URL fallback
+      const m = film.trailer_url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/);
+      if(m) currentTrailerKey = m[1];
+    }
+    if(currentTrailerKey){
       document.getElementById('trailerBox').style.display='block';
       document.getElementById('trailerIframe').style.display='none';
       document.getElementById('trailerPlayBtn').style.display='flex';
