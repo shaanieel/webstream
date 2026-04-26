@@ -273,13 +273,17 @@ async function tmdbMulti(request, env) {
 function normalizeDrivePath(input, gdiBase) {
   if (!input) return null;
   let s = String(input).trim();
-  // Buang base URL GDI kalau ada
+  // Buang base URL GDI kalau ada (mendukung paste URL utuh dari address bar GDI)
   try {
     const u = new URL(s);
     if (gdiBase && u.origin === new URL(gdiBase).origin) {
-      s = u.pathname + (u.search || '');
+      // Buang query (mis: ?a=view) — kita cuma butuh path-nya untuk resolve POST
+      s = u.pathname;
     }
   } catch { /* not a URL, treat as path */ }
+  // Buang query string juga kalau pake plain string (mis: "/Movies/Foo.mp4?a=view")
+  const qIdx = s.indexOf('?');
+  if (qIdx >= 0) s = s.slice(0, qIdx);
   // Pastikan ada leading slash
   if (!s.startsWith('/')) s = '/' + s;
   return s;
