@@ -270,6 +270,16 @@ async function tmdbMulti(request, env) {
 // dari "link" param. Kalau yang dikirim sudah absolute URL ke GDI worker,
 // kita parse path-nya.
 
+// gdiFetch — wrapper yang otomatis pakai service binding (env.GDI) kalau ada,
+// fallback ke plain fetch. Service binding dipakai supaya bypass Cloudflare
+// error 1042 (Worker tidak boleh fetch Worker lain di *.workers.dev via URL).
+async function gdiFetch(env, url, options) {
+  if (env.GDI && typeof env.GDI.fetch === 'function') {
+    return env.GDI.fetch(url, options);
+  }
+  return fetch(url, options);
+}
+
 function normalizeDrivePath(input, gdiBase) {
   if (!input) return null;
   let s = String(input).trim();
@@ -300,7 +310,7 @@ async function driveResolve(request, env) {
   if (!drivePath) return err('Path drive tidak valid');
   // Path file (bukan folder) → POST ke GDI dengan body kosong, GDI return { link: '/download.aspx?...' }
   try {
-    const r = await fetch(`${gdiBase}${drivePath}`, {
+    const r = await gdiFetch(env, `${gdiBase}${drivePath}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -408,7 +418,7 @@ async function adminHealthHandler(request, env) {
       checks.drive = { ok: false, status: 0, message: 'GDI_WORKER_URL belum di-set di wrangler.toml' };
     } else {
       // GET ke root → harusnya 401 / 200 (kalau ada login GDI_USER/GDI_PASS)
-      const r = await fetch(gdiBase + '/', { method: 'GET' });
+      const r = await gdiFetch(env, gdiBase + '/', { method: 'GET' });
       const text = await r.text();
       const looksDown = r.status >= 500;
       const looksOk = r.status < 500;
@@ -456,7 +466,7 @@ async function adminDriveTest(request, env) {
   const drivePath = normalizeDrivePath(path, gdiBase);
   const fullUrl = `${gdiBase}${drivePath}`;
   try {
-    const r = await fetch(fullUrl, {
+    const r = await gdiFetch(env, fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -471,6 +481,7 @@ async function adminDriveTest(request, env) {
       drive_path: drivePath,
       gdi_url_called: fullUrl,
       gdi_base: gdiBase,
+      service_binding_used: !!(env.GDI && typeof env.GDI.fetch === 'function'),
       data: data || text.slice(0, 500),
       stream_url: data && data.link ? gdiBase + data.link : null,
     });

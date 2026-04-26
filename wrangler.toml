@@ -22,7 +22,17 @@ not_found_handling = "single-page-application"
 SUPABASE_URL = "https://gmjudsbreuyyznxtfjve.supabase.co"
 # Anon key Supabase memang dirancang untuk publik (RLS yang melindungi).
 SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
-# URL gdi-worker yang aktif (deployment terbaru). Update kalau ganti subdomain.
+# URL gdi-worker yang aktif (untuk display & build URL stream ke client).
+# CATATAN: untuk fetch internal Worker→Worker, kita pakai service binding GDI
+# (lihat [[services]] di bawah) untuk bypass error CF 1042 (cross-zone block).
 GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
 # Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
+
+# === Service Binding ke gdi-worker ===
+# Cloudflare Workers TIDAK BISA fetch Worker lain di *.workers.dev via URL publik
+# (return error 1042). Solusi: pakai service binding — internal RPC, no network hop.
+# Worker `gdriveindex` HARUS sudah di-deploy duluan supaya binding bisa di-resolve.
+[[services]]
+binding = "GDI"
+service = "gdriveindex"
