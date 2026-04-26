@@ -635,13 +635,6 @@ img{display:block;max-width:100%;}
         </button>
       </div>
 
-      <div class="nav-section" id="adminNavSection" style="display:none;">
-        <div class="nav-section-title">Admin</div>
-        <a class="nav-item" href="/admin">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>
-          Panel Admin
-        </a>
-      </div>
     </nav>
 
     <div class="sidebar-footer">
@@ -961,18 +954,8 @@ async function onAuthSuccess(session){
   if(currentTier==='vip'){ tierEl.textContent='♛ VIP'; tierEl.className='profile-tier vip'; }
   else{ tierEl.textContent='Free'; tierEl.className='profile-tier'; }
 
-  // Show admin nav if admin
-  if(isAdminEmail(email)){
-    document.getElementById('adminNavSection').style.display='block';
-  }
-
   showApp();
   await loadCatalog();
-}
-
-function isAdminEmail(email){
-  // Frontend cek aja untuk show/hide nav. Worker tetap re-verify.
-  return (email||'').toLowerCase()==='sholehhuddin21@gmail.com';
 }
 
 /* ════════════════════════════════════════════════════════════════════

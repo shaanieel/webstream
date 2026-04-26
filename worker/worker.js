@@ -2,7 +2,7 @@
  * ZAEINSTREAM — Cloudflare Worker
  *
  * Tugas:
- * 1. Serve static assets (index.html, admin.html, dll dari /public)
+ * 1. Serve static assets (index.html, dll dari /public)
  * 2. Proxy ke Subsource API (subtitle search/download) dengan API key di env (aman)
  * 3. Proxy ke Drive Index Worker untuk dapat direct video link
  * 4. Admin API: tambah/edit/hapus film & user, manage VIP — pakai Supabase Service Key di env
@@ -438,7 +438,7 @@ export default {
       if (m && request.method === 'DELETE') return adminUserDelete(request, env, m[1]);
     }
 
-    // === Static assets (index.html, admin.html, dll) ===
+    // === Static assets (index.html, dll) ===
     // Cloudflare akan otomatis serve dari ./public/ via [assets] di wrangler.toml
     if (env.ASSETS) return env.ASSETS.fetch(request);
 
