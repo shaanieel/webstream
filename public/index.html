@@ -2235,6 +2235,10 @@ async function loadVideo(film){
   videoPlayer.src({ src: streamUrl, type: mime });
   videoPlayer.load();
   setStreamActions(streamUrl, film.title || '');
+
+  // External audio tracks (multi-dub) — resolve in parallel with main video
+  await setupExternalAudioTracks(film);
+  renderAudioTracks();
 }
 
 // ── Stream actions: download + external player URL schemes ──
@@ -2285,29 +2289,158 @@ document.addEventListener('click', function(e){
   if(!b.contains(e.target) && !m.contains(e.target)) m.style.display='none';
 });
 
+/* ═══════════════════════════════════════════════════════════════════
+   MULTI-TRACK AUDIO (Multitrack.JS-style)
+   ─────────────────────────────────────────────────────────────────
+   Browser HTML5 <video> gak expose embedded audio tracks untuk file MP4
+   biasa. Jadi untuk dub/multi-language, admin upload audio-only file
+   terpisah ke Drive Index. Frontend play video (muted) + <audio> element
+   terpisah (synced per-frame ke video.currentTime).
+   ═══════════════════════════════════════════════════════════════════ */
+let externalAudioTracks = [];  // [{ name, audioEl }]
+let activeAudioIdx = -1;       // -1 = original (from video), 0..N = external track
+let _multitrackWired = false;
+
+function currentExternalAudioEl(){
+  return activeAudioIdx >= 0 ? (externalAudioTracks[activeAudioIdx] && externalAudioTracks[activeAudioIdx].audioEl) : null;
+}
+
+async function setupExternalAudioTracks(film){
+  // Cleanup previous
+  externalAudioTracks.forEach(t=>{
+    try{ t.audioEl.pause(); t.audioEl.src=''; t.audioEl.remove(); }catch{}
+  });
+  externalAudioTracks = [];
+  activeAudioIdx = -1;
+  if(videoPlayer){ try{ videoPlayer.muted(false); }catch{} }
+
+  if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length) return;
+
+  // Resolve each track's drive_path to stream URL in parallel
+  const resolved = await Promise.all(film.audio_tracks.map(async (tr)=>{
+    if(!tr) return null;
+    let url = tr.url || tr.stream_url || null;
+    if(!url && tr.drive_path){
+      try{
+        const r = await fetch('/api/drive/resolve?path='+encodeURIComponent(tr.drive_path));
+        const d = await r.json();
+        if(d.ok) url = d.stream_url;
+      }catch{ /* ignore */ }
+    }
+    if(!url) return null;
+    return { name: tr.name || tr.language || 'Audio', url };
+  }));
+
+  for(const tr of resolved){
+    if(!tr) continue;
+    const a = document.createElement('audio');
+    a.src = tr.url;
+    a.preload = 'auto';
+    a.crossOrigin = 'anonymous';
+    a.style.display = 'none';
+    a.muted = true;  // start muted; unmuted on switch
+    document.body.appendChild(a);
+    externalAudioTracks.push({ name: tr.name, audioEl: a });
+  }
+
+  // Wire sync once
+  if(videoPlayer && !_multitrackWired){
+    _multitrackWired = true;
+    videoPlayer.on('play', ()=>{
+      const a = currentExternalAudioEl();
+      if(a){ try{ a.currentTime = videoPlayer.currentTime(); a.play().catch(()=>{}); }catch{} }
+    });
+    videoPlayer.on('pause', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.pause(); }catch{} });
+    videoPlayer.on('seeked', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.currentTime = videoPlayer.currentTime(); }catch{} });
+    videoPlayer.on('ratechange', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.playbackRate = videoPlayer.playbackRate(); }catch{} });
+    videoPlayer.on('volumechange', ()=>{
+      const a = currentExternalAudioEl();
+      if(a){ try{ a.volume = videoPlayer.volume(); }catch{} }
+    });
+    videoPlayer.on('timeupdate', ()=>{
+      const a = currentExternalAudioEl();
+      if(!a) return;
+      const diff = Math.abs(a.currentTime - videoPlayer.currentTime());
+      if(diff > 0.35){ try{ a.currentTime = videoPlayer.currentTime(); }catch{} }
+    });
+    videoPlayer.on('ended', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.pause(); }catch{} });
+  }
+}
+
+function switchExternalAudio(idx){
+  // Mute & pause all external audio
+  externalAudioTracks.forEach(t=>{
+    try{ t.audioEl.muted = true; t.audioEl.pause(); }catch{}
+  });
+  activeAudioIdx = idx;
+  if(idx < 0){
+    // Original (from video): unmute video audio
+    try{ videoPlayer.muted(false); }catch{}
+  } else {
+    // External track: mute video audio, play the selected audio element
+    try{ videoPlayer.muted(true); }catch{}
+    const a = externalAudioTracks[idx] && externalAudioTracks[idx].audioEl;
+    if(a){
+      try{
+        a.muted = false;
+        a.volume = videoPlayer.volume();
+        a.playbackRate = videoPlayer.playbackRate();
+        a.currentTime = videoPlayer.currentTime();
+        if(!videoPlayer.paused()) a.play().catch(()=>{});
+      }catch{}
+    }
+  }
+}
+
 function renderAudioTracks(){
   if(!videoPlayer) return;
-  const tracks = videoPlayer.audioTracks ? videoPlayer.audioTracks() : null;
   const btn = document.getElementById('toolBtnAudio');
   const panel = document.getElementById('audioPanel');
-  if(!tracks || tracks.length<=1){
+
+  // Browser-native audioTracks (HLS/DASH multi-audio; usually empty for plain MP4)
+  const embeddedTracks = videoPlayer.audioTracks ? videoPlayer.audioTracks() : null;
+  const embeddedCount = embeddedTracks ? embeddedTracks.length : 0;
+
+  // Total = embedded (if >1) + external sync tracks
+  const totalExtras = externalAudioTracks.length + (embeddedCount>1 ? embeddedCount : 0);
+  if(totalExtras === 0){
     btn.classList.remove('show');
-    panel.innerHTML='';
+    panel.innerHTML = '';
     return;
   }
   btn.classList.add('show');
-  // Build picker
+
   const items = [];
-  for(let i=0;i<tracks.length;i++){
-    const t = tracks[i];
-    const label = t.label || t.language || ('Audio '+(i+1));
-    items.push(`<div class="audio-panel-item${t.enabled?' active':''}" data-idx="${i}">${escapeHtml(label)}</div>`);
+  // "Original" (from video file) is always first — selects embedded track 0 or plain video audio
+  items.push(`<div class="audio-panel-item${activeAudioIdx===-1?' active':''}" data-mode="original">Original (dari video)</div>`);
+
+  // Embedded tracks (if browser exposes multiple)
+  if(embeddedCount > 1){
+    for(let i=0;i<embeddedCount;i++){
+      const t = embeddedTracks[i];
+      const label = t.label || t.language || ('Embedded '+(i+1));
+      items.push(`<div class="audio-panel-item${t.enabled && activeAudioIdx===-1?' active':''}" data-mode="embedded" data-idx="${i}">${escapeHtml(label)}</div>`);
+    }
   }
+
+  // External sync tracks
+  externalAudioTracks.forEach((t,i)=>{
+    items.push(`<div class="audio-panel-item${activeAudioIdx===i?' active':''}" data-mode="external" data-idx="${i}">${escapeHtml(t.name)}</div>`);
+  });
+
   panel.innerHTML = items.join('');
   panel.querySelectorAll('.audio-panel-item').forEach(el=>{
     el.addEventListener('click', ()=>{
-      const idx = Number(el.dataset.idx);
-      for(let i=0;i<tracks.length;i++){ tracks[i].enabled = (i===idx); }
+      const mode = el.dataset.mode;
+      if(mode === 'original'){
+        switchExternalAudio(-1);
+      } else if(mode === 'embedded' && embeddedTracks){
+        const idx = Number(el.dataset.idx);
+        for(let i=0;i<embeddedTracks.length;i++){ embeddedTracks[i].enabled = (i===idx); }
+        switchExternalAudio(-1);
+      } else if(mode === 'external'){
+        switchExternalAudio(Number(el.dataset.idx));
+      }
       panel.querySelectorAll('.audio-panel-item').forEach(x=>x.classList.remove('active'));
       el.classList.add('active');
       panel.classList.remove('open');
@@ -2333,6 +2466,12 @@ function closePlayer(opts){
   if(videoPlayer){
     try{ videoPlayer.pause(); videoPlayer.src(''); }catch{}
   }
+  // Clean up external audio tracks
+  externalAudioTracks.forEach(t=>{
+    try{ t.audioEl.pause(); t.audioEl.src=''; t.audioEl.remove(); }catch{}
+  });
+  externalAudioTracks = [];
+  activeAudioIdx = -1;
   const sa = document.getElementById('streamActions');
   if(sa) sa.style.display='none';
   const sm = document.getElementById('streamExtMenu');
