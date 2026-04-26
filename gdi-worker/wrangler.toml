@@ -1,0 +1,17 @@
+# GDI Worker — di-deploy TERPISAH dari main worker
+# URL produksi: https://indexgoogle.zaeinstream.workers.dev
+#
+# Cara deploy:
+#   cd gdi-worker
+#   wrangler deploy
+#
+# Set secrets (jangan commit):
+#   wrangler secret put CLIENT_ID
+#   wrangler secret put CLIENT_SECRET
+#   wrangler secret put REFRESH_TOKEN
+#   wrangler secret put GDI_USER
+#   wrangler secret put GDI_PASS
+
+name = "indexgoogle"
+main = "indexgoogle.js"
+compatibility_date = "2025-01-15"

@@ -2,8 +2,17 @@
 // Version: 2.5.7
 // Author: Parveen Bhadoo
 // Website: https://gdi.js.org
+//
+// ⚠️ FILE INI DI-DEPLOY TERPISAH SEBAGAI CLOUDFLARE WORKER
+//    URL produksi kamu: https://indexgoogle.zaeinstream.workers.dev
+//
+// 🔒 KREDENSIAL TIDAK DI-COMMIT KE GIT.
+//    Cara pakai (ada di README.md):
+//      1. Salin file ini ke server / Cloudflare dashboard kamu
+//      2. Isi nilai di bawah dengan kredensial Google OAuth + GDI user
+//      3. Jangan push perubahan ini ke Git public
 
-const environment = 'production'; // ✅ SUDAH DIGANTI ke production
+const environment = 'production';
 
 const serviceaccounts = [];
 const randomserviceaccount = serviceaccounts[Math.floor(Math.random() * serviceaccounts.length)];
@@ -13,11 +22,19 @@ const blocked_region = [''];
 const blocked_asn = [];
 const CDN_VERSION = '2.5.7';
 
+// Cloudflare Worker secrets (set via `wrangler secret put GDI_CLIENT_SECRET` dll).
+// Kalau worker di-deploy via Cloudflare dashboard (paste-script), isi langsung di field di bawah.
+const GDI_CLIENT_ID     = (typeof CLIENT_ID     !== 'undefined') ? CLIENT_ID     : "REPLACE_GOOGLE_CLIENT_ID";
+const GDI_CLIENT_SECRET = (typeof CLIENT_SECRET !== 'undefined') ? CLIENT_SECRET : "REPLACE_GOOGLE_CLIENT_SECRET";
+const GDI_REFRESH_TOKEN = (typeof REFRESH_TOKEN !== 'undefined') ? REFRESH_TOKEN : "REPLACE_GOOGLE_REFRESH_TOKEN";
+const GDI_USERNAME      = (typeof GDI_USER      !== 'undefined') ? GDI_USER      : "REPLACE_USERNAME";
+const GDI_PASSWORD      = (typeof GDI_PASS      !== 'undefined') ? GDI_PASS      : "REPLACE_PASSWORD";
+
 const authConfig = {
-  "siteName": "ZAEINSTREAM — VIP INDEX", // ✅ Nama site
-  "client_id": "461888042895-bbktnbpt0hshjsfvjgaq6cqtgkqcapi5.apps.googleusercontent.com",
-  "client_secret": "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",
-  "refresh_token": "1//044LapAt8oZfrCgYIARAAGAQSNwF-L9IrIqK-E5tXmdxFPdOu3CMQMcJo4XGz1yWVGULWKevooAA_zvTdF_z37ANkHOT88phoCtI",
+  "siteName": "ZAEINSTREAM — VIP INDEX",
+  "client_id": GDI_CLIENT_ID,
+  "client_secret": GDI_CLIENT_SECRET,
+  "refresh_token": GDI_REFRESH_TOKEN,
   "service_account": false,
   "service_account_json": randomserviceaccount,
   "files_list_page_size": 100,
@@ -33,7 +50,7 @@ const authConfig = {
   "enable_social_login": false,
   "google_client_id_for_login": "",
   "google_client_secret_for_login": "",
-  "redirect_domain": "https://indexgoogle.zaeinstream.workers.dev", // ✅ URL Worker kamu
+  "redirect_domain": "https://indexgoogle.zaeinstream.workers.dev",
   "login_database": "Local",
   "login_days": 7,
   "enable_ip_lock": false,
@@ -42,8 +59,8 @@ const authConfig = {
   "cors_domain": "*",
   "users_list": [
     {
-      "username": "sholehhuddin21@gmail.com", // ✅ Username kamu
-      "password": "korona123", // ✅ Password kamu
+      "username": GDI_USERNAME,
+      "password": GDI_PASSWORD,
     }
   ],
   "roots": [
