@@ -1,0 +1,24 @@
+name = "nonton-zaeinstream"
+main = "worker/worker.js"
+compatibility_date = "2025-01-15"
+
+# Static assets di folder public/ akan otomatis di-serve untuk path apapun
+# yang tidak match dengan rute di worker.js
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# === Secrets (jangan commit) ===
+# Set via: wrangler secret put SUBSOURCE_API_KEY
+# Set via: wrangler secret put SUPABASE_SERVICE_KEY
+# Set via: wrangler secret put TMDB_API_KEY (opsional, fallback ke key di frontend)
+
+[vars]
+SUPABASE_URL = "https://gmjudsbreuyyznxtfjve.supabase.co"
+# Anon key Supabase memang dirancang untuk publik (RLS yang melindungi).
+# Tapi kalau mau lebih bersih, pindahkan ke `wrangler secret put SUPABASE_ANON_KEY`.
+SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
+GDI_WORKER_URL = "https://indexgoogle.zaeinstream.workers.dev"
+# Email admin (boleh banyak, dipisah koma)
+ADMIN_EMAILS = "sholehhuddin21@gmail.com"

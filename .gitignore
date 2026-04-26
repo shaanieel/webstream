@@ -1,0 +1,22 @@
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+node_modules/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+*.secrets
+secrets.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
