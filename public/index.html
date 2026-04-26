@@ -72,13 +72,12 @@ img{display:block;max-width:100%;}
   transition:width .35s cubic-bezier(.4,0,.2,1),transform .25s ease;
 }
 .sidebar.collapsed{ width:var(--sidebar-w-collapsed); }
-.sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .nav-item-label,
 .sidebar.collapsed .nav-section-title,
 .sidebar.collapsed .profile-info{ display:none; }
 .sidebar.collapsed .nav-item{ justify-content:center; padding:11px 0; }
 .sidebar.collapsed .sidebar-logo{ padding:18px 0; justify-content:center; }
-.sidebar.collapsed .sidebar-logo-img{ width:32px;height:32px; }
+.sidebar.collapsed .sidebar-logo-img{ max-height:32px; }
 .sidebar.collapsed .profile-chip{ justify-content:center; padding:8px 0; }
 
 /* Sidebar collapse toggle button (vertically centered, on right edge of sidebar) */
@@ -100,19 +99,12 @@ img{display:block;max-width:100%;}
 
 .sidebar-logo{
   padding:18px 20px 22px;
-  font-weight:800;
   display:flex;align-items:center;gap:10px;
-  font-size:1.45rem;
-  letter-spacing:.5px;
 }
 .sidebar-logo-img{
-  width:36px; height:36px; object-fit:contain; flex-shrink:0;
-  transition:width .25s,height .25s;
-}
-.sidebar-logo-text{
-  background:linear-gradient(135deg,#fff,#0ea5e9);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-  white-space:nowrap;
+  max-width:100%; height:auto; max-height:44px;
+  object-fit:contain; flex-shrink:0;
+  transition:max-height .25s;
 }
 .sidebar-nav{flex:1;overflow-y:auto;padding:0 12px;}
 .nav-section{margin-bottom:24px;}
@@ -933,9 +925,8 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   <!-- ── Sidebar ── -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <img src="https://iili.io/BPFTO6x.md.png" alt="StreameX" class="sidebar-logo-img"
+      <img src="https://iili.io/BPFTO6x.md.png" alt="" class="sidebar-logo-img"
            onerror="this.style.display='none'"/>
-      <span class="sidebar-logo-text">StreameX</span>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section">
@@ -1697,6 +1688,11 @@ function goPage(name, opts){
   opts = opts || {};
   if(!VALID_PAGES.includes(name)) name = 'home';
   _currentPage = name;
+  // If player modal is open, close it first so the user can see the page
+  const pm = document.getElementById('playerModal');
+  if(pm && pm.classList.contains('open') && !opts.fromPopState){
+    closePlayer({ skipHistoryBack:true });
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
   document.querySelectorAll('.bottom-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
@@ -2327,7 +2323,8 @@ function closePlayer(opts){
   document.body.style.overflow='';
   // If we pushed a /film/{id} URL, navigate back one step so URL reverts
   // to whatever page the user was on before opening the film.
-  if(!opts.fromPopState){
+  // Skip when caller (e.g. goPage) will handle history itself.
+  if(!opts.fromPopState && !opts.skipHistoryBack){
     if(location.pathname.startsWith('/film/')){
       // history.back() triggers popstate → applyRoute() restores previous page
       history.back();
