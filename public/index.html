@@ -1502,8 +1502,9 @@ async function onAuthSuccess(session){
 
   showApp();
   await loadCatalog();
-  // After data is ready, navigate to whatever hash is in the URL (or home)
-  hashRoute();
+  // After catalog is loaded, apply whatever route is in the URL
+  // (handles /movies, /tv, /film/123, etc. on initial load/reload)
+  applyRoute({ fromPopState:true });
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1549,7 +1550,8 @@ async function doLogin(){
 async function confirmLogout(){
   if(!confirm('Yakin mau logout?')) return;
   await sb.auth.signOut();
-  location.hash = '';
+  // Clear both hash and path so we land on clean /
+  history.replaceState(null, '', '/');
   location.reload();
 }
 // Backward-compat alias
@@ -1682,12 +1684,17 @@ document.addEventListener('keydown',(e)=>{
 });
 
 /* ════════════════════════════════════════════════════════════════════
-   NAVIGATION
+   NAVIGATION — Clean URLs via History API
+   Pages:  /, /movies, /tv, /browse, /watchlist, /search, /vip, /profile
+   Film:   /film/{id}
    ════════════════════════════════════════════════════════════════════ */
 const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','vip','profile'];
 let _currentPage = 'home';
 
+function pagePath(name){ return name==='home' ? '/' : '/'+name; }
+
 function goPage(name, opts){
+  opts = opts || {};
   if(!VALID_PAGES.includes(name)) name = 'home';
   _currentPage = name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1705,24 +1712,79 @@ function goPage(name, opts){
   if(name==='vip') renderVipPage();
   if(name==='profile') renderProfilePage();
 
-  // Update URL hash for shareable links + browser history
-  const expectedHash = name==='home' ? '#/' : '#/'+name;
-  if(!opts || !opts.fromHashChange){
-    if(location.hash !== expectedHash) location.hash = expectedHash;
+  // Update URL via History API (clean path, no hash)
+  if(!opts.fromPopState){
+    const target = pagePath(name);
+    if(location.pathname !== target){
+      history.pushState({ kind:'page', name }, '', target);
+    }
   }
   // Update mobile topbar URL
   const top = document.getElementById('mobileUrl');
-  if(top) top.textContent = 'zaeinstream.net' + (name==='home' ? '/' : '/'+name);
+  if(top) top.textContent = location.host + pagePath(name);
 
   window.scrollTo({top:0});
 }
 
-function hashRoute(){
-  const h = (location.hash || '').replace(/^#\/?/,'');
-  const name = (h.split('/')[0] || 'home').toLowerCase();
-  goPage(name, { fromHashChange:true });
+// Resolve film by id — handle numeric DB id (preferred) or tmdb_id
+function findFilmByRouteId(id){
+  if(!id) return null;
+  const sid = String(id);
+  return allFilms.find(f => String(f.id)===sid)
+      || allFilms.find(f => String(f.tmdb_id)===sid)
+      || null;
 }
-window.addEventListener('hashchange', hashRoute);
+
+// Parse pathname -> route object
+function parseRoute(){
+  const p = (location.pathname || '/').replace(/\/+$/,'') || '/';
+  if(p === '' || p === '/') return { kind:'page', name:'home' };
+  const parts = p.split('/').filter(Boolean);
+  if(parts[0] === 'film' && parts[1]){
+    return { kind:'film', id: parts[1] };
+  }
+  if(VALID_PAGES.includes(parts[0])){
+    return { kind:'page', name: parts[0] };
+  }
+  return { kind:'page', name: 'home' };
+}
+
+// Apply a route (on initial load or on popstate)
+function applyRoute(opts){
+  opts = opts || {};
+  const r = parseRoute();
+  if(r.kind === 'film'){
+    const f = findFilmByRouteId(r.id);
+    if(f){
+      // Go to home behind the modal so back button behavior is sensible
+      goPage('home', { fromPopState:true });
+      openFilm(f, { fromPopState:true });
+    } else {
+      // Film not found (catalog not loaded yet, or id invalid) → fallback to home
+      goPage('home', { fromPopState:true });
+    }
+  } else {
+    // Close player if open (e.g., back button from /film/X → /something)
+    const pm = document.getElementById('playerModal');
+    if(pm && pm.classList.contains('open')){ closePlayer({ fromPopState:true }); }
+    goPage(r.name, { fromPopState:true });
+  }
+}
+
+window.addEventListener('popstate', ()=>applyRoute({ fromPopState:true }));
+
+// Legacy hash-link support: if user arrives with /#/movies, migrate to /movies
+(function migrateLegacyHash(){
+  const h = location.hash || '';
+  if(h.startsWith('#/') || h.startsWith('#!')){
+    const name = h.replace(/^#\/?!?/,'').split('/')[0].toLowerCase();
+    if(VALID_PAGES.includes(name)){
+      history.replaceState({ kind:'page', name }, '', pagePath(name));
+    } else {
+      history.replaceState({ kind:'page', name:'home' }, '', '/');
+    }
+  }
+})();
 
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');
@@ -2041,6 +2103,14 @@ async function openFilm(film, opts){
   document.body.style.overflow='hidden';
   document.getElementById('playerTitle').textContent = film.judul || '—';
 
+  // Update URL to /film/{id} (clean, shareable)
+  if(!opts.fromPopState){
+    const filmPath = '/film/' + encodeURIComponent(film.id);
+    if(location.pathname !== filmPath){
+      history.pushState({ kind:'film', id: String(film.id) }, '', filmPath);
+    }
+  }
+
   // Populate right panel with whatever we have from the local film record.
   // loadFilmExtras() will enrich with TMDB data (status, production, genres, cast, trailer).
   const poster = film.poster_url || '';
@@ -2251,9 +2321,18 @@ function renderAudioTracks(){
   });
 }
 
-function closePlayer(){
+function closePlayer(opts){
+  opts = opts || {};
   document.getElementById('playerModal').classList.remove('open');
   document.body.style.overflow='';
+  // If we pushed a /film/{id} URL, navigate back one step so URL reverts
+  // to whatever page the user was on before opening the film.
+  if(!opts.fromPopState){
+    if(location.pathname.startsWith('/film/')){
+      // history.back() triggers popstate → applyRoute() restores previous page
+      history.back();
+    }
+  }
   if(videoPlayer){
     try{ videoPlayer.pause(); videoPlayer.src(''); }catch{}
   }
