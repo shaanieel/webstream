@@ -32,8 +32,9 @@ const err = (msg, status = 400) => json({ ok: false, error: msg }, status);
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+    'Access-Control-Max-Age': '86400',
   };
 }
 
@@ -100,11 +101,17 @@ async function requireAdmin(request, env) {
 
 async function subsourceFetch(env, path, opts = {}) {
   const url = `${SUBSOURCE_BASE}${path}`;
+  const apiKey = (env.SUBSOURCE_API_KEY || '').trim();
+  if (!apiKey) {
+    // Throw supaya caller bisa balikin error dengan pesan yang jelas
+    throw new Error('SUBSOURCE_API_KEY belum di-set di Cloudflare worker secrets');
+  }
   const r = await fetch(url, {
     ...opts,
     headers: {
-      'X-API-Key': env.SUBSOURCE_API_KEY,
+      'X-API-Key': apiKey,
       Accept: 'application/json',
+      'User-Agent': 'zaeinstream-worker/1.0',
       ...(opts.headers || {}),
     },
   });
@@ -219,11 +226,27 @@ async function tmdbSearch(request, env) {
 }
 
 // GET /api/tmdb/movie/:id  atau  /api/tmdb/tv/:id
+// Append=videos,credits,recommendations supaya frontend dapat semua data sekaligus
 async function tmdbDetail(request, env, type, id) {
   if (!['movie', 'tv'].includes(type)) return err('type harus movie atau tv');
   if (!/^\d+$/.test(id)) return err('id TMDB harus angka');
   try {
-    const r = await tmdbFetch(env, `/${type}/${id}`);
+    const r = await tmdbFetch(env, `/${type}/${id}?append_to_response=videos,credits,recommendations`);
+    const data = await r.json();
+    if (!r.ok) return err(`TMDB ${r.status}: ${data.status_message || ''}`, 502);
+    return json({ ok: true, data });
+  } catch (e) {
+    return err('TMDB error: ' + e.message, 502);
+  }
+}
+
+// GET /api/tmdb/multi?query=spider — search movie+tv+person sekaligus (untuk autocomplete)
+async function tmdbMulti(request, env) {
+  const u = new URL(request.url);
+  const query = u.searchParams.get('query') || '';
+  if (!query) return err('Parameter query wajib');
+  try {
+    const r = await tmdbFetch(env, `/search/multi?query=${encodeURIComponent(query)}&include_adult=false`);
     const data = await r.json();
     if (!r.ok) return err(`TMDB ${r.status}: ${data.status_message || ''}`, 502);
     return json({ ok: true, data });
@@ -301,6 +324,152 @@ async function driveResolve(request, env) {
 }
 
 // ───────────────────────────────────────────────────────────────────
+// Identity / Health
+// ───────────────────────────────────────────────────────────────────
+
+// GET /api/me — return profile + tier + isAdmin (untuk frontend)
+async function meHandler(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return json({ ok: true, authenticated: false });
+  const profile = await getUserProfile(env, user.id);
+  let userTier = 'free';
+  let expired = false;
+  if (profile) {
+    expired = profile.expired_at && new Date(profile.expired_at) < new Date();
+    if (expired) userTier = 'expired';
+    else userTier = profile.is_vip ? 'vip' : 'free';
+  }
+  return json({
+    ok: true,
+    authenticated: true,
+    user: { id: user.id, email: user.email, created_at: user.created_at },
+    profile: profile || null,
+    tier: userTier,
+    expired,
+    is_admin: isAdminEmail(env, user.email || ''),
+  });
+}
+
+// GET /api/admin/me — strict, hanya untuk gating panel adminweb1
+async function adminMeHandler(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden — bukan admin', 403);
+  return json({ ok: true, is_admin: true, email: admin.email, id: admin.id });
+}
+
+// GET /api/admin/health — cek status integrasi (subsource, GDI, supabase, tmdb)
+// Hanya admin yang boleh akses (jangan expose status detail ke user biasa)
+async function adminHealthHandler(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+
+  const checks = {};
+
+  // === Subsource ===
+  try {
+    if (!env.SUBSOURCE_API_KEY) {
+      checks.subsource = { ok: false, status: 0, message: 'SUBSOURCE_API_KEY belum di-set di Cloudflare' };
+    } else {
+      const r = await subsourceFetch(env, '/movies/search?searchType=text&q=avengers&limit=1');
+      checks.subsource = {
+        ok: r.ok,
+        status: r.status,
+        message: r.ok ? 'API key valid' : `HTTP ${r.status}: ${(await r.text()).slice(0, 120)}`,
+      };
+    }
+  } catch (e) {
+    checks.subsource = { ok: false, status: 0, message: 'Error: ' + e.message };
+  }
+
+  // === TMDB ===
+  try {
+    if (!env.TMDB_API_KEY) {
+      checks.tmdb = { ok: false, status: 0, message: 'TMDB_API_KEY belum di-set di Cloudflare' };
+    } else {
+      const r = await tmdbFetch(env, '/configuration');
+      checks.tmdb = {
+        ok: r.ok,
+        status: r.status,
+        message: r.ok ? 'API key valid' : `HTTP ${r.status}`,
+      };
+    }
+  } catch (e) {
+    checks.tmdb = { ok: false, status: 0, message: 'Error: ' + e.message };
+  }
+
+  // === GDI worker (Drive Index) ===
+  try {
+    const gdiBase = (env.GDI_WORKER_URL || '').replace(/\/$/, '');
+    if (!gdiBase) {
+      checks.drive = { ok: false, status: 0, message: 'GDI_WORKER_URL belum di-set di wrangler.toml' };
+    } else {
+      // GET ke root → harusnya 401 / 200 (kalau ada login GDI_USER/GDI_PASS)
+      const r = await fetch(gdiBase + '/', { method: 'GET' });
+      const text = await r.text();
+      const looksDown = r.status >= 500;
+      const looksOk = r.status < 500;
+      checks.drive = {
+        ok: looksOk,
+        status: r.status,
+        message: looksDown
+          ? 'GDI worker error 5xx — kemungkinan token Google Drive expired (refresh CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN)'
+          : `Reachable (HTTP ${r.status}). Pastikan path file ada di Drive.`,
+        url: gdiBase,
+        body_preview: text.slice(0, 200),
+      };
+    }
+  } catch (e) {
+    checks.drive = { ok: false, status: 0, message: 'Error reaching GDI: ' + e.message };
+  }
+
+  // === Supabase service ===
+  try {
+    const r = await supabaseRest(env, '/films?select=id&limit=1');
+    checks.supabase = { ok: r.ok, status: r.status, message: r.ok ? 'OK' : 'HTTP ' + r.status };
+  } catch (e) {
+    checks.supabase = { ok: false, status: 0, message: 'Error: ' + e.message };
+  }
+
+  return json({ ok: true, checks, env: {
+    has_subsource_key: !!env.SUBSOURCE_API_KEY,
+    has_tmdb_key: !!env.TMDB_API_KEY,
+    has_supabase_service_key: !!env.SUPABASE_SERVICE_KEY,
+    has_admin_emails: !!env.ADMIN_EMAILS,
+    admin_emails: (env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean),
+    gdi_worker_url: env.GDI_WORKER_URL || null,
+  } });
+}
+
+// POST /api/admin/drive/test — test resolve sebuah path drive (admin only)
+async function adminDriveTest(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const body = await request.json().catch(() => ({}));
+  const path = body.path;
+  if (!path) return err('Field path wajib');
+  const gdiBase = (env.GDI_WORKER_URL || '').replace(/\/$/, '');
+  if (!gdiBase) return err('GDI_WORKER_URL belum di-set', 500);
+  const drivePath = normalizeDrivePath(path, gdiBase);
+  try {
+    const r = await fetch(`${gdiBase}${drivePath}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const text = await r.text();
+    let data; try { data = JSON.parse(text); } catch { data = null; }
+    return json({
+      ok: r.ok,
+      status: r.status,
+      data: data || text.slice(0, 500),
+      stream_url: data && data.link ? gdiBase + data.link : null,
+    });
+  } catch (e) {
+    return err('GDI error: ' + e.message, 502);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Catalog API (films) — public read, admin write
 // ───────────────────────────────────────────────────────────────────
 
@@ -351,6 +520,7 @@ async function adminFilmCreate(request, env) {
     poster_url: body.poster_url || null,
     overview: body.overview || null,
     genre: body.genre || null,
+    trailer_url: body.trailer_url || null,
   };
   const r = await supabaseRest(env, '/films', {
     method: 'POST',
@@ -535,19 +705,40 @@ export default {
       return catalogList(request, env);
     }
 
-    // === TMDB (admin only — auth via JWT) ===
+    // === Identity ===
+    if (pathname === '/api/me' && request.method === 'GET') {
+      return meHandler(request, env);
+    }
+
+    // === TMDB (any authenticated user; key tetap di-server, gak ke browser) ===
     if (pathname === '/api/tmdb/search' && request.method === 'GET') {
-      const admin = await requireAdmin(request, env);
-      if (!admin) return err('Forbidden', 403);
+      const u = await getUserFromAuth(request, env);
+      if (!u) return err('Login dulu', 401);
       return tmdbSearch(request, env);
+    }
+    if (pathname === '/api/tmdb/multi' && request.method === 'GET') {
+      const u = await getUserFromAuth(request, env);
+      if (!u) return err('Login dulu', 401);
+      return tmdbMulti(request, env);
     }
     {
       const m = pathname.match(/^\/api\/tmdb\/(movie|tv)\/(\d+)$/);
       if (m && request.method === 'GET') {
-        const admin = await requireAdmin(request, env);
-        if (!admin) return err('Forbidden', 403);
+        const u = await getUserFromAuth(request, env);
+        if (!u) return err('Login dulu', 401);
         return tmdbDetail(request, env, m[1], m[2]);
       }
+    }
+
+    // === Admin: identity / health (untuk gating adminweb1 + diagnostik) ===
+    if (pathname === '/api/admin/me' && request.method === 'GET') {
+      return adminMeHandler(request, env);
+    }
+    if (pathname === '/api/admin/health' && request.method === 'GET') {
+      return adminHealthHandler(request, env);
+    }
+    if (pathname === '/api/admin/drive/test' && request.method === 'POST') {
+      return adminDriveTest(request, env);
     }
 
     // === Admin: films ===

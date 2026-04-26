@@ -12,6 +12,6 @@
 #   wrangler secret put GDI_USER
 #   wrangler secret put GDI_PASS
 
-name = "indexgoogle"
+name = "gdriveindex"
 main = "indexgoogle.js"
 compatibility_date = "2025-01-15"
