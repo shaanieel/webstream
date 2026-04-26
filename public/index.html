@@ -297,9 +297,33 @@ img{display:block;max-width:100%;}
   background:var(--surface);
   border:1px solid var(--border);
 }
-.card-poster img{width:100%;height:100%;object-fit:cover;transition:transform .3s ease;}
-.card:hover .card-poster img{transform:scale(1.04);}
+.card-poster img{width:100%;height:100%;object-fit:cover;transition:transform .3s ease,filter .3s ease;}
+.card:hover .card-poster img,.card:focus-within .card-poster img,.card.touched .card-poster img{transform:scale(1.04);filter:blur(2px) brightness(.55);}
 .card-poster.placeholder{display:flex;align-items:center;justify-content:center;color:var(--muted-2);font-size:.75rem;text-align:center;padding:8px;}
+.card-play-overlay{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .25s ease;pointer-events:none;z-index:2;
+}
+.card:hover .card-play-overlay,.card:focus-within .card-play-overlay,.card.touched .card-play-overlay{opacity:1;}
+.card-play-overlay .play-circle{
+  width:54px;height:54px;border-radius:50%;
+  background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.card-play-overlay .play-circle::after{
+  content:"";display:block;width:0;height:0;
+  border-left:14px solid #0a0a0f;border-top:9px solid transparent;border-bottom:9px solid transparent;
+  margin-left:4px;
+}
+.card-cw-delete{
+  position:absolute;top:6px;right:6px;z-index:3;width:26px;height:26px;border-radius:50%;
+  background:rgba(0,0,0,.7);color:#fff;display:none;align-items:center;justify-content:center;
+  border:1px solid rgba(255,255,255,.2);cursor:pointer;font-size:14px;line-height:1;
+}
+.card-cw-delete.show{display:flex;}
+.card-cw-delete:hover{background:rgba(239,68,68,.85);}
+.card-progress-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.15);z-index:2;}
+.card-progress-bar > span{display:block;height:100%;background:var(--accent);}
 .rating-badge{
   position:absolute;top:8px;left:8px;
   background:rgba(0,0,0,.75);backdrop-filter:blur(6px);
@@ -808,6 +832,17 @@ img{display:block;max-width:100%;}
         </div>
       </div>
 
+      <div class="row" id="continueWatchingRow" style="display:none;">
+        <div class="row-head">
+          <div class="row-title">Continue Watching</div>
+          <div class="row-actions">
+            <button class="row-arrow" onclick="rowScroll('continueWatchingGrid',-1)" aria-label="Prev">‹</button>
+            <button class="row-arrow" onclick="rowScroll('continueWatchingGrid',1)" aria-label="Next">›</button>
+          </div>
+        </div>
+        <div class="grid" id="continueWatchingGrid"></div>
+      </div>
+
       <div class="row">
         <div class="row-head">
           <div class="row-title">Trending Now</div>
@@ -916,7 +951,10 @@ img{display:block;max-width:100%;}
     <!-- ════ PROFILE ════ -->
     <section class="page" id="page-profile">
       <div class="profile-page">
-        <div class="page-title">Akun Saya</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+          <button class="btn-back" onclick="profileBack()" aria-label="Kembali" style="background:var(--surface-2);border:1px solid var(--border);color:var(--text);width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;">←</button>
+          <div class="page-title" style="margin:0;">Akun Saya</div>
+        </div>
         <div class="profile-card">
           <div class="profile-head">
             <div class="profile-avatar-lg" id="profileAvatarLg">Z</div>
@@ -963,14 +1001,21 @@ img{display:block;max-width:100%;}
     </section>
   </main>
 
-  <!-- VIP Locked Modal (untuk non-VIP yang coba akses film VIP) -->
+  <!-- VIP Locked Modal (untuk non-VIP yang coba akses film/halaman VIP) -->
   <div class="vip-locked-modal" id="vipLockedModal">
     <div class="vip-locked-box">
       <button class="btn-close" onclick="closeVipLocked()">×</button>
-      <div class="lock-icon">🔒</div>
-      <h2>Konten VIP</h2>
-      <p id="vipLockedMsg">Film ini hanya tersedia untuk member VIP. Upgrade akun kamu untuk akses tanpa batas.</p>
-      <a class="btn-vip" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">Hubungi Admin untuk Upgrade</a>
+      <div class="lock-icon">👑</div>
+      <h2 id="vipLockedTitle">Konten VIP</h2>
+      <p id="vipLockedMsg">Halaman ini hanya untuk member VIP. Hubungi admin untuk upgrade.</p>
+      <ul style="text-align:left;padding:0;margin:18px 0;list-style:none;font-size:.92rem;color:#ddd;line-height:1.7;">
+        <li>👑 <strong style="color:#facc15">Akses ribuan film premium</strong></li>
+        <li>🎬 Update terus tiap hari</li>
+        <li>🇮🇩 Film dubbing Indonesia & lokal lengkap</li>
+        <li>📺 Kualitas 4K Ultra HD</li>
+        <li>⚡ Tanpa batas streaming</li>
+      </ul>
+      <a class="btn-vip" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">📲 Hubungi Admin untuk Upgrade</a>
     </div>
   </div>
 
@@ -1057,6 +1102,31 @@ img{display:block;max-width:100%;}
         <h2 id="playerInfoTitle">—</h2>
         <div class="player-info-meta" id="playerInfoMeta"></div>
         <p id="playerInfoDesc"></p>
+
+        <!-- Trailer (TMDB videos) -->
+        <div id="trailerBox" style="display:none;margin-top:18px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--accent);margin-bottom:8px;letter-spacing:.5px;">🎬 Trailer</div>
+          <div id="trailerWrap" style="position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden;border:1px solid var(--border);">
+            <button id="trailerPlayBtn" onclick="playTrailerInPlayer()" style="position:absolute;inset:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:transparent;color:#fff;cursor:pointer;border:0;">
+              <div style="width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;">
+                <div style="width:0;height:0;border-left:18px solid #0a0a0f;border-top:11px solid transparent;border-bottom:11px solid transparent;margin-left:5px;"></div>
+              </div>
+            </button>
+            <iframe id="trailerIframe" style="display:none;width:100%;height:100%;border:0;" allow="autoplay;encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+
+        <!-- Cast -->
+        <div id="castBox" style="display:none;margin-top:18px;">
+          <div style="font-size:.85rem;font-weight:700;color:var(--accent);margin-bottom:8px;letter-spacing:.5px;">👥 Pemain</div>
+          <div id="castGrid" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;"></div>
+        </div>
+
+        <!-- Recommended -->
+        <div id="recBox" style="display:none;margin-top:24px;">
+          <div style="font-size:.95rem;font-weight:700;margin-bottom:12px;letter-spacing:.5px;">🎬 Rekomendasi Mirip</div>
+          <div id="recGrid" class="grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;"></div>
+        </div>
       </div>
     </div>
 
@@ -1088,6 +1158,9 @@ let allFilms = [];
 let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
 let currentFilm = null;
 let videoPlayer = null;
+let currentResumeFrom = 0;
+let currentTmdbExtras = null;
+let currentTrailerKey = null;
 let _currentSubBlobUrl = null;
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1286,11 +1359,16 @@ function renderVipPage(){
   const empty = document.getElementById('vipEmpty');
   const heroDesc = document.getElementById('vipHeroDesc');
 
+  // Non-VIP: tampilkan modal langsung (gak boleh akses isi halaman)
   if(currentTier!=='vip'){
-    heroDesc.innerHTML = `<strong style="color:#facc15">Kamu belum jadi VIP.</strong><br>Kamu bisa lihat poster, tapi nonton perlu upgrade akun. Hubungi admin untuk upgrade.`;
-  } else {
-    heroDesc.textContent = 'Selamat datang VIP — semua film premium sudah unlock.';
+    showVipLocked({page:true});
+    heroDesc.innerHTML = `<strong style="color:#facc15">Halaman ini hanya untuk member VIP.</strong>`;
+    grid.innerHTML = '';
+    empty.style.display = 'none';
+    return;
   }
+
+  heroDesc.textContent = 'Selamat datang VIP — semua film premium sudah unlock.';
 
   if(!vipFilms.length){
     grid.innerHTML = '';
@@ -1308,11 +1386,30 @@ function renderVipPage(){
   }
 }
 
-function showVipLocked(film){
+function showVipLocked(opts){
+  const titleEl = document.getElementById('vipLockedTitle');
+  const msgEl = document.getElementById('vipLockedMsg');
+  if(opts && opts.page){
+    titleEl.textContent = 'VIP Zone Terkunci';
+    msgEl.textContent = 'Halaman VIP Zone hanya untuk member VIP. Upgrade akun kamu untuk akses tanpa batas.';
+  } else {
+    titleEl.textContent = 'Film VIP';
+    msgEl.textContent = 'Film ini hanya tersedia untuk member VIP. Upgrade untuk akses tanpa batas.';
+  }
   document.getElementById('vipLockedModal').classList.add('show');
 }
 function closeVipLocked(){
   document.getElementById('vipLockedModal').classList.remove('show');
+  // Kalau user di /vip dan bukan VIP, bawa balik ke home
+  if(_currentPage==='vip' && currentTier!=='vip'){
+    goPage('home');
+  }
+}
+
+// Tombol back di profile page
+function profileBack(){
+  if(history.length>1){ history.back(); return; }
+  goPage('home');
 }
 
 document.addEventListener('keydown',(e)=>{
@@ -1452,9 +1549,61 @@ function renderHome(){
     document.getElementById('hero')._film = heroFilm;
   }
 
+  renderContinueWatching();
   renderGrid('trendingGrid', allFilms.slice(0,14));
   renderGrid('moviesGrid', movies.slice(0,7));
   renderGrid('tvGrid', tvs.slice(0,7));
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   CONTINUE WATCHING
+   ════════════════════════════════════════════════════════════════════ */
+const CW_KEY = 'zaein_continue_watching';
+
+function getContinueWatching(){
+  try{ return JSON.parse(localStorage.getItem(CW_KEY)||'[]'); }catch{ return []; }
+}
+function saveContinueWatching(list){
+  // Sort by lastWatched desc, max 12 entries
+  list.sort((a,b)=>(b.lastWatched||0)-(a.lastWatched||0));
+  localStorage.setItem(CW_KEY, JSON.stringify(list.slice(0,12)));
+}
+function upsertContinueWatching(filmId, currentTime, duration){
+  if(!filmId || !duration || currentTime<5) return; // skip jika baru mulai
+  const progress = Math.min(0.99, currentTime/duration);
+  if(progress > 0.95) return removeContinueWatching(filmId); // hampir selesai → hapus
+  const list = getContinueWatching();
+  const idx = list.findIndex(x=>String(x.id)===String(filmId));
+  const entry = { id: filmId, position: currentTime, duration, progress, lastWatched: Date.now() };
+  if(idx>=0) list[idx]=entry; else list.push(entry);
+  saveContinueWatching(list);
+}
+function removeContinueWatching(filmId){
+  const list = getContinueWatching().filter(x=>String(x.id)!==String(filmId));
+  localStorage.setItem(CW_KEY, JSON.stringify(list));
+  renderContinueWatching();
+  showToast('Dihapus dari Continue Watching');
+}
+function renderContinueWatching(){
+  const row = document.getElementById('continueWatchingRow');
+  const grid = document.getElementById('continueWatchingGrid');
+  if(!row || !grid) return;
+  const list = getContinueWatching();
+  const items = list.map(cw=>{
+    const film = allFilms.find(f=>String(f.id)===String(cw.id));
+    return film ? { film, cw } : null;
+  }).filter(Boolean);
+  if(!items.length){ row.style.display='none'; return; }
+  row.style.display='block';
+  grid.innerHTML = items.map(({film,cw})=>cardHTML(film, false, { cw })).join('');
+  grid.querySelectorAll('[data-film-id]').forEach(el=>{
+    el.addEventListener('click', ev=>{
+      if(ev.target.closest('[data-cw-delete]')) return;
+      const id=el.dataset.filmId;
+      const film=allFilms.find(x=>String(x.id)===String(id));
+      if(film) openFilm(film, { resumeFrom: list.find(x=>String(x.id)===String(id))?.position||0 });
+    });
+  });
 }
 
 function renderGrid(id, items){
@@ -1475,7 +1624,8 @@ function renderGrid(id, items){
   });
 }
 
-function cardHTML(f, vipStyle){
+function cardHTML(f, vipStyle, opts){
+  opts = opts || {};
   const poster = f.poster_url || '';
   const year = f.tahun || '—';
   const type = (f.tipe==='series'?'TV':'MOVIE');
@@ -1484,13 +1634,19 @@ function cardHTML(f, vipStyle){
   const cls = 'card' + (vipStyle ? ' vip-card' : '');
   const posterHTML = poster
     ? `<img src="${poster}" loading="lazy" alt="${escapeHtml(f.judul||'')}"/>`
-    : `<div class="card-poster placeholder">${escapeHtml(f.judul||'No image')}</div>`;
+    : '';
+  const placeholder = poster ? '' : `<div class="card-poster-placeholder" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#666;font-size:.75rem;text-align:center;padding:8px;">${escapeHtml(f.judul||'No image')}</div>`;
+  const cwDelete = opts.cw ? `<button class="card-cw-delete show" data-cw-delete="${f.id}" aria-label="Hapus dari Continue Watching" onclick="event.stopPropagation();removeContinueWatching('${f.id}');">×</button>` : '';
+  const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
+  const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
   return `
-    <div class="${cls}" data-film-id="${f.id}">
+    <div class="${cls}" data-film-id="${f.id}" tabindex="0">
       <div class="card-poster">
-        ${rating}${tier}
+        ${rating}${tier}${cwDelete}
         <div class="type-badge">${type}</div>
-        ${posterHTML}
+        ${posterHTML}${placeholder}
+        <div class="card-play-overlay"><div class="play-circle"></div></div>
+        ${progress}
       </div>
       <div class="card-meta"><span>${type}</span><span>${year}</span></div>
       <div class="card-title">${escapeHtml(f.judul||'')}</div>
@@ -1585,7 +1741,8 @@ function toggleWatchlist(id){
 /* ════════════════════════════════════════════════════════════════════
    PLAYER
    ════════════════════════════════════════════════════════════════════ */
-async function openFilm(film){
+async function openFilm(film, opts){
+  opts = opts || {};
   // Tier check — show fancy locked modal instead of toast
   if(film.tier==='vip' && currentTier!=='vip'){
     showVipLocked(film);
@@ -1593,6 +1750,13 @@ async function openFilm(film){
   }
 
   currentFilm = film;
+  currentResumeFrom = opts.resumeFrom || 0;
+  // Kalau gak ada explicit resume, ambil dari Continue Watching kalau ada
+  if(!opts.resumeFrom){
+    const cw = getContinueWatching().find(x=>String(x.id)===String(film.id));
+    if(cw && cw.position) currentResumeFrom = cw.position;
+  }
+
   document.getElementById('playerModal').classList.add('open');
   document.body.style.overflow='hidden';
   document.getElementById('playerTitle').textContent = film.judul || '—';
@@ -1625,6 +1789,9 @@ async function openFilm(film){
 
   // Auto search subsource
   setTimeout(()=>subsourceSearch(), 300);
+
+  // Load TMDB extra (cast, trailer, recommended)
+  loadFilmExtras(film);
 }
 
 function renderEpisodeList(film){
@@ -1658,6 +1825,26 @@ async function loadVideo(film){
       fluid:true,
     });
     videoPlayer.on('loadedmetadata', renderAudioTracks);
+    // Resume jika ada saved position
+    videoPlayer.on('loadedmetadata', ()=>{
+      if(currentResumeFrom && currentResumeFrom > 5){
+        try{ videoPlayer.currentTime(currentResumeFrom); }catch{}
+      }
+    });
+    // Save Continue Watching tiap 10 detik
+    let lastSave = 0;
+    videoPlayer.on('timeupdate', ()=>{
+      const now = Date.now();
+      if(now - lastSave < 8000) return;
+      lastSave = now;
+      if(!currentFilm) return;
+      const t = videoPlayer.currentTime();
+      const d = videoPlayer.duration();
+      if(t && d) upsertContinueWatching(currentFilm.id, t, d);
+    });
+    videoPlayer.on('ended', ()=>{
+      if(currentFilm) removeContinueWatching(currentFilm.id);
+    });
   }
 
   // Reset audio panel
@@ -1733,6 +1920,131 @@ function closePlayer(){
     URL.revokeObjectURL(_currentSubBlobUrl);
     _currentSubBlobUrl=null;
   }
+  // Stop trailer iframe
+  const ifr = document.getElementById('trailerIframe');
+  if(ifr) ifr.src = '';
+  document.getElementById('trailerBox').style.display='none';
+  document.getElementById('castBox').style.display='none';
+  document.getElementById('recBox').style.display='none';
+  currentTmdbExtras = null;
+  currentTrailerKey = null;
+  // Refresh continue watching list
+  renderContinueWatching();
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TMDB EXTRAS — cast, trailer, recommendations
+   ════════════════════════════════════════════════════════════════════ */
+async function loadFilmExtras(film){
+  document.getElementById('trailerBox').style.display='none';
+  document.getElementById('castBox').style.display='none';
+  document.getElementById('recBox').style.display='none';
+  currentTmdbExtras = null;
+  currentTrailerKey = null;
+  if(!session) return; // butuh login (TMDB endpoint butuh auth)
+
+  let tmdbId = film.tmdb_id;
+  const mediaType = film.tipe==='series' ? 'tv' : 'movie';
+  // Kalau tidak ada tmdb_id → search by judul dulu
+  if(!tmdbId){
+    try{
+      const r = await fetch(`${apiBase()}/api/tmdb/search?type=${mediaType}&query=${encodeURIComponent(film.judul||'')}`, {
+        headers: { Authorization: 'Bearer '+session.access_token },
+      });
+      const d = await r.json();
+      if(d.ok && d.data && d.data.results && d.data.results.length){
+        tmdbId = d.data.results[0].id;
+      }
+    }catch{}
+  }
+  if(!tmdbId) return;
+
+  try{
+    const r = await fetch(`${apiBase()}/api/tmdb/${mediaType}/${tmdbId}`, {
+      headers: { Authorization: 'Bearer '+session.access_token },
+    });
+    const d = await r.json();
+    if(!d.ok) return;
+    currentTmdbExtras = d.data;
+
+    // Trailer
+    const videos = (d.data.videos && d.data.videos.results) || [];
+    const trailer = videos.find(v=>v.site==='YouTube' && v.type==='Trailer') || videos.find(v=>v.site==='YouTube');
+    if(trailer){
+      currentTrailerKey = trailer.key;
+      document.getElementById('trailerBox').style.display='block';
+      document.getElementById('trailerIframe').style.display='none';
+      document.getElementById('trailerPlayBtn').style.display='flex';
+    }
+
+    // Cast (top 8)
+    const cast = (d.data.credits && d.data.credits.cast) || [];
+    if(cast.length){
+      document.getElementById('castBox').style.display='block';
+      const IMG = (CONFIG && CONFIG.tmdb_image_base) || 'https://image.tmdb.org/t/p/w500';
+      const PROFILE = IMG.replace('w500','w185');
+      document.getElementById('castGrid').innerHTML = cast.slice(0,10).map(c=>`
+        <div style="flex:0 0 92px;text-align:center;">
+          <div style="width:92px;height:92px;border-radius:50%;overflow:hidden;background:var(--surface-2);margin:0 auto 6px;border:1px solid var(--border);">
+            ${c.profile_path ? `<img src="${PROFILE}${c.profile_path}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"/>` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--muted-2);font-size:24px;">👤</div>`}
+          </div>
+          <div style="font-size:.78rem;font-weight:600;line-height:1.2;">${escapeHtml(c.name||'')}</div>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:2px;">${escapeHtml(c.character||'')}</div>
+        </div>
+      `).join('');
+    }
+
+    // Recommendations
+    const recs = (d.data.recommendations && d.data.recommendations.results) || [];
+    if(recs.length){
+      document.getElementById('recBox').style.display='block';
+      const IMG = (CONFIG && CONFIG.tmdb_image_base) || 'https://image.tmdb.org/t/p/w500';
+      document.getElementById('recGrid').innerHTML = recs.slice(0,12).map(r=>{
+        // Cek apakah film ada di katalog kita
+        const localFilm = allFilms.find(f=>String(f.tmdb_id)===String(r.id));
+        const poster = r.poster_path ? `${IMG}${r.poster_path}` : '';
+        const title = r.title || r.name || '';
+        const year = (r.release_date||r.first_air_date||'').slice(0,4) || '';
+        const inLib = localFilm ? '<div style="position:absolute;top:6px;left:6px;background:var(--accent);color:#fff;font-size:.6rem;padding:2px 6px;border-radius:4px;font-weight:700;">DI KATALOG</div>' : '';
+        return `
+          <div class="rec-card" data-tmdb-id="${r.id}" data-local-id="${localFilm?localFilm.id:''}" style="cursor:pointer;">
+            <div style="position:relative;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:var(--surface-2);border:1px solid var(--border);">
+              ${inLib}
+              ${poster ? `<img src="${poster}" loading="lazy" style="width:100%;height:100%;object-fit:cover;"/>` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--muted-2);font-size:.7rem;text-align:center;padding:8px;">${escapeHtml(title)}</div>`}
+            </div>
+            <div style="font-size:.8rem;font-weight:600;margin-top:6px;line-height:1.2;">${escapeHtml(title)}</div>
+            <div style="font-size:.7rem;color:var(--muted);margin-top:2px;">${year}</div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('recGrid').querySelectorAll('.rec-card').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const localId = el.dataset.localId;
+          if(localId){
+            const f = allFilms.find(x=>String(x.id)===String(localId));
+            if(f) openFilm(f);
+          } else {
+            showToast('Film ini belum ada di katalog. Hubungi admin untuk request.', 'error');
+          }
+        });
+      });
+    }
+  }catch(e){
+    console.warn('TMDB extras failed:', e);
+  }
+}
+
+function playTrailerInPlayer(){
+  if(!currentTrailerKey) return;
+  const ifr = document.getElementById('trailerIframe');
+  ifr.src = `https://www.youtube.com/embed/${currentTrailerKey}?autoplay=1&rel=0`;
+  ifr.style.display='block';
+  document.getElementById('trailerPlayBtn').style.display='none';
+}
+
+function apiBase(){
+  // Worker melayani frontend dari domain yg sama, tapi kita pakai relative URL
+  return '';
 }
 
 function togglePanel(name){
