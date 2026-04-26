@@ -9,16 +9,20 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# === Secrets (jangan commit) ===
-# Set via: wrangler secret put SUBSOURCE_API_KEY
-# Set via: wrangler secret put SUPABASE_SERVICE_KEY
-# Set via: wrangler secret put TMDB_API_KEY (opsional, fallback ke key di frontend)
+# === Secrets (HARUS pakai tipe Secret, BUKAN Variable!) ===
+# Cara set:
+#   - Via dashboard: Settings → Variables and Secrets → + Add → Type: SECRET (encrypted)
+#   - Via CLI: wrangler secret put NAMA
+#
+# CATATAN PENTING: Cloudflare AKAN MENGHAPUS plaintext variable yang tidak ada
+# di [vars] section ini setiap kali deploy. Tapi SECRET (encrypted) PERSISTEN.
+# Selalu pakai tipe Secret untuk: SUBSOURCE_API_KEY, TMDB_API_KEY, SUPABASE_SERVICE_KEY.
 
 [vars]
 SUPABASE_URL = "https://gmjudsbreuyyznxtfjve.supabase.co"
 # Anon key Supabase memang dirancang untuk publik (RLS yang melindungi).
-# Tapi kalau mau lebih bersih, pindahkan ke `wrangler secret put SUPABASE_ANON_KEY`.
 SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
-GDI_WORKER_URL = "https://indexgoogle.zaeinstream.workers.dev"
-# Email admin (boleh banyak, dipisah koma)
+# URL gdi-worker yang aktif (deployment terbaru). Update kalau ganti subdomain.
+GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
+# Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
