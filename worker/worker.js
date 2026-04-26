@@ -462,9 +462,12 @@ async function adminDriveTest(request, env) {
     });
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch { data = null; }
+    // ok=true selalu (API call kita berhasil); gdi_ok untuk hasil resolve di GDI.
     return json({
-      ok: r.ok,
-      status: r.status,
+      ok: true,
+      gdi_ok: r.ok,
+      gdi_status: r.status,
+      drive_path: drivePath,
       data: data || text.slice(0, 500),
       stream_url: data && data.link ? gdiBase + data.link : null,
     });
