@@ -13,6 +13,9 @@
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 <script src="https://cdn.vidstack.io/player" type="module"></script>
+<!-- mp4box.js — client-side MP4 demuxer used by Player 2 to expose multi-audio tracks
+     embedded inside a single MP4 file (the file Apex multi-language scenario). -->
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
 <style>
 /* ════════════════════════════════════════════════════════════════════
    ZAEINSTREAM — Streamex-style theme
@@ -2399,6 +2402,11 @@ function teardownEngine2(){
     }
     if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
     if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+    if(p2State.mse){
+      p2State.mse.teardown = true;
+      try{ p2State.mse.ms.endOfStream(); }catch{}
+      try{ URL.revokeObjectURL(p2State.mse.blobUrl); }catch{}
+    }
   }
   p2State = null;
 }
@@ -2539,6 +2547,11 @@ async function loadVideoEngine2(film, sources){
     }
     if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
     if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+    if(p2State.mse){
+      p2State.mse.teardown = true;
+      try{ p2State.mse.ms.endOfStream(); }catch{}
+      try{ URL.revokeObjectURL(p2State.mse.blobUrl); }catch{}
+    }
   }
 
   wrap.classList.add('show');
@@ -2581,7 +2594,26 @@ async function loadVideoEngine2(film, sources){
   // Set Vidstack title + provider source. Pass an explicit type so URLs
   // without extensions (e.g. /download.aspx) resolve to the video provider.
   player.title = film.judul || film.title || '';
-  player.src = { src: videos[0].path, type: _p2GuessVideoType(videos[0].path) };
+
+  // Try mp4box.js client-side demux when:
+  //   - admin uploaded only ONE video file
+  //   - admin did NOT upload separate audio_tracks
+  // If the file turns out to be a multi-audio MP4, _p2TryMseMode wires
+  // MediaSource Extensions and exposes the embedded audio tracks. If it
+  // fails or returns false, fall back to the normal Vidstack <video> src.
+  const canProbe = videos.length === 1 && audios.length <= 1 && typeof MP4Box !== 'undefined';
+  let mseHandled = false;
+  if(canProbe){
+    try{
+      mseHandled = await _p2TryMseMode(player, videos[0].path);
+    }catch(e){
+      console.warn('[p2] mp4box probe failed:', e);
+      mseHandled = false;
+    }
+  }
+  if(!mseHandled){
+    player.src = { src: videos[0].path, type: _p2GuessVideoType(videos[0].path) };
+  }
 
   // Build subtitle <track> children inside <media-provider>
   const provider = player.querySelector('media-provider');
@@ -2759,6 +2791,267 @@ function _p2BuildChip(label, items){
     if(!chip.contains(e.target)) chip.classList.remove('open');
   });
   return chip;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   mp4box.js + MediaSource Extensions client-side demuxer.
+   When a film is uploaded as one MP4 with multiple audio tracks
+   embedded (e.g. ENG + IND in a single file), Chrome's HTMLMediaElement
+   will only expose track 0. This routine bypasses that limitation by:
+     1. Streaming the MP4 in 4 MB chunks via HTTP Range requests.
+     2. Feeding chunks to mp4box.js so it can parse the moov atom.
+     3. On 'ready', enumerating the file's audio tracks.
+     4. If 2+ audio tracks: setting up a MediaSource with one video
+        SourceBuffer + one audio SourceBuffer (the user-selected track).
+     5. Audio chip menu ("Audio: ENG ▾") swaps the active audio track —
+        we detach the audio SourceBuffer, recreate it for the new track,
+        and replay buffered samples from current time.
+   Returns true if MSE mode was activated (caller skips the normal
+   Vidstack src assignment), false otherwise.
+   ───────────────────────────────────────────────────────────────── */
+
+const _P2_CHUNK = 4 * 1024 * 1024;     // 4 MB per Range request
+
+async function _p2TryMseMode(player, url){
+  // 1. Quick guard: only attempt if browser supports MediaSource + MP4
+  if(typeof MediaSource === 'undefined') return false;
+  const mp4MimeProbe = 'video/mp4; codecs="avc1.640028, mp4a.40.2"';
+  if(!MediaSource.isTypeSupported(mp4MimeProbe)) return false;
+
+  // 2. Probe the file: feed Range chunks to mp4box.js until onReady fires.
+  //    Most fast-start MP4s yield moov within the first few MB.
+  const mp4 = MP4Box.createFile();
+  let info = null;
+  let probeAborted = false;
+  const onReadyP = new Promise((resolve, reject)=>{
+    mp4.onError = (e)=>{ if(!info) reject(new Error('mp4box: '+e)); };
+    mp4.onReady = (i)=>{ info = i; resolve(i); };
+  });
+
+  let nextStart = 0;
+  let totalSize = -1;
+  let probedBytes = 0;
+  const PROBE_BUDGET = 30 * 1024 * 1024;   // give up if no moov in first 30 MB
+
+  async function fetchRange(start, end){
+    const r = await fetch(url, { headers: { 'Range': 'bytes='+start+'-'+end } });
+    if(!r.ok && r.status !== 206) throw new Error('Range fetch failed: '+r.status);
+    if(totalSize < 0){
+      const cr = r.headers.get('Content-Range');
+      if(cr){ const m = cr.match(/\/(\d+)\s*$/); if(m) totalSize = parseInt(m[1], 10); }
+    }
+    return r.arrayBuffer();
+  }
+
+  // Probe loop — run until onReady or budget exhausted.
+  while(!info && probedBytes < PROBE_BUDGET && !probeAborted){
+    const buf = await fetchRange(nextStart, nextStart + _P2_CHUNK - 1);
+    if(buf.byteLength === 0) break;
+    buf.fileStart = nextStart;
+    mp4.appendBuffer(buf);
+    nextStart += buf.byteLength;
+    probedBytes += buf.byteLength;
+    // Yield to the microtask queue so onReady can fire if moov landed
+    await new Promise(r => setTimeout(r, 0));
+  }
+  // moov could be at the end of the file (non-faststart). Try the tail too.
+  if(!info && totalSize > 0){
+    const tailStart = Math.max(0, totalSize - 8 * 1024 * 1024);
+    if(tailStart > nextStart){
+      const tailBuf = await fetchRange(tailStart, totalSize - 1);
+      tailBuf.fileStart = tailStart;
+      mp4.appendBuffer(tailBuf);
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  if(!info){ try{ mp4.flush(); }catch{} }
+  if(!info){ console.info('[p2] mp4box: no moov detected, falling back'); return false; }
+
+  // 3. Inspect audio track count
+  const audioTracks = info.tracks.filter(t => t.type === 'audio' || (t.codec && /^mp4a|^opus|^vorbis|^ec-3|^ac-3/.test(t.codec)));
+  const videoTracks = info.tracks.filter(t => t.type === 'video' || (t.codec && /^avc|^hev|^hvc|^vp0?9|^av01/.test(t.codec)));
+  if(audioTracks.length < 2 || videoTracks.length === 0){
+    console.info('[p2] mp4box: not multi-audio (audios='+audioTracks.length+'); falling back');
+    return false;
+  }
+  console.info('[p2] mp4box: multi-audio MP4 detected:', audioTracks.length, 'audio tracks');
+
+  // 4. Set up MediaSource pipeline
+  const ms = new MediaSource();
+  const blobUrl = URL.createObjectURL(ms);
+  player.src = { src: blobUrl, type: 'video/mp4' };
+
+  // Honour an explicit pre-selected audio track (used during track switch)
+  const overrideId = p2State && p2State._mseOverrideAudioId;
+  const initialAudioTrack = (overrideId && audioTracks.find(t => t.id === overrideId)) || audioTracks[0];
+
+  const mseState = {
+    url, totalSize, info, mp4,
+    ms, blobUrl,
+    videoTrack: videoTracks[0],
+    audioTracks,
+    activeAudioId: initialAudioTrack.id,
+    videoSb: null,
+    audioSb: null,
+    nextDownloadStart: nextStart,
+    downloading: false,
+    teardown: false,
+    queueV: [], queueA: [],
+  };
+  p2State.mse = mseState;
+
+  // Override the audio chip with track names from the demuxed MP4
+  if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} p2State.audioChip = null; }
+  const bar = document.getElementById('playerEngineBar');
+  if(bar){
+    const items = audioTracks.map((t, i)=>{
+      const lang = (t.language || '').replace(/und/i,'').trim();
+      const label = (t.name || lang || ('Audio '+(i+1))).toUpperCase();
+      return {
+        label,
+        active: t.id === mseState.activeAudioId,
+        onSelect: ()=>{ _p2MseSwitchAudio(t.id).catch(e=>console.error(e)); },
+      };
+    });
+    const chip = _p2BuildChip('Audio', items);
+    bar.appendChild(chip);
+    p2State.audioChip = chip;
+  }
+
+  await new Promise((resolve)=>{
+    ms.addEventListener('sourceopen', ()=>{
+      try{
+        const vMime = 'video/mp4; codecs="' + mseState.videoTrack.codec + '"';
+        const aMime = 'audio/mp4; codecs="' + audioTracks.find(t=>t.id===mseState.activeAudioId).codec + '"';
+        if(!MediaSource.isTypeSupported(vMime) || !MediaSource.isTypeSupported(aMime)){
+          throw new Error('codec not supported by browser: '+vMime+' / '+aMime);
+        }
+        mseState.videoSb = ms.addSourceBuffer(vMime);
+        mseState.audioSb = ms.addSourceBuffer(aMime);
+        mseState.videoSb.addEventListener('updateend', ()=> _p2MseDrain(mseState, 'v'));
+        mseState.audioSb.addEventListener('updateend', ()=> _p2MseDrain(mseState, 'a'));
+        // Tell mp4box which tracks to extract and how many samples per segment
+        mp4.setSegmentOptions(mseState.videoTrack.id, mseState.videoSb, { nbSamples: 100 });
+        mp4.setSegmentOptions(mseState.activeAudioId,  mseState.audioSb, { nbSamples: 100 });
+        // Handle init segments
+        const initSegs = mp4.initializeSegmentation();
+        for(const seg of initSegs){
+          if(seg.user === mseState.videoSb)      mseState.queueV.push(seg.buffer);
+          else if(seg.user === mseState.audioSb) mseState.queueA.push(seg.buffer);
+        }
+        // mp4box extraction callback for media segments
+        mp4.onSegment = (id, user, buffer, sampleNum, isLast)=>{
+          if(mseState.teardown) return;
+          if(user === mseState.videoSb)      mseState.queueV.push(buffer);
+          else if(user === mseState.audioSb) mseState.queueA.push(buffer);
+          _p2MseDrain(mseState, 'v');
+          _p2MseDrain(mseState, 'a');
+        };
+        mp4.start();
+        _p2MseDrain(mseState, 'v');
+        _p2MseDrain(mseState, 'a');
+        // Continue downloading the rest of the file in the background
+        _p2MseDownloadLoop(mseState);
+        resolve();
+      }catch(e){
+        console.error('[p2] sourceopen wiring failed:', e);
+        // Best-effort fallback: nuke MSE, let caller retry with native src
+        try{ URL.revokeObjectURL(blobUrl); }catch{}
+        p2State.mse = null;
+        resolve();
+      }
+    }, { once: true });
+  });
+
+  // If sourceopen failed and cleared mse, signal caller to fall back
+  return !!p2State.mse;
+}
+
+function _p2MseDrain(state, which){
+  if(state.teardown) return;
+  const sb = which === 'v' ? state.videoSb : state.audioSb;
+  const q  = which === 'v' ? state.queueV  : state.queueA;
+  if(!sb || sb.updating || q.length === 0) return;
+  try{ sb.appendBuffer(q.shift()); }
+  catch(e){ console.warn('[p2] sb.appendBuffer error', e); }
+}
+
+async function _p2MseDownloadLoop(state){
+  if(state.downloading) return;
+  state.downloading = true;
+  try{
+    while(!state.teardown && (state.totalSize < 0 || state.nextDownloadStart < state.totalSize)){
+      const start = state.nextDownloadStart;
+      const end = state.totalSize > 0 ? Math.min(start + _P2_CHUNK - 1, state.totalSize - 1) : (start + _P2_CHUNK - 1);
+      const r = await fetch(state.url, { headers: { 'Range': 'bytes='+start+'-'+end } });
+      if(!r.ok && r.status !== 206) throw new Error('range fetch failed: '+r.status);
+      if(state.totalSize < 0){
+        const cr = r.headers.get('Content-Range');
+        if(cr){ const m = cr.match(/\/(\d+)\s*$/); if(m) state.totalSize = parseInt(m[1], 10); }
+      }
+      const buf = await r.arrayBuffer();
+      if(buf.byteLength === 0) break;
+      buf.fileStart = start;
+      state.mp4.appendBuffer(buf);
+      state.nextDownloadStart += buf.byteLength;
+      // small tick so we don't peg the main thread
+      await new Promise(r => setTimeout(r, 0));
+    }
+    if(!state.teardown){
+      state.mp4.flush();
+      try{ state.ms.endOfStream(); }catch{}
+    }
+  }catch(e){
+    console.error('[p2] mse download loop failed:', e);
+  }finally{
+    state.downloading = false;
+  }
+}
+
+async function _p2MseSwitchAudio(newAudioId){
+  if(!p2State || !p2State.mse) return;
+  const state = p2State.mse;
+  if(state.activeAudioId === newAudioId) return;
+  const newTrack = state.audioTracks.find(t=>t.id===newAudioId);
+  if(!newTrack){ return; }
+  const aMime = 'audio/mp4; codecs="' + newTrack.codec + '"';
+  if(!MediaSource.isTypeSupported(aMime)){
+    showToast('Codec audio tidak didukung browser: '+newTrack.codec, 'error');
+    return;
+  }
+  const player = document.getElementById('p2VsPlayer');
+  const t = player.currentTime || 0;
+  const wasPlaying = !player.paused;
+  // mp4box does not support live re-segmenting of an additional track on
+  // an already-running file. Simplest reliable path: tear down the MSE,
+  // re-probe & re-init with the new selected track. This re-downloads
+  // the moov + initial chunks but re-uses HTTP cache for everything else.
+  state.teardown = true;
+  try{ state.ms.endOfStream(); }catch{}
+  try{ URL.revokeObjectURL(state.blobUrl); }catch{}
+  p2State.mse = null;
+
+  // Spin up a fresh MSE pipeline preferring the requested audio track
+  await _p2TryMseModeWithAudio(player, state.url, newAudioId, t, wasPlaying);
+}
+
+async function _p2TryMseModeWithAudio(player, url, preferredAudioId, resumeTime, wasPlaying){
+  // Wrapper that calls _p2TryMseMode but seeds the active audio choice.
+  // Implemented by setting a one-shot override on p2State so the next
+  // probe picks `preferredAudioId` as the default audio.
+  p2State._mseOverrideAudioId = preferredAudioId;
+  p2State._mseResumeTime = resumeTime;
+  p2State._mseResumeWasPlaying = !!wasPlaying;
+  const ok = await _p2TryMseMode(player, url);
+  if(ok){
+    const seek = ()=>{
+      try{ player.currentTime = resumeTime; }catch{}
+      if(wasPlaying){ try{ player.play(); }catch{} }
+    };
+    player.addEventListener('loaded-metadata', seek, { once: true });
+    setTimeout(seek, 800);  // safety net if event already fired
+  }
+  delete p2State._mseOverrideAudioId;
 }
 
 function _p2GuessVideoType(url){
