@@ -9,6 +9,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <!-- Multitrack.JS player (CSS injected by JS bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Vidstack player (Player 2 — same library used by player4me). Default theme. -->
+<link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+<link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
+<script src="https://cdn.vidstack.io/player" type="module"></script>
 <style>
 /* ════════════════════════════════════════════════════════════════════
    ZAEINSTREAM — Streamex-style theme
@@ -542,128 +546,45 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .player-engine-btn:hover{ color:var(--text); }
 .player-engine-btn.active{ background:var(--brand,#3461ff); color:#fff; }
 
-/* ── Player 2 (Vidstack-style minimal UI) ── */
-#player2Wrap{
-  position:absolute; inset:0; display:none;
-  background:#000; user-select:none;
+/* Quality / Audio chip dropdowns next to engine toggle (Player 2 only) */
+.player-engine-chip{ position:relative; }
+.player-engine-chip-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  background:transparent; color:var(--text); border:1px solid var(--border);
+  padding:5px 10px; border-radius:6px; font-size:.78rem; font-weight:600;
+  cursor:pointer; font-family:inherit;
 }
-#player2Wrap.show{ display:block; }
-#player2Wrap video{ position:absolute; inset:0; width:100%; height:100%; background:#000; }
-#player2Wrap audio{ display:none; }
-
-#player2Wrap .p2-loading{
-  position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-  pointer-events:none;
+.player-engine-chip-btn:hover{ background:rgba(255,255,255,.05); }
+.player-engine-chip-label{ color:var(--muted); font-weight:500; }
+.player-engine-chip-val{ color:var(--text); }
+.player-engine-chip-menu{
+  position:absolute; top:calc(100% + 4px); left:0;
+  background:var(--surface-2,#1a1a26); border:1px solid var(--border);
+  border-radius:8px; min-width:160px; padding:4px 0;
+  box-shadow:0 6px 20px rgba(0,0,0,.4);
+  display:none; z-index:5;
 }
-#player2Wrap.loading .p2-loading{ display:flex; }
-#player2Wrap .p2-spinner{
-  width:46px; height:46px; border-radius:50%;
-  border:3px solid rgba(255,255,255,.18); border-top-color:#fff;
-  animation:p2spin 1s linear infinite;
-}
-@keyframes p2spin{ to{ transform:rotate(360deg); } }
-
-#player2Wrap .p2-controls{
-  position:absolute; left:0; right:0; bottom:0;
-  padding:8px 14px 10px;
-  background:linear-gradient(0deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.55) 60%, rgba(0,0,0,0) 100%);
-  opacity:0; transition:opacity .25s;
-  z-index:3;
-}
-#player2Wrap.show-controls .p2-controls,
-#player2Wrap:hover .p2-controls,
-#player2Wrap.paused .p2-controls{ opacity:1; }
-
-#player2Wrap .p2-progress{
-  position:relative; height:5px; border-radius:3px;
-  background:rgba(255,255,255,.18); cursor:pointer;
-  margin:0 4px 6px;
-  transition:height .15s;
-}
-#player2Wrap .p2-progress:hover{ height:7px; }
-#player2Wrap .p2-progress-fill{
-  position:absolute; left:0; top:0; bottom:0;
-  background:#fff; border-radius:3px; width:0%;
-}
-#player2Wrap .p2-progress-buffer{
-  position:absolute; left:0; top:0; bottom:0;
-  background:rgba(255,255,255,.32); border-radius:3px; width:0%;
-}
-
-#player2Wrap .p2-bar{
-  display:flex; align-items:center; gap:6px;
-  color:#fff; font-size:.82rem;
-}
-#player2Wrap .p2-bar button{
-  background:transparent; color:#fff; border:0;
-  padding:6px; border-radius:4px; cursor:pointer;
-  display:inline-flex; align-items:center; justify-content:center;
-  transition:background .15s;
-}
-#player2Wrap .p2-bar button:hover{ background:rgba(255,255,255,.12); }
-#player2Wrap .p2-bar button svg{ width:20px; height:20px; }
-#player2Wrap .p2-time{ font-variant-numeric:tabular-nums; padding:0 4px; }
-#player2Wrap .p2-spacer{ flex:1; }
-#player2Wrap .p2-quality-label{
-  font-size:.72rem; font-weight:700; padding:4px 8px;
-  letter-spacing:.04em;
-}
-
-#player2Wrap .p2-vol-wrap{
-  display:inline-flex; align-items:center; gap:4px;
-  position:relative;
-}
-#player2Wrap .p2-vol-slider{
-  width:0; height:4px; border-radius:2px; background:rgba(255,255,255,.25);
-  position:relative; cursor:pointer; overflow:hidden;
-  transition:width .2s;
-}
-#player2Wrap .p2-vol-wrap:hover .p2-vol-slider{ width:80px; margin:0 6px; }
-#player2Wrap .p2-vol-fill{
-  height:100%; background:#fff; width:100%;
-}
-
-#player2Wrap .p2-menu{
-  position:absolute; right:14px; bottom:60px;
-  background:rgba(20,20,20,.95); border-radius:8px;
-  min-width:240px; max-width:300px; padding:6px 0;
-  display:none; z-index:4;
-  box-shadow:0 8px 24px rgba(0,0,0,.4);
-}
-#player2Wrap .p2-menu.show{ display:block; }
-#player2Wrap .p2-menu-item{
-  display:flex; align-items:center; gap:10px; justify-content:space-between;
-  padding:9px 14px; color:#fff; font-size:.85rem;
+.player-engine-chip.open .player-engine-chip-menu{ display:block; }
+.player-engine-chip-item{
+  padding:7px 12px; font-size:.82rem; color:var(--text);
   cursor:pointer; transition:background .12s;
 }
-#player2Wrap .p2-menu-item:hover{ background:rgba(255,255,255,.08); }
-#player2Wrap .p2-menu-item .p2-menu-val{ color:rgba(255,255,255,.55); font-size:.78rem; }
-#player2Wrap .p2-menu-back{
-  display:flex; align-items:center; gap:8px;
-  padding:9px 14px; color:rgba(255,255,255,.55); font-size:.78rem;
-  cursor:pointer; border-bottom:1px solid rgba(255,255,255,.08);
-}
-#player2Wrap .p2-menu-back:hover{ color:#fff; }
-#player2Wrap .p2-menu-back svg{ width:14px; height:14px; }
-#player2Wrap .p2-menu-check{
-  width:14px; display:inline-flex; opacity:0;
-}
-#player2Wrap .p2-menu-item.active .p2-menu-check{ opacity:1; }
-#player2Wrap .p2-menu-item .p2-menu-name{ flex:1; }
+.player-engine-chip-item:hover{ background:rgba(255,255,255,.08); }
+.player-engine-chip-item.active{ color:var(--brand,#3461ff); font-weight:600; }
 
-#player2Wrap .p2-subs-overlay{
-  position:absolute; left:0; right:0; bottom:80px;
-  text-align:center; pointer-events:none;
-  z-index:2;
+/* ── Player 2 (Vidstack web components — same library player4me uses) ── */
+#player2Wrap{
+  position:absolute; inset:0; display:none;
+  background:#000;
 }
-#player2Wrap .p2-subs-overlay .p2-subs-line{
-  display:inline-block; max-width:88%;
-  padding:4px 12px; margin:2px;
-  background:rgba(0,0,0,.55);
-  color:#fff; font-size:1.1rem; line-height:1.4;
-  border-radius:4px;
-  text-shadow:0 1px 2px rgba(0,0,0,.8);
+#player2Wrap.show{ display:block; }
+#player2Wrap media-player{
+  width:100%; height:100%; aspect-ratio:auto;
+  --media-brand:#3461ff;
+  --media-focus-ring:0 0 0 3px rgba(52,97,255,.5);
 }
+/* Hidden audio element for synced multi-dub track playback */
+#player2Wrap > audio.p2-aux-audio{ display:none; }
 
 .player-info{margin-top:18px;}
 .player-info h2{font-size:1.5rem;font-weight:700;margin-bottom:6px;}
@@ -1385,48 +1306,22 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
         <!-- Multitrack.JS player container (Quality / Audio / Subtitle / Speed all in built-in Settings menu) -->
         <div id="multitrackPlayer" style="width:100%;height:100%;"></div>
 
-        <!-- Player 2 ─ minimal Vidstack-style UI with our own multi-track sync -->
+        <!-- Player 2 ─ Vidstack web component (same library player4me uses) -->
         <div id="player2Wrap">
-          <video id="p2Video" muted playsinline preload="metadata"></video>
-          <audio id="p2Audio" preload="metadata"></audio>
-          <div class="p2-subs-overlay" id="p2SubsOverlay"></div>
-          <div class="p2-loading"><div class="p2-spinner"></div></div>
-          <div class="p2-controls" id="p2Controls">
-            <div class="p2-progress" id="p2Progress">
-              <div class="p2-progress-buffer" id="p2ProgressBuffer"></div>
-              <div class="p2-progress-fill" id="p2ProgressFill"></div>
-            </div>
-            <div class="p2-bar">
-              <button id="p2PlayBtn" type="button" title="Play / Pause">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path id="p2PlayIcon" d="M8 5v14l11-7z"/></svg>
-              </button>
-              <div class="p2-vol-wrap">
-                <button id="p2MuteBtn" type="button" title="Mute">
-                  <svg id="p2VolIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-                </button>
-                <div class="p2-vol-slider" id="p2VolSlider"><div class="p2-vol-fill" id="p2VolFill"></div></div>
-              </div>
-              <span class="p2-time"><span id="p2TimeCur">0:00</span> / <span id="p2TimeDur">0:00</span></span>
-              <div class="p2-spacer"></div>
-              <button id="p2CCBtn" type="button" title="Captions">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></svg>
-              </button>
-              <button id="p2SettingsBtn" type="button" title="Settings">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94 0 .31.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-              </button>
-              <button id="p2QualityBtn" class="p2-quality-label" type="button" title="Quality">1080P</button>
-              <button id="p2PipBtn" type="button" title="Picture in Picture">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
-              </button>
-              <button id="p2DlBtn" type="button" title="Download">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </button>
-              <button id="p2FullBtn" type="button" title="Fullscreen">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-              </button>
-            </div>
-          </div>
-          <div class="p2-menu" id="p2Menu"></div>
+          <media-player
+            id="p2VsPlayer"
+            title=""
+            playsinline
+            crossorigin
+            keep-alive
+            load="visible"
+            posterload="visible"
+          >
+            <media-provider></media-provider>
+            <media-video-layout></media-video-layout>
+          </media-player>
+          <!-- Hidden auxiliary audio element for synced multi-dub track playback -->
+          <audio id="p2AuxAudio" class="p2-aux-audio" preload="metadata"></audio>
         </div>
         <!-- Hidden legacy elements (kept so old JS refs don't crash; toolbar replaced by Multitrack.JS Settings menu) -->
         <div id="audioPanel" style="display:none;"></div>
@@ -2482,16 +2377,29 @@ function teardownEngine1(){
 function teardownEngine2(){
   const wrap = document.getElementById('player2Wrap');
   if(!wrap) return;
-  wrap.classList.remove('show','paused','loading','show-controls');
-  const v = document.getElementById('p2Video');
-  const a = document.getElementById('p2Audio');
-  try{ if(v){ v.pause(); v.removeAttribute('src'); v.load(); } }catch{}
-  try{ if(a){ a.pause(); a.removeAttribute('src'); a.load(); } }catch{}
-  const m = document.getElementById('p2Menu');
-  if(m){ m.classList.remove('show'); m.innerHTML=''; }
-  const so = document.getElementById('p2SubsOverlay');
-  if(so) so.innerHTML='';
-  if(p2State && p2State.subBlobUrl){ try{ URL.revokeObjectURL(p2State.subBlobUrl); }catch{} }
+  wrap.classList.remove('show');
+  const vsPlayer = document.getElementById('p2VsPlayer');
+  const aux = document.getElementById('p2AuxAudio');
+  try{
+    if(vsPlayer){
+      vsPlayer.pause && vsPlayer.pause();
+      // Clear sources / tracks
+      vsPlayer.src = [];
+      // Remove dynamically added <track> children (they live on <media-provider>)
+      const provider = vsPlayer.querySelector('media-provider');
+      if(provider){
+        provider.querySelectorAll('track').forEach(t=>t.remove());
+      }
+    }
+  }catch{}
+  try{ if(aux){ aux.pause(); aux.removeAttribute('src'); aux.load(); } }catch{}
+  if(p2State){
+    if(p2State.subBlobUrls){
+      for(const u of p2State.subBlobUrls){ try{ URL.revokeObjectURL(u); }catch{} }
+    }
+    if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
+    if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+  }
   p2State = null;
 }
 
@@ -2609,34 +2517,52 @@ document.addEventListener('click', function(e){
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   PLAYER 2 — minimal player4me-style UI.
-   Reuses the same data model as Player 1 (videos / audios / subtitles)
-   and keeps a separate <video> + <audio> in sync (video is muted).
+   PLAYER 2 — Vidstack web components (same library as player4me).
+   Default-theme video layout provides the entire player UI:
+     play/pause/seek/volume/captions/PiP/fullscreen/keyboard/gestures.
+   Multi-quality + multi-audio dropdowns are added next to the engine
+   toggle (since native MP4 sources don't expose those to Vidstack).
    ═══════════════════════════════════════════════════════════════════ */
-
-function _p2El(id){ return document.getElementById(id); }
-function _p2Fmt(t){
-  if(!isFinite(t) || t < 0) t = 0;
-  const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), s = Math.floor(t%60);
-  const mm = (h ? String(m).padStart(2,'0') : String(m));
-  const ss = String(s).padStart(2,'0');
-  return h ? (h+':'+mm+':'+ss) : (mm+':'+ss);
-}
 
 async function loadVideoEngine2(film, sources){
   const { videos, audios, subtitles } = sources;
-  const wrap = _p2El('player2Wrap');
-  const v = _p2El('p2Video');
-  const a = _p2El('p2Audio');
-  if(!wrap || !v || !a){ console.error('Player 2 DOM missing'); return; }
+  const wrap = document.getElementById('player2Wrap');
+  const player = document.getElementById('p2VsPlayer');
+  const aux = document.getElementById('p2AuxAudio');
+  if(!wrap || !player || !aux){ console.error('Player 2 DOM missing'); return; }
 
-  // Reset UI state
-  wrap.classList.add('show','loading','paused');
-  _p2El('p2SubsOverlay').innerHTML = '';
-  _p2El('p2Menu').classList.remove('show');
-  _p2El('p2Menu').innerHTML = '';
+  // Ensure no stale chips / blob URLs from a previous film when reloading on
+  // the same engine (loadVideo path doesn't auto-teardown engine 2).
+  if(p2State){
+    if(p2State.subBlobUrls){
+      for(const u of p2State.subBlobUrls){ try{ URL.revokeObjectURL(u); }catch{} }
+    }
+    if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
+    if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+  }
 
-  // Initialise runtime state
+  wrap.classList.add('show');
+
+  // Convert any subtitle (SRT/VTT/ASS) to a VTT blob URL so Vidstack
+  // can render it via the standard <track> element + native cues UI.
+  const subBlobUrls = [];
+  const trackEntries = [];
+  for(let i = 0; i < subtitles.length; i++){
+    const s = subtitles[i];
+    try{
+      const r = await fetch(s.path);
+      const raw = await r.text();
+      const vtt = _p2ToVtt(raw, s.path);
+      const blob = new Blob([vtt], { type: 'text/vtt' });
+      const url = URL.createObjectURL(blob);
+      subBlobUrls.push(url);
+      trackEntries.push({ src: url, label: s.name || ('Subtitle ' + (i+1)), language: s.language || '' });
+    }catch(e){
+      console.warn('subtitle load failed', s.path, e);
+    }
+  }
+
+  // Initialise runtime state (used by chip menus)
   p2State = {
     film,
     videos,
@@ -2644,441 +2570,299 @@ async function loadVideoEngine2(film, sources){
     subtitles,
     qualityIdx: 0,
     audioIdx: 0,
-    subIdx: -1,
-    speed: 1,
-    cues: [],         // parsed VTT/SRT cues for currently active subtitle
-    subBlobUrl: null,
-    syncTimer: null,
+    subBlobUrls,
+    qualityChip: null,
+    audioChip: null,
     lastSavedAt: 0,
+    _hookedTime: false,
+    _useAux: audios.length > 1,   // only sync aux audio when there are multiple dub tracks
   };
 
-  // Set first quality on video
-  const firstVideo = videos[0];
-  v.src = firstVideo.path;
-  v.muted = true;        // video element is always muted; audio element drives sound
-  v.playbackRate = 1;
-  v.load();
+  // Set Vidstack title + provider source. Pass an explicit type so URLs
+  // without extensions (e.g. /download.aspx) resolve to the video provider.
+  player.title = film.judul || film.title || '';
+  player.src = { src: videos[0].path, type: _p2GuessVideoType(videos[0].path) };
 
-  // Set first audio on audio element
-  a.src = audios[0].path;
-  a.volume = 1;
-  a.playbackRate = 1;
-  a.load();
-
-  // Update Quality button label
-  _p2El('p2QualityBtn').textContent = (firstVideo.name || 'Default').toUpperCase();
-
-  // Wire events (idempotent — clear previous listeners by replacing nodes? simpler: track init flag)
-  if(!wrap._p2Inited){
-    _p2WireEvents();
-    wrap._p2Inited = true;
+  // Build subtitle <track> children inside <media-provider>
+  const provider = player.querySelector('media-provider');
+  if(provider){
+    provider.querySelectorAll('track').forEach(t=>t.remove());
+    for(const t of trackEntries){
+      const tr = document.createElement('track');
+      tr.kind = 'subtitles';
+      tr.src = t.src;
+      tr.label = t.label;
+      if(t.language) tr.srclang = t.language;
+      provider.appendChild(tr);
+    }
   }
 
-  // Update legacy compat shim
+  // Multi-dub auxiliary audio
+  if(p2State._useAux){
+    aux.src = audios[0].path;
+    aux.muted = false;
+    aux.volume = 1;
+    aux.load();
+  }else{
+    aux.removeAttribute('src');
+    aux.load();
+  }
+
+  // Wire Vidstack <-> aux audio sync, and build quality/audio chips next to engine toggle
+  _p2WireVidstack(player, aux, film);
+
+  // Compat shim so legacy code referring to videoPlayer keeps working
   videoPlayer = {
-    pause: ()=>{ try{ v.pause(); a.pause(); }catch{} },
-    play:  ()=>{ try{ v.play();  a.play();  }catch{} },
-    paused: ()=> v.paused,
+    pause: ()=>{ try{ player.pause(); }catch{} },
+    play:  ()=>{ try{ player.play();  }catch{} },
+    paused: ()=> player.paused,
     currentTime: function(t){
-      if(t === undefined) return v.currentTime;
-      v.currentTime = t; a.currentTime = t;
+      if(t === undefined) return player.currentTime || 0;
+      try{ player.currentTime = t; }catch{}
     },
-    duration: function(){ return v.duration || 0; },
+    duration: function(){ return player.duration || 0; },
     playbackRate: function(r){
-      if(r === undefined) return v.playbackRate;
-      v.playbackRate = r; a.playbackRate = r;
+      if(r === undefined) return player.playbackRate || 1;
+      try{ player.playbackRate = r; }catch{}
     },
-    muted: function(m){ if(m === undefined) return a.muted; a.muted = m; },
-    volume: function(vol){ if(vol === undefined) return a.volume; a.volume = vol; },
+    muted: function(m){ if(m === undefined) return player.muted; try{ player.muted = m; }catch{} },
+    volume: function(vol){ if(vol === undefined) return player.volume; try{ player.volume = vol; }catch{} },
     src: ()=>{}, load: ()=>{}, on: ()=>{},
     audioTracks: ()=>null,
     addRemoteTextTrack: ()=>{}, remoteTextTracks: ()=>[], removeRemoteTextTrack: ()=>{},
   };
 
-  // Resume position
+  // Resume position once metadata is loaded
   if(currentResumeFrom && currentResumeFrom > 5){
-    const seek = ()=>{ try{ v.currentTime = currentResumeFrom; a.currentTime = currentResumeFrom; }catch{} };
-    if(v.readyState >= 1) seek();
-    else v.addEventListener('loadedmetadata', seek, { once: true });
+    const seek = ()=>{ try{ player.currentTime = currentResumeFrom; }catch{} };
+    player.addEventListener('loaded-metadata', seek, { once: true });
   }
 
-  // Stream actions (uses first quality URL)
-  setStreamActions(firstVideo.path, film.judul || film.title || '');
+  setStreamActions(videos[0].path, film.judul || film.title || '');
 }
 
-function _p2WireEvents(){
-  const wrap = _p2El('player2Wrap');
-  const v = _p2El('p2Video');
-  const a = _p2El('p2Audio');
+function _p2WireVidstack(player, aux, film){
+  // Build extra chips (Quality + Audio) inside the engine toolbar so users
+  // can switch even though Vidstack's built-in menu can't auto-detect them
+  // for native MP4 sources.
+  const bar = document.getElementById('playerEngineBar');
+  if(bar && p2State){
+    if(p2State.videos.length > 1){
+      const chip = _p2BuildChip('Kualitas', p2State.videos.map((q, i)=>({
+        label: q.name || ('Quality ' + (i+1)),
+        active: i === p2State.qualityIdx,
+        onSelect: ()=>{ _p2SwitchQuality(i); },
+      })));
+      bar.appendChild(chip);
+      p2State.qualityChip = chip;
+    }
+    if(p2State.audios.length > 1){
+      const chip = _p2BuildChip('Audio', p2State.audios.map((a, i)=>({
+        label: a.name || ('Audio ' + (i+1)),
+        active: i === p2State.audioIdx,
+        onSelect: ()=>{ _p2SwitchAudio(i); },
+      })));
+      bar.appendChild(chip);
+      p2State.audioChip = chip;
+    }
+  }
 
-  // Sync: keep audio time-locked to video. Tolerance 0.05s.
-  v.addEventListener('timeupdate', ()=>{
-    if(!p2State) return;
-    const dt = a.currentTime - v.currentTime;
-    if(Math.abs(dt) > 0.25){ a.currentTime = v.currentTime; }
-    else if(Math.abs(dt) > 0.05){ a.playbackRate = v.playbackRate * (dt > 0 ? 0.97 : 1.03); }
-    else { a.playbackRate = v.playbackRate; }
-    // Time UI
-    _p2El('p2TimeCur').textContent = _p2Fmt(v.currentTime);
-    _p2RenderSubs(v.currentTime);
-    // Save Continue Watching every ~8s
-    const now = Date.now();
-    if(now - p2State.lastSavedAt > 8000){
-      p2State.lastSavedAt = now;
-      const t = v.currentTime, d = v.duration;
-      if(currentFilm && t && d) upsertContinueWatching(currentFilm.id, t, d);
+  // When aux audio is in use, mute provider so only <audio> drives sound.
+  try{ player.muted = !!p2State._useAux; }catch{}
+
+  // Wire all event listeners ONCE per player element (they read live p2State)
+  if(player._p2VsHooked) return;
+  player._p2VsHooked = true;
+
+  const sync = ()=>{
+    if(!p2State || !p2State._useAux) return;
+    try{
+      const dt = aux.currentTime - player.currentTime;
+      if(Math.abs(dt) > 0.25) aux.currentTime = player.currentTime;
+      else if(Math.abs(dt) > 0.05) aux.playbackRate = (player.playbackRate || 1) * (dt > 0 ? 0.97 : 1.03);
+      else aux.playbackRate = (player.playbackRate || 1);
+    }catch{}
+  };
+  player.addEventListener('play', ()=>{
+    if(p2State && p2State._useAux){
+      try{ aux.currentTime = player.currentTime; }catch{}
+      aux.play().catch(()=>{});
     }
   });
-  v.addEventListener('loadedmetadata', ()=>{
-    _p2El('p2TimeDur').textContent = _p2Fmt(v.duration);
-    wrap.classList.remove('loading');
+  player.addEventListener('pause', ()=>{
+    if(p2State && p2State._useAux){ try{ aux.pause(); }catch{} }
   });
-  v.addEventListener('waiting', ()=>{ wrap.classList.add('loading'); });
-  v.addEventListener('playing', ()=>{ wrap.classList.remove('loading'); });
-  v.addEventListener('progress', ()=>{
-    try{
-      if(v.buffered.length){
-        const end = v.buffered.end(v.buffered.length-1);
-        if(v.duration){
-          _p2El('p2ProgressBuffer').style.width = (end/v.duration*100).toFixed(2)+'%';
-        }
-      }
-    }catch{}
+  player.addEventListener('seeking', ()=>{
+    if(p2State && p2State._useAux){ try{ aux.currentTime = player.currentTime; }catch{} }
+  });
+  player.addEventListener('seeked',  ()=>{
+    if(p2State && p2State._useAux){ try{ aux.currentTime = player.currentTime; }catch{} }
+  });
+  player.addEventListener('rate-change', ()=>{
+    if(p2State && p2State._useAux){ try{ aux.playbackRate = player.playbackRate; }catch{} }
+  });
+  player.addEventListener('volume-change', ()=>{
+    if(p2State && p2State._useAux){
+      try{ aux.volume = player.volume; aux.muted = player.muted ? false : aux.muted; }catch{}
+    }
   });
 
-  // Play / pause keep the two media elements in lockstep
-  v.addEventListener('play', ()=>{
-    wrap.classList.remove('paused');
-    _p2El('p2PlayIcon').setAttribute('d','M6 19h4V5H6v14zm8-14v14h4V5h-4z'); // pause icon
-    if(a.paused){ a.currentTime = v.currentTime; a.play().catch(()=>{}); }
+  // Save Continue Watching every ~8s + sync aux audio
+  player.addEventListener('time-update', ()=>{
+    if(!p2State) return;
+    sync();
+    const now = Date.now();
+    if(now - p2State.lastSavedAt < 8000) return;
+    p2State.lastSavedAt = now;
+    const t = player.currentTime, d = player.duration;
+    if(currentFilm && t && d) upsertContinueWatching(currentFilm.id, t, d);
   });
-  v.addEventListener('pause', ()=>{
-    wrap.classList.add('paused');
-    _p2El('p2PlayIcon').setAttribute('d','M8 5v14l11-7z'); // play icon
-    if(!a.paused) a.pause();
-  });
-  v.addEventListener('seeking', ()=>{ try{ a.currentTime = v.currentTime; }catch{} });
-  v.addEventListener('ratechange', ()=>{ a.playbackRate = v.playbackRate; });
-  v.addEventListener('ended', ()=>{
+  player.addEventListener('ended', ()=>{
     if(currentFilm) removeContinueWatching(currentFilm.id);
   });
+}
 
-  // Click video toggles play
-  v.addEventListener('click', ()=>{
-    if(v.paused){ v.play(); } else { v.pause(); }
-  });
-  // Double-click toggles fullscreen
-  v.addEventListener('dblclick', ()=>{ _p2ToggleFullscreen(); });
-
-  // Play button
-  _p2El('p2PlayBtn').addEventListener('click', ()=>{
-    if(v.paused){ v.play(); } else { v.pause(); }
-  });
-
-  // Mute button
-  _p2El('p2MuteBtn').addEventListener('click', ()=>{
-    a.muted = !a.muted;
-    _p2UpdateVolUI();
-  });
-  _p2El('p2VolFill').style.width = '100%';
-  _p2El('p2VolSlider').addEventListener('click', (e)=>{
-    const r = e.currentTarget.getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    a.volume = f; a.muted = false;
-    _p2UpdateVolUI();
-  });
-
-  // Progress bar seek
-  const prog = _p2El('p2Progress');
-  let dragging = false;
-  function seekFromEvent(e){
-    const r = prog.getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    if(v.duration){
-      v.currentTime = f * v.duration;
-      a.currentTime = v.currentTime;
-    }
+function _p2BuildChip(label, items){
+  // Small dropdown chip styled to match .player-engine-bar
+  const chip = document.createElement('div');
+  chip.className = 'player-engine-chip';
+  chip.innerHTML =
+    '<button type="button" class="player-engine-chip-btn">'+
+      '<span class="player-engine-chip-label">'+label+':</span>' +
+      '<span class="player-engine-chip-val">'+(items.find(i=>i.active)||items[0]||{}).label+'</span>' +
+      '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>' +
+    '</button>' +
+    '<div class="player-engine-chip-menu"></div>';
+  const menu = chip.querySelector('.player-engine-chip-menu');
+  const valEl = chip.querySelector('.player-engine-chip-val');
+  const btn = chip.querySelector('.player-engine-chip-btn');
+  function rebuildMenu(){
+    menu.innerHTML = items.map((it, i)=>(
+      '<div class="player-engine-chip-item '+(it.active?'active':'')+'" data-idx="'+i+'">'+it.label+'</div>'
+    )).join('');
+    menu.querySelectorAll('.player-engine-chip-item').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const i = parseInt(el.dataset.idx, 10);
+        items.forEach((it, j)=>{ it.active = (j === i); });
+        valEl.textContent = items[i].label;
+        chip.classList.remove('open');
+        items[i].onSelect();
+      });
+    });
   }
-  prog.addEventListener('mousedown', (e)=>{ dragging = true; seekFromEvent(e); });
-  document.addEventListener('mousemove', (e)=>{ if(dragging) seekFromEvent(e); });
-  document.addEventListener('mouseup', ()=>{ dragging = false; });
-
-  // Animate fill via requestAnimationFrame
-  function tickFill(){
-    if(p2State && v.duration){
-      _p2El('p2ProgressFill').style.width = (v.currentTime / v.duration * 100).toFixed(2)+'%';
-    }
-    requestAnimationFrame(tickFill);
-  }
-  tickFill();
-
-  // Settings menu (gear)
-  _p2El('p2SettingsBtn').addEventListener('click', _p2OpenSettingsMenu);
-  // CC button
-  _p2El('p2CCBtn').addEventListener('click', _p2OpenSubsMenu);
-  // Quality button
-  _p2El('p2QualityBtn').addEventListener('click', _p2OpenQualityMenu);
-  // PiP
-  _p2El('p2PipBtn').addEventListener('click', ()=>{
-    try{
-      if(document.pictureInPictureElement){ document.exitPictureInPicture(); }
-      else { v.requestPictureInPicture(); }
-    }catch(e){}
+  rebuildMenu();
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    chip.classList.toggle('open');
   });
-  // Download — uses current quality URL via streamActions
-  _p2El('p2DlBtn').addEventListener('click', ()=>{
-    const dl = document.getElementById('streamDlBtn');
-    if(dl) dl.click();
-  });
-  // Fullscreen
-  _p2El('p2FullBtn').addEventListener('click', _p2ToggleFullscreen);
-
-  // Close menu when clicking outside
   document.addEventListener('click', (e)=>{
-    const menu = _p2El('p2Menu');
-    if(!menu || !menu.classList.contains('show')) return;
-    if(menu.contains(e.target)) return;
-    if(['p2SettingsBtn','p2CCBtn','p2QualityBtn'].includes(e.target.id)) return;
-    if(e.target.closest && (e.target.closest('#p2SettingsBtn') || e.target.closest('#p2CCBtn') || e.target.closest('#p2QualityBtn'))) return;
-    menu.classList.remove('show');
+    if(!chip.contains(e.target)) chip.classList.remove('open');
   });
+  return chip;
 }
 
-function _p2UpdateVolUI(){
-  const a = _p2El('p2Audio');
-  const fill = _p2El('p2VolFill');
-  const muted = a.muted || a.volume === 0;
-  fill.style.width = muted ? '0%' : (a.volume*100)+'%';
-}
-
-function _p2ToggleFullscreen(){
-  const wrap = _p2El('player2Wrap');
-  if(document.fullscreenElement){ document.exitFullscreen().catch(()=>{}); }
-  else { wrap.requestFullscreen && wrap.requestFullscreen().catch(()=>{}); }
-}
-
-function _p2RenderMenu(items){
-  const m = _p2El('p2Menu');
-  m.innerHTML = items.map((it, i)=>{
-    if(it.type === 'header'){
-      return '<div class="p2-menu-back" data-back="1"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>'+it.label+'</div>';
-    }
-    const checkSvg = '<span class="p2-menu-check"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></span>';
-    return '<div class="p2-menu-item '+(it.active?'active':'')+'" data-idx="'+i+'">'+checkSvg+'<span class="p2-menu-name">'+it.label+'</span>'+(it.right?'<span class="p2-menu-val">'+it.right+'</span>':'')+'</div>';
-  }).join('');
-  m.classList.add('show');
-  return m;
-}
-
-function _p2OpenSettingsMenu(){
-  if(!p2State) return;
-  const m = _p2RenderMenu([
-    { label: 'Kualitas',     right: (p2State.videos[p2State.qualityIdx]||{}).name || '—' },
-    { label: 'Audio Track',  right: (p2State.audios[p2State.audioIdx]||{}).name || '—' },
-    { label: 'Subtitle',     right: p2State.subIdx >= 0 ? p2State.subtitles[p2State.subIdx].name : 'Off' },
-    { label: 'Kecepatan',    right: p2State.speed + 'x' },
-  ]);
-  m.querySelectorAll('.p2-menu-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const idx = parseInt(el.dataset.idx, 10);
-      if(idx === 0) _p2OpenQualityMenu();
-      else if(idx === 1) _p2OpenAudioMenu();
-      else if(idx === 2) _p2OpenSubsMenu();
-      else if(idx === 3) _p2OpenSpeedMenu();
-    });
-  });
-}
-
-function _p2OpenQualityMenu(){
-  if(!p2State) return;
-  const items = [{ type:'header', label:'Kualitas' }].concat(
-    p2State.videos.map((q, i)=>({ label: q.name || 'Quality '+(i+1), active: i === p2State.qualityIdx }))
-  );
-  const m = _p2RenderMenu(items);
-  m.querySelector('[data-back]').addEventListener('click', _p2OpenSettingsMenu);
-  m.querySelectorAll('.p2-menu-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const i = parseInt(el.dataset.idx, 10) - 1;
-      _p2SwitchQuality(i);
-      m.classList.remove('show');
-    });
-  });
-}
-
-function _p2OpenAudioMenu(){
-  if(!p2State) return;
-  const items = [{ type:'header', label:'Audio Track' }].concat(
-    p2State.audios.map((au, i)=>({ label: au.name || 'Audio '+(i+1), active: i === p2State.audioIdx }))
-  );
-  const m = _p2RenderMenu(items);
-  m.querySelector('[data-back]').addEventListener('click', _p2OpenSettingsMenu);
-  m.querySelectorAll('.p2-menu-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const i = parseInt(el.dataset.idx, 10) - 1;
-      _p2SwitchAudio(i);
-      m.classList.remove('show');
-    });
-  });
-}
-
-function _p2OpenSubsMenu(){
-  if(!p2State) return;
-  const items = [{ type:'header', label:'Subtitle' }, { label:'Tanpa Subtitle', active: p2State.subIdx === -1 }].concat(
-    p2State.subtitles.map((s, i)=>({ label: s.name || 'Subtitle '+(i+1), active: i === p2State.subIdx }))
-  );
-  const m = _p2RenderMenu(items);
-  m.querySelector('[data-back]').addEventListener('click', _p2OpenSettingsMenu);
-  m.querySelectorAll('.p2-menu-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const i = parseInt(el.dataset.idx, 10);
-      if(i === 1) _p2SwitchSub(-1);
-      else _p2SwitchSub(i - 2);
-      m.classList.remove('show');
-    });
-  });
-}
-
-function _p2OpenSpeedMenu(){
-  if(!p2State) return;
-  const speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
-  const items = [{ type:'header', label:'Kecepatan' }].concat(
-    speeds.map(s=>({ label: s + 'x', active: s === p2State.speed }))
-  );
-  const m = _p2RenderMenu(items);
-  m.querySelector('[data-back]').addEventListener('click', _p2OpenSettingsMenu);
-  m.querySelectorAll('.p2-menu-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const i = parseInt(el.dataset.idx, 10) - 1;
-      const s = speeds[i];
-      const v = _p2El('p2Video'), a = _p2El('p2Audio');
-      v.playbackRate = s; a.playbackRate = s; p2State.speed = s;
-      m.classList.remove('show');
-    });
-  });
+function _p2GuessVideoType(url){
+  const lower = (url || '').toLowerCase().split('?')[0];
+  if(lower.endsWith('.m3u8')) return 'application/x-mpegurl';
+  if(lower.endsWith('.mpd'))  return 'application/dash+xml';
+  if(lower.endsWith('.webm')) return 'video/webm';
+  if(lower.endsWith('.ogv') || lower.endsWith('.ogg')) return 'video/ogg';
+  if(lower.endsWith('.mkv'))  return 'video/x-matroska';
+  // Default — Chrome will try the file as MP4 and most non-MP4 files will
+  // surface a normal "format not supported" media error from Vidstack.
+  return 'video/mp4';
 }
 
 function _p2SwitchQuality(i){
-  if(!p2State || i < 0 || i >= p2State.videos.length) return;
-  if(i === p2State.qualityIdx) return;
-  const v = _p2El('p2Video');
-  const t = v.currentTime;
-  const wasPlaying = !v.paused;
+  if(!p2State || i < 0 || i >= p2State.videos.length || i === p2State.qualityIdx) return;
+  const player = document.getElementById('p2VsPlayer');
+  const t = player.currentTime || 0;
+  const wasPlaying = !player.paused;
   p2State.qualityIdx = i;
-  v.src = p2State.videos[i].path;
-  v.load();
-  v.addEventListener('loadedmetadata', ()=>{
-    v.currentTime = t;
-    if(wasPlaying) v.play();
+  player.src = { src: p2State.videos[i].path, type: _p2GuessVideoType(p2State.videos[i].path) };
+  // Restore time once new source is ready
+  player.addEventListener('loaded-metadata', ()=>{
+    try{ player.currentTime = t; }catch{}
+    if(wasPlaying){ try{ player.play(); }catch{} }
   }, { once: true });
-  _p2El('p2QualityBtn').textContent = (p2State.videos[i].name || 'Default').toUpperCase();
 }
 
 function _p2SwitchAudio(i){
-  if(!p2State || i < 0 || i >= p2State.audios.length) return;
-  if(i === p2State.audioIdx) return;
-  const v = _p2El('p2Video'), a = _p2El('p2Audio');
-  const t = v.currentTime;
-  const wasPlaying = !v.paused;
+  if(!p2State || i < 0 || i >= p2State.audios.length || i === p2State.audioIdx) return;
+  const aux = document.getElementById('p2AuxAudio');
+  const player = document.getElementById('p2VsPlayer');
+  const t = player.currentTime || 0;
+  const wasPlaying = !player.paused;
   p2State.audioIdx = i;
-  a.src = p2State.audios[i].path;
-  a.load();
-  a.addEventListener('loadedmetadata', ()=>{
-    a.currentTime = t;
-    if(wasPlaying) a.play().catch(()=>{});
+  aux.src = p2State.audios[i].path;
+  aux.load();
+  aux.addEventListener('loadedmetadata', ()=>{
+    try{ aux.currentTime = t; }catch{}
+    if(wasPlaying){ aux.play().catch(()=>{}); }
   }, { once: true });
 }
 
-async function _p2SwitchSub(i){
-  if(!p2State) return;
-  // Clear overlay
-  _p2El('p2SubsOverlay').innerHTML = '';
-  if(p2State.subBlobUrl){ try{ URL.revokeObjectURL(p2State.subBlobUrl); }catch{} p2State.subBlobUrl=null; }
-  p2State.cues = [];
-  p2State.subIdx = i;
-  if(i < 0) return;
-  const sub = p2State.subtitles[i];
-  if(!sub || !sub.path) return;
-  try{
-    const r = await fetch(sub.path);
-    let txt = await r.text();
-    p2State.cues = _p2ParseSubs(txt, sub.path);
-  }catch(e){
-    showToast('Gagal load subtitle: '+e.message, 'error');
-  }
-}
-
-function _p2RenderSubs(t){
-  if(!p2State || !p2State.cues || !p2State.cues.length){
-    _p2El('p2SubsOverlay').innerHTML = '';
-    return;
-  }
-  const active = p2State.cues.filter(c => t >= c.start && t <= c.end);
-  if(active.length){
-    _p2El('p2SubsOverlay').innerHTML = active.map(c => '<div class="p2-subs-line">'+c.text+'</div>').join('');
-  } else {
-    _p2El('p2SubsOverlay').innerHTML = '';
-  }
-}
-
-// Minimal SRT/VTT/ASS parser. ASS is rendered as plain text (no styling).
-function _p2ParseSubs(txt, path){
-  const lower = (path||'').toLowerCase();
+// Convert SRT or ASS subtitle text to WebVTT so it can be assigned to a
+// native <track> element. VTT input is returned unchanged.
+function _p2ToVtt(txt, path){
+  const lower = (path || '').toLowerCase();
+  if(/^WEBVTT/.test(txt.trim())) return txt;
   if(lower.endsWith('.ass') || lower.endsWith('.ssa') || /^\[Script Info\]/m.test(txt)){
-    return _p2ParseAss(txt);
+    return _p2AssToVtt(txt);
   }
-  return _p2ParseSrtVtt(txt);
+  return _p2SrtToVtt(txt);
 }
-function _p2TimeToSec(s){
-  // Accepts "HH:MM:SS,mmm", "HH:MM:SS.mmm", "MM:SS.mmm"
-  s = s.replace(',', '.').trim();
-  const parts = s.split(':').map(parseFloat);
-  if(parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
-  if(parts.length === 2) return parts[0]*60 + parts[1];
-  return parseFloat(s) || 0;
-}
-function _p2ParseSrtVtt(txt){
-  const cues = [];
-  const blocks = txt.replace(/\r/g,'').split(/\n\n+/);
+function _p2SrtToVtt(srt){
+  // Basic SRT → VTT: replace "," with "." in timestamps, drop numeric indices.
+  const out = ['WEBVTT', ''];
+  const blocks = srt.replace(/\r/g, '').split(/\n\n+/);
   for(const b of blocks){
-    const lines = b.split('\n').map(l=>l.trim()).filter(Boolean);
+    const lines = b.split('\n').filter(Boolean);
     if(!lines.length) continue;
     let i = 0;
-    if(/^WEBVTT/i.test(lines[0])) continue;
-    if(/^\d+$/.test(lines[0])) i = 1; // SRT index
-    const tline = lines[i] || '';
-    const m = tline.match(/(\d{1,2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[.,]\d{3})/);
-    if(!m) continue;
-    const start = _p2TimeToSec(m[1]);
-    const end = _p2TimeToSec(m[2]);
-    const text = lines.slice(i+1).join('<br>').replace(/<[^>]+>/g, t => /^<\/?(b|i|u|br)>$/i.test(t) ? t : '');
-    cues.push({ start, end, text });
+    if(/^\d+$/.test(lines[0])) i = 1;
+    if(!lines[i]) continue;
+    const tline = lines[i].replace(/,/g, '.');
+    out.push(tline);
+    for(let j = i + 1; j < lines.length; j++) out.push(lines[j]);
+    out.push('');
   }
-  return cues;
+  return out.join('\n');
 }
-function _p2ParseAss(txt){
-  const cues = [];
-  const lines = txt.split(/\r?\n/);
+function _p2AssToVtt(ass){
+  const out = ['WEBVTT', ''];
+  const lines = ass.split(/\r?\n/);
   let format = null;
+  function fmtTs(s){
+    // ASS time: H:MM:SS.cc (centiseconds) → HH:MM:SS.mmm
+    const m = s.trim().match(/^(\d+):(\d{1,2}):(\d{1,2})\.(\d{1,2})$/);
+    if(!m) return s;
+    const h = String(parseInt(m[1],10)).padStart(2,'0');
+    const mi = String(parseInt(m[2],10)).padStart(2,'0');
+    const se = String(parseInt(m[3],10)).padStart(2,'0');
+    const ms = String(parseInt(m[4],10)*10).padStart(3,'0');
+    return h+':'+mi+':'+se+'.'+ms;
+  }
   for(const ln of lines){
     if(/^Format:/i.test(ln) && /Start/i.test(ln) && /End/i.test(ln)){
       format = ln.replace(/^Format:\s*/i,'').split(',').map(s=>s.trim());
-    } else if(/^Dialogue:/i.test(ln) && format){
+    }else if(/^Dialogue:/i.test(ln) && format){
       const fields = ln.replace(/^Dialogue:\s*/i,'').split(',');
-      const startIdx = format.indexOf('Start');
-      const endIdx = format.indexOf('End');
-      const textIdx = format.indexOf('Text');
-      if(startIdx < 0 || endIdx < 0 || textIdx < 0) continue;
-      const text = fields.slice(textIdx).join(',')
-        .replace(/\{[^}]*\}/g, '')      // strip ASS override tags
-        .replace(/\\N|\\n/g, '<br>');
-      cues.push({
-        start: _p2TimeToSec(fields[startIdx]),
-        end: _p2TimeToSec(fields[endIdx]),
-        text,
-      });
+      const sIdx = format.indexOf('Start');
+      const eIdx = format.indexOf('End');
+      const tIdx = format.indexOf('Text');
+      if(sIdx < 0 || eIdx < 0 || tIdx < 0) continue;
+      const text = fields.slice(tIdx).join(',')
+        .replace(/\{[^}]*\}/g, '')
+        .replace(/\\N|\\n/gi, '\n')
+        .trim();
+      if(!text) continue;
+      out.push(fmtTs(fields[sIdx]) + ' --> ' + fmtTs(fields[eIdx]));
+      out.push(text);
+      out.push('');
     }
   }
-  return cues;
+  return out.join('\n');
 }
 
 function closePlayer(opts){
