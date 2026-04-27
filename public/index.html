@@ -7,7 +7,7 @@
 <title>ZAEINSTREAM</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230ea5e9'/><polygon points='38,28 38,72 72,50' fill='white'/></svg>" type="image/svg+xml" />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="https://vjs.zencdn.net/8.16.1/video-js.css" />
+<!-- Multitrack.JS player (CSS injected by JS bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* ════════════════════════════════════════════════════════════════════
@@ -519,14 +519,10 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   position:relative;background:#000;border-radius:12px;overflow:hidden;
   aspect-ratio:16/9;
 }
-.video-js{width:100%;height:100%;}
-.video-js .vjs-big-play-button{
-  width:80px;height:80px;border-radius:50%;border:none;
-  background:rgba(255,255,255,.95);color:#000;line-height:80px;
-  top:50%;left:50%;transform:translate(-50%,-50%);
-  font-size:32px;
-}
-.video-js .vjs-control-bar{background:linear-gradient(180deg,transparent,rgba(0,0,0,.85));}
+/* Multitrack.JS responsive override (lib defaults 854x480) */
+.mjs{width:100% !important;height:100% !important;display:block;}
+#multitrackPlayer .mjs__root{width:100%;height:100%;}
+#multitrackPlayer video,#multitrackPlayer .mjs__video{width:100%;height:100%;object-fit:contain;background:#000;}
 
 .player-info{margin-top:18px;}
 .player-info h2{font-size:1.5rem;font-weight:700;margin-bottom:6px;}
@@ -1239,20 +1235,13 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   <div class="player-body">
     <div class="player-main">
       <div class="player-wrap show-tools" id="playerWrap">
-        <div class="player-toolbar">
-          <button class="tool-btn" onclick="togglePanel('subs')" id="toolBtnSubs">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM5 18V6h14v12H5zm2-7h2v2H7v-2zm0 4h6v-2H7v2zm8 0h2v-2h-2v2zm-4-4h6V9h-6v2z"/></svg>
-            Subs
-          </button>
-          <button class="tool-btn audio-btn" onclick="togglePanel('audio')" id="toolBtnAudio">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-            <span id="toolBtnAudioLabel">Audio</span>
-          </button>
-          <button class="tool-btn" onclick="cyclePlaybackRate()" id="toolBtnSpeed">1x</button>
-        </div>
-        <div class="audio-panel" id="audioPanel"></div>
-
-        <video id="videoPlayer" class="video-js vjs-default-skin vjs-fluid" controls preload="auto" crossorigin="anonymous" playsinline></video>
+        <!-- Multitrack.JS player container (Quality / Audio / Subtitle / Speed all in built-in Settings menu) -->
+        <div id="multitrackPlayer" style="width:100%;height:100%;"></div>
+        <!-- Hidden legacy elements (kept so old JS refs don't crash; toolbar replaced by Multitrack.JS Settings menu) -->
+        <div id="audioPanel" style="display:none;"></div>
+        <button id="toolBtnSubs" style="display:none;"></button>
+        <button id="toolBtnAudio" style="display:none;"><span id="toolBtnAudioLabel"></span></button>
+        <button id="toolBtnSpeed" style="display:none;"></button>
 
         <!-- Trailer overlay (shown on top of video when user clicks Trailer btn) -->
         <iframe id="trailerIframe" style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;z-index:6;background:#000;" allow="autoplay;encrypted-media" allowfullscreen></iframe>
@@ -1398,7 +1387,7 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<script src="https://vjs.zencdn.net/8.16.1/video.min.js"></script>
+<script src="/multitrack.bundle.js"></script>
 <script>
 /* ════════════════════════════════════════════════════════════════════
    STATE & CONFIG
@@ -1411,7 +1400,8 @@ let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
 let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
 let currentFilm = null;
-let videoPlayer = null;
+let mtPlayer = null;        // Multitrack.JS instance
+let videoPlayer = null;     // legacy compat shim (delegates to mtPlayer)
 let currentResumeFrom = 0;
 let currentTmdbExtras = null;
 let currentTrailerKey = null;
@@ -2174,71 +2164,136 @@ function renderEpisodeList(film){
   });
 }
 
+/* ────────────────────────────────────────────────────────────────────
+   loadVideo — initialise Multitrack.JS player with multi-quality video,
+   multi-dub audio, and multi-subtitle tracks (resolved from Drive Index).
+   ──────────────────────────────────────────────────────────────────── */
+async function _resolveDrivePath(drivePath){
+  if(!drivePath) return null;
+  try{
+    const r = await fetch('/api/drive/resolve?path='+encodeURIComponent(drivePath));
+    const d = await r.json();
+    return d && d.ok ? d.stream_url : null;
+  }catch{ return null; }
+}
+
 async function loadVideo(film){
-  // Init player jika belum
-  if(!videoPlayer){
-    videoPlayer = videojs('videoPlayer', {
-      html5:{ vhs:{ overrideNative:true } },
-      preload:'auto',
-      fluid:true,
+  // Cleanup previous Multitrack player instance
+  if(mtPlayer){
+    try{ mtPlayer.pause(); }catch{}
+    mtPlayer = null;
+  }
+  const container = document.getElementById('multitrackPlayer');
+  container.innerHTML = '';
+  container.classList.remove('mjs');
+
+  // ── Build videos array (multi-resolution) ──
+  const videos = [];
+  if(Array.isArray(film.videos)){
+    for(const v of film.videos){
+      if(!v) continue;
+      const url = v.url || v.stream_url || await _resolveDrivePath(v.drive_path);
+      if(url) videos.push({ name: v.name || v.label || 'Default', path: url });
+    }
+  }
+  // Fallback: main drive_path / drive_link as single quality
+  if(!videos.length){
+    const driveRef = film.drive_path || film.drive_link;
+    if(!driveRef){
+      showToast('Film ini belum punya path Drive. Hubungi admin.', 'error');
+      return;
+    }
+    const param = film.drive_path ? 'path='+encodeURIComponent(film.drive_path) : 'link='+encodeURIComponent(film.drive_link);
+    try{
+      const r = await fetch('/api/drive/resolve?'+param);
+      const d = await r.json();
+      if(!d.ok){ showToast('Drive: '+(d.error||'gagal resolve'), 'error'); return; }
+      videos.push({ name: 'Default', path: d.stream_url });
+    }catch(e){ showToast('Drive resolve error: '+e.message, 'error'); return; }
+  }
+
+  // ── Build audios array (multi-dub) — Multitrack.JS REQUIRES at least 1 ──
+  const audios = [];
+  if(Array.isArray(film.audio_tracks)){
+    for(const t of film.audio_tracks){
+      if(!t) continue;
+      const url = t.url || t.stream_url || await _resolveDrivePath(t.drive_path);
+      if(url) audios.push({ name: t.name || t.language || 'Audio', path: url });
+    }
+  }
+  // Fallback: use main video URL as audio source (single-file mode — video element
+  // is muted via patched media.js so audio comes from <audio> element only).
+  if(!audios.length){
+    audios.push({ name: 'Original', path: videos[0].path });
+  }
+
+  // ── Build subtitles array (.ass / .srt / .vtt — Multitrack.JS uses ASS lib) ──
+  const subtitles = [];
+  if(Array.isArray(film.subtitles)){
+    for(const s of film.subtitles){
+      if(!s) continue;
+      const url = s.url || s.stream_url || await _resolveDrivePath(s.drive_path);
+      if(url) subtitles.push({ name: s.name || s.language || 'Subtitle', path: url });
+    }
+  }
+
+  // ── Construct Multitrack.JS player ──
+  try{
+    mtPlayer = new MultitrackJS('#multitrackPlayer', {
+      videos,
+      audios,
+      subtitles,
+      title: (film.judul || film.title || ''),
+      placeholder: film.poster_url || '',
     });
-    videoPlayer.on('loadedmetadata', renderAudioTracks);
-    // Resume jika ada saved position
-    videoPlayer.on('loadedmetadata', ()=>{
-      if(currentResumeFrom && currentResumeFrom > 5){
-        try{ videoPlayer.currentTime(currentResumeFrom); }catch{}
-      }
-    });
-    // Save Continue Watching tiap 10 detik
+  }catch(e){
+    console.error('MultitrackJS init failed:', e);
+    showToast('Player init failed: '+e.message, 'error');
+    return;
+  }
+
+  // ── Compat shim so legacy code referencing `videoPlayer` still works ──
+  videoPlayer = {
+    pause: ()=>{ try{ mtPlayer && mtPlayer.pause(); }catch{} },
+    play:  ()=>{ try{ mtPlayer && mtPlayer.play();  }catch{} },
+    paused:()=> mtPlayer ? mtPlayer.paused : true,
+    currentTime: function(v){ if(!mtPlayer) return 0; if(v===undefined) return mtPlayer.currentTime; mtPlayer.currentTime = v; },
+    duration: function(){ return mtPlayer ? mtPlayer.duration : 0; },
+    playbackRate: function(v){ if(!mtPlayer) return 1; if(v===undefined) return mtPlayer.playbackRate; mtPlayer.playbackRate = v; },
+    muted: function(v){ if(!mtPlayer) return false; if(v===undefined) return mtPlayer.muted; mtPlayer.muted = v; },
+    volume: function(v){ if(!mtPlayer) return 1; if(v===undefined) return mtPlayer.volume; mtPlayer.volume = v; },
+    src: ()=>{}, load: ()=>{}, on: ()=>{},
+    audioTracks: ()=>null,
+    addRemoteTextTrack: ()=>{}, remoteTextTracks: ()=>[], removeRemoteTextTrack: ()=>{},
+  };
+
+  // ── Resume position ──
+  if(currentResumeFrom && currentResumeFrom > 5){
+    setTimeout(()=>{ try{ mtPlayer.currentTime = currentResumeFrom; }catch{} }, 600);
+  }
+
+  // ── Hook Continue Watching save (every ~8s via audio.timeupdate) ──
+  const audioEl = mtPlayer._ && mtPlayer._.form && mtPlayer._.form.audio;
+  if(audioEl){
     let lastSave = 0;
-    videoPlayer.on('timeupdate', ()=>{
+    audioEl.addEventListener('timeupdate', ()=>{
       const now = Date.now();
       if(now - lastSave < 8000) return;
       lastSave = now;
       if(!currentFilm) return;
-      const t = videoPlayer.currentTime();
-      const d = videoPlayer.duration();
+      const t = mtPlayer.currentTime, d = mtPlayer.duration;
       if(t && d) upsertContinueWatching(currentFilm.id, t, d);
     });
-    videoPlayer.on('ended', ()=>{
+    audioEl.addEventListener('ended', ()=>{
       if(currentFilm) removeContinueWatching(currentFilm.id);
     });
   }
 
-  // Reset audio panel
-  document.getElementById('toolBtnAudio').classList.remove('show');
-  document.getElementById('audioPanel').classList.remove('open');
+  // ── Stream actions (download + external player) — use first quality URL ──
+  setStreamActions(videos[0].path, film.judul || film.title || '');
 
-  // Resolve via worker — kirim drive_path (kolom baru) atau drive_link (kompatibilitas lama)
-  const driveRef = film.drive_path || film.drive_link;
-  if(!driveRef){
-    showToast('Film ini belum punya path Drive. Hubungi admin.', 'error');
-    return;
-  }
-  let streamUrl = '';
-  let mime = 'video/mp4';
-  try{
-    const param = film.drive_path ? 'path='+encodeURIComponent(film.drive_path) : 'link='+encodeURIComponent(film.drive_link);
-    const r = await fetch('/api/drive/resolve?'+param);
-    const d = await r.json();
-    if(!d.ok){
-      showToast('Drive: '+(d.error||'gagal resolve'), 'error');
-      return;
-    }
-    streamUrl = d.stream_url;
-    if(d.mime_type) mime = d.mime_type;
-  }catch(e){
-    showToast('Drive resolve error: '+e.message, 'error');
-    return;
-  }
-
-  videoPlayer.src({ src: streamUrl, type: mime });
-  videoPlayer.load();
-  setStreamActions(streamUrl, film.title || '');
-
-  // External audio tracks (multi-dub) — resolve in parallel with main video
-  await setupExternalAudioTracks(film);
-  renderAudioTracks();
+  // Resize player after layout settles
+  setTimeout(()=>{ try{ mtPlayer && mtPlayer.resize(); }catch{} }, 200);
 }
 
 // ── Stream actions: download + external player URL schemes ──
@@ -2290,165 +2345,11 @@ document.addEventListener('click', function(e){
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   MULTI-TRACK AUDIO (Multitrack.JS-style)
-   ─────────────────────────────────────────────────────────────────
-   Browser HTML5 <video> gak expose embedded audio tracks untuk file MP4
-   biasa. Jadi untuk dub/multi-language, admin upload audio-only file
-   terpisah ke Drive Index. Frontend play video (muted) + <audio> element
-   terpisah (synced per-frame ke video.currentTime).
+   MULTI-TRACK AUDIO — handled natively by Multitrack.JS player.
+   See loadVideo() above for how `film.audio_tracks` is mapped to the
+   Multitrack.JS `audios` config array; the player's built-in Settings
+   menu (Pengaturan → Audio Track) provides the picker UI.
    ═══════════════════════════════════════════════════════════════════ */
-let externalAudioTracks = [];  // [{ name, audioEl }]
-let activeAudioIdx = -1;       // -1 = original (from video), 0..N = external track
-let _multitrackWired = false;
-
-function currentExternalAudioEl(){
-  return activeAudioIdx >= 0 ? (externalAudioTracks[activeAudioIdx] && externalAudioTracks[activeAudioIdx].audioEl) : null;
-}
-
-async function setupExternalAudioTracks(film){
-  // Cleanup previous
-  externalAudioTracks.forEach(t=>{
-    try{ t.audioEl.pause(); t.audioEl.src=''; t.audioEl.remove(); }catch{}
-  });
-  externalAudioTracks = [];
-  activeAudioIdx = -1;
-  if(videoPlayer){ try{ videoPlayer.muted(false); }catch{} }
-
-  if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length) return;
-
-  // Resolve each track's drive_path to stream URL in parallel
-  const resolved = await Promise.all(film.audio_tracks.map(async (tr)=>{
-    if(!tr) return null;
-    let url = tr.url || tr.stream_url || null;
-    if(!url && tr.drive_path){
-      try{
-        const r = await fetch('/api/drive/resolve?path='+encodeURIComponent(tr.drive_path));
-        const d = await r.json();
-        if(d.ok) url = d.stream_url;
-      }catch{ /* ignore */ }
-    }
-    if(!url) return null;
-    return { name: tr.name || tr.language || 'Audio', url };
-  }));
-
-  for(const tr of resolved){
-    if(!tr) continue;
-    const a = document.createElement('audio');
-    a.src = tr.url;
-    a.preload = 'auto';
-    a.crossOrigin = 'anonymous';
-    a.style.display = 'none';
-    a.muted = true;  // start muted; unmuted on switch
-    document.body.appendChild(a);
-    externalAudioTracks.push({ name: tr.name, audioEl: a });
-  }
-
-  // Wire sync once
-  if(videoPlayer && !_multitrackWired){
-    _multitrackWired = true;
-    videoPlayer.on('play', ()=>{
-      const a = currentExternalAudioEl();
-      if(a){ try{ a.currentTime = videoPlayer.currentTime(); a.play().catch(()=>{}); }catch{} }
-    });
-    videoPlayer.on('pause', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.pause(); }catch{} });
-    videoPlayer.on('seeked', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.currentTime = videoPlayer.currentTime(); }catch{} });
-    videoPlayer.on('ratechange', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.playbackRate = videoPlayer.playbackRate(); }catch{} });
-    videoPlayer.on('volumechange', ()=>{
-      const a = currentExternalAudioEl();
-      if(a){ try{ a.volume = videoPlayer.volume(); }catch{} }
-    });
-    videoPlayer.on('timeupdate', ()=>{
-      const a = currentExternalAudioEl();
-      if(!a) return;
-      const diff = Math.abs(a.currentTime - videoPlayer.currentTime());
-      if(diff > 0.35){ try{ a.currentTime = videoPlayer.currentTime(); }catch{} }
-    });
-    videoPlayer.on('ended', ()=>{ const a = currentExternalAudioEl(); if(a) try{ a.pause(); }catch{} });
-  }
-}
-
-function switchExternalAudio(idx){
-  // Mute & pause all external audio
-  externalAudioTracks.forEach(t=>{
-    try{ t.audioEl.muted = true; t.audioEl.pause(); }catch{}
-  });
-  activeAudioIdx = idx;
-  if(idx < 0){
-    // Original (from video): unmute video audio
-    try{ videoPlayer.muted(false); }catch{}
-  } else {
-    // External track: mute video audio, play the selected audio element
-    try{ videoPlayer.muted(true); }catch{}
-    const a = externalAudioTracks[idx] && externalAudioTracks[idx].audioEl;
-    if(a){
-      try{
-        a.muted = false;
-        a.volume = videoPlayer.volume();
-        a.playbackRate = videoPlayer.playbackRate();
-        a.currentTime = videoPlayer.currentTime();
-        if(!videoPlayer.paused()) a.play().catch(()=>{});
-      }catch{}
-    }
-  }
-}
-
-function renderAudioTracks(){
-  if(!videoPlayer) return;
-  const btn = document.getElementById('toolBtnAudio');
-  const panel = document.getElementById('audioPanel');
-
-  // Browser-native audioTracks (HLS/DASH multi-audio; usually empty for plain MP4)
-  const embeddedTracks = videoPlayer.audioTracks ? videoPlayer.audioTracks() : null;
-  const embeddedCount = embeddedTracks ? embeddedTracks.length : 0;
-
-  // Total = embedded (if >1) + external sync tracks
-  const totalExtras = externalAudioTracks.length + (embeddedCount>1 ? embeddedCount : 0);
-  if(totalExtras === 0){
-    btn.classList.remove('show');
-    panel.innerHTML = '';
-    return;
-  }
-  btn.classList.add('show');
-
-  const items = [];
-  // "Original" (from video file) is always first — selects embedded track 0 or plain video audio
-  items.push(`<div class="audio-panel-item${activeAudioIdx===-1?' active':''}" data-mode="original">Original (dari video)</div>`);
-
-  // Embedded tracks (if browser exposes multiple)
-  if(embeddedCount > 1){
-    for(let i=0;i<embeddedCount;i++){
-      const t = embeddedTracks[i];
-      const label = t.label || t.language || ('Embedded '+(i+1));
-      items.push(`<div class="audio-panel-item${t.enabled && activeAudioIdx===-1?' active':''}" data-mode="embedded" data-idx="${i}">${escapeHtml(label)}</div>`);
-    }
-  }
-
-  // External sync tracks
-  externalAudioTracks.forEach((t,i)=>{
-    items.push(`<div class="audio-panel-item${activeAudioIdx===i?' active':''}" data-mode="external" data-idx="${i}">${escapeHtml(t.name)}</div>`);
-  });
-
-  panel.innerHTML = items.join('');
-  panel.querySelectorAll('.audio-panel-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const mode = el.dataset.mode;
-      if(mode === 'original'){
-        switchExternalAudio(-1);
-      } else if(mode === 'embedded' && embeddedTracks){
-        const idx = Number(el.dataset.idx);
-        for(let i=0;i<embeddedTracks.length;i++){ embeddedTracks[i].enabled = (i===idx); }
-        switchExternalAudio(-1);
-      } else if(mode === 'external'){
-        switchExternalAudio(Number(el.dataset.idx));
-      }
-      panel.querySelectorAll('.audio-panel-item').forEach(x=>x.classList.remove('active'));
-      el.classList.add('active');
-      panel.classList.remove('open');
-      const lbl = el.textContent;
-      document.getElementById('toolBtnAudioLabel').textContent = lbl.length>10 ? lbl.slice(0,10)+'…' : lbl;
-    });
-  });
-}
 
 function closePlayer(opts){
   opts = opts || {};
@@ -2463,15 +2364,15 @@ function closePlayer(opts){
       history.back();
     }
   }
-  if(videoPlayer){
-    try{ videoPlayer.pause(); videoPlayer.src(''); }catch{}
+  // Tear down Multitrack.JS player
+  if(mtPlayer){
+    try{ mtPlayer.pause(); }catch{}
+    try{ mtPlayer.trySync = false; }catch{}
+    mtPlayer = null;
   }
-  // Clean up external audio tracks
-  externalAudioTracks.forEach(t=>{
-    try{ t.audioEl.pause(); t.audioEl.src=''; t.audioEl.remove(); }catch{}
-  });
-  externalAudioTracks = [];
-  activeAudioIdx = -1;
+  videoPlayer = null;
+  const cont = document.getElementById('multitrackPlayer');
+  if(cont){ cont.innerHTML=''; cont.classList.remove('mjs','mjs__settings_show'); }
   const sa = document.getElementById('streamActions');
   if(sa) sa.style.display='none';
   const sm = document.getElementById('streamExtMenu');
@@ -2900,15 +2801,30 @@ function srtToVtt(srt){
 }
 
 function applySubTrack(url, label){
-  if(!videoPlayer) return;
-  const tracks = videoPlayer.remoteTextTracks();
-  for(let i=tracks.length-1;i>=0;i--){
-    videoPlayer.removeRemoteTextTrack(tracks[i]);
-  }
-  videoPlayer.addRemoteTextTrack({
-    kind:'subtitles', src:url, srclang:'id',
-    label:label||'Subtitle', default:true, mode:'showing',
-  }, false);
+  // Multitrack.JS: dynamically attach external subtitle URL into the
+  // built-in Settings → Subtitle picker, and select it.
+  if(!mtPlayer || !mtPlayer._ || !mtPlayer._.form || !mtPlayer._.form.settings) return;
+  const menu = mtPlayer._.form.settings.menu && mtPlayer._.form.settings.menu.subtitles;
+  if(!menu || typeof menu.appendButton !== 'function') return;
+  // Avoid duplicates of same dynamic label
+  for(const b of menu.Buttons || []){ if(b && b.innerText === (label||'Subtitle')) { try{ b.click(); }catch{} return; } }
+  menu.appendButton(label||'Subtitle', ()=>{
+    // Fetch text manually then build an ASS-rendered overlay (Multitrack uses assjs).
+    // For VTT/SRT (non-ASS) we fall back to a basic <track> overlay on the inner video.
+    fetch(url).then(r=>r.text()).then(text=>{
+      const v = mtPlayer._.form.video;
+      if(!v) return;
+      // Strip any existing dynamic <track>
+      Array.from(v.querySelectorAll('track[data-dynamic]')).forEach(t=>t.remove());
+      const blob = new Blob([text], {type:'text/vtt'});
+      const turl = URL.createObjectURL(blob);
+      const tr = document.createElement('track');
+      tr.kind='subtitles'; tr.label=label||'Subtitle'; tr.srclang='id';
+      tr.src=turl; tr.default=true; tr.setAttribute('data-dynamic','1');
+      v.appendChild(tr);
+      try{ v.textTracks[v.textTracks.length-1].mode='showing'; }catch{}
+    }).catch(()=>{});
+  });
 }
 
 function onSubFile(file){

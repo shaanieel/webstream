@@ -543,6 +543,8 @@ async function adminFilmCreate(request, env) {
     genre: body.genre || null,
     trailer_url: body.trailer_url || null,
     audio_tracks: Array.isArray(body.audio_tracks) ? body.audio_tracks : [],
+    videos: Array.isArray(body.videos) ? body.videos : [],
+    subtitles: Array.isArray(body.subtitles) ? body.subtitles : [],
   };
   const r = await supabaseRest(env, '/films', {
     method: 'POST',
