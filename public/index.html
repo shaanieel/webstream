@@ -676,6 +676,69 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .episode-item.active .episode-num{background:var(--accent-2);color:#fff;}
 .episode-name{font-size:.88rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
+/* ── Episode picker (Netflix-style sidebar in player right panel) ── */
+.ep-picker{ display:flex;flex-direction:column;gap:12px;margin-bottom:18px; }
+.ep-picker-head{ display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+.ep-picker-head select,
+.ep-picker-head input[type=number]{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+  padding:8px 10px;border-radius:8px;font-size:.85rem;font-family:inherit;
+}
+.ep-picker-head select{ min-width:120px; cursor:pointer; }
+.ep-picker-head input[type=number]{ width:62px;text-align:center;font-weight:700; }
+.ep-picker-head .ep-view-btns{ display:flex;gap:4px;margin-left:auto; }
+.ep-view-btn{
+  background:var(--surface-2);border:1px solid var(--border);
+  color:var(--muted);padding:8px;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.ep-view-btn.active{ background:var(--accent-2);color:#fff;border-color:var(--accent-2); }
+.ep-view-btn svg{ width:16px;height:16px; }
+
+.ep-list{ display:flex;flex-direction:column;gap:10px;max-height:62vh;overflow-y:auto;padding-right:4px; }
+.ep-list.grid-mode{ display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+.ep-card{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:10px;
+  cursor:pointer;transition:transform .15s, border-color .15s;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.ep-card:hover{ border-color:var(--accent-2);transform:translateY(-1px); }
+.ep-card.active{ border-color:var(--accent-2);box-shadow:0 0 0 1px var(--accent-2); }
+.ep-card-thumb{
+  position:relative;aspect-ratio:16/9;background:var(--surface);
+  background-size:cover;background-position:center;flex-shrink:0;
+}
+.ep-card-thumb .ph{
+  width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+  color:var(--muted);font-size:24px;font-weight:700;
+}
+.ep-card-info{ padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0; }
+.ep-card-num{
+  font-size:.78rem;font-weight:700;color:var(--text);
+  display:flex;align-items:center;gap:6px;
+}
+.ep-card-num .play-arrow{ color:var(--accent-2);font-size:.7rem; }
+.ep-card-title{
+  font-size:.78rem;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ep-list:not(.grid-mode) .ep-card{ flex-direction:row; }
+.ep-list:not(.grid-mode) .ep-card-thumb{ width:120px;flex-shrink:0; }
+.ep-list:not(.grid-mode) .ep-card-info{ flex:1;justify-content:center; }
+
+/* Below-player info bar (Season N • Episode M ... N Episodes / Now Playing card) */
+.now-playing-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 4px 4px;font-size:.85rem;
+}
+.now-playing-bar .left{ color:var(--text);font-weight:600; }
+.now-playing-bar .right{ color:var(--muted); }
+.now-playing-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 14px;font-size:.78rem;color:var(--muted);
+}
+.now-playing-card .npc-label{ color:var(--text);font-weight:700;font-size:.85rem;margin-bottom:2px; }
+
 /* ── Player toolbar (custom buttons over player) ── */
 .player-toolbar{
   position:absolute;top:14px;right:14px;display:flex;gap:6px;z-index:5;
@@ -1403,12 +1466,14 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
         </div>
       </div>
 
-      <!-- Episode list (TV series) lives in center column below the player -->
-      <div class="episode-list" id="episodeListBox" style="display:none;margin-top:20px;">
-        <div class="episode-list-head">
-          <h3 id="episodeListTitle">Episodes</h3>
-        </div>
-        <div class="episode-list-body" id="episodeListBody"></div>
+      <!-- Below-player info bar (series): Season N • Episode M     N Episodes -->
+      <div id="nowPlayingBar" class="now-playing-bar" style="display:none;">
+        <div class="left" id="npbLeft">—</div>
+        <div class="right" id="npbRight">—</div>
+      </div>
+      <div id="nowPlayingCard" class="now-playing-card" style="display:none;margin-top:6px;">
+        <div class="npc-label">Now Playing</div>
+        <div id="npcSubtitle">—</div>
       </div>
 
       <!-- Recommendations under the player (center column, fills width when right collapsed) -->
@@ -1418,8 +1483,25 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
       </div>
     </div>
 
-    <!-- RIGHT PANEL: TMDB info (poster, status, production, aired, title, synopsis, genres, trailer, cast) -->
+    <!-- RIGHT PANEL: Episode picker (series) + TMDB info -->
     <aside class="player-right" id="playerRight">
+      <!-- Episode picker (series only) — kept on top so it's the primary navigation -->
+      <div class="ep-picker" id="epPicker" style="display:none;">
+        <div class="ep-picker-head">
+          <select id="epSeasonSel" onchange="onEpSeasonChange(this.value)" aria-label="Season"></select>
+          <input type="number" id="epNumInput" min="1" placeholder="#" onkeydown="if(event.key==='Enter')onEpNumGo()" oninput="onEpNumInput()" aria-label="Episode number"/>
+          <div class="ep-view-btns">
+            <button class="ep-view-btn" id="epViewListBtn" onclick="setEpView('list')" title="List view">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button class="ep-view-btn active" id="epViewGridBtn" onclick="setEpView('grid')" title="Grid view">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="ep-list" id="epList"></div>
+      </div>
+
       <div class="pr-poster" id="prPosterWrap">
         <img id="prPoster" alt="" onerror="this.style.display='none'"/>
       </div>
@@ -1692,8 +1774,8 @@ function renderProfilePage(){
    VIP PAGE
    ════════════════════════════════════════════════════════════════════ */
 function renderVipPage(){
-  // VIP Zone: tampilkan film tier 'vip' (VIP saja) + 'free' (Basic + VIP)
-  const vipFilms = allFilms.filter(f=>f.tier==='vip' || f.tier==='free' || !f.tier);
+  // VIP Zone: tampilkan film tier 'vip' (VIP saja) + 'free' (Basic + VIP) — series di-dedupe
+  const vipFilms = _dedupeSeries(allFilms.filter(f=>f.tier==='vip' || f.tier==='free' || !f.tier));
   const grid = document.getElementById('vipGrid');
   const empty = document.getElementById('vipEmpty');
   const heroDesc = document.getElementById('vipHeroDesc');
@@ -1962,8 +2044,37 @@ async function enrichTmdbPosters(){
 // Film 'vip' hanya muncul di VIP Zone.
 function _mainGridFilter(f){ return f.tier !== 'vip'; }
 
+// Dedupe series: 1 row per series (pakai film dengan episode terkecil sebagai cover).
+// Kalau bukan series, biarkan apa adanya.
+function _dedupeSeries(items){
+  const seen = new Map(); // judul → film
+  const out = [];
+  for(const f of items){
+    if(f.tipe === 'series' && f.judul){
+      const prev = seen.get(f.judul);
+      if(!prev){
+        seen.set(f.judul, f);
+        out.push(f);
+      } else {
+        // Pilih episode terkecil sebagai cover (S01E01)
+        const prevEp = (prev.season||1)*1000 + (prev.episode||0);
+        const curEp = (f.season||1)*1000 + (f.episode||0);
+        if(curEp < prevEp){
+          // Replace di out array
+          const idx = out.indexOf(prev);
+          if(idx >= 0) out[idx] = f;
+          seen.set(f.judul, f);
+        }
+      }
+    } else {
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 function renderHome(){
-  const mainFilms = allFilms.filter(_mainGridFilter);
+  const mainFilms = _dedupeSeries(allFilms.filter(_mainGridFilter));
   const movies = mainFilms.filter(f=>f.tipe!=='series');
   const tvs = mainFilms.filter(f=>f.tipe==='series');
 
@@ -2093,28 +2204,22 @@ function rowScroll(id, dir){
 
 function renderMoviesPage(){
   const q=(document.getElementById('moviesSearchInput')?.value||'').toLowerCase().trim();
-  let items = allFilms.filter(f=>f.tipe!=='series' && _mainGridFilter(f));
+  let items = _dedupeSeries(allFilms.filter(f=>f.tipe!=='series' && _mainGridFilter(f)));
   if(q) items = items.filter(f=>(f.judul||'').toLowerCase().includes(q));
   renderGrid('moviesPageGrid', items);
 }
 function renderTvPage(){
   const q=(document.getElementById('tvSearchInput')?.value||'').toLowerCase().trim();
-  let items = allFilms.filter(f=>f.tipe==='series' && _mainGridFilter(f));
-  // Group by judul (series) — pick latest episode as cover
-  const map={};
-  items.forEach(f=>{
-    if(!map[f.judul] || (f.episode||0)>(map[f.judul].episode||0)) map[f.judul]=f;
-  });
-  let arr=Object.values(map);
+  let arr = _dedupeSeries(allFilms.filter(f=>f.tipe==='series' && _mainGridFilter(f)));
   if(q) arr = arr.filter(f=>(f.judul||'').toLowerCase().includes(q));
   renderGrid('tvPageGrid', arr);
 }
 function renderBrowsePage(){
   // Browse tampilkan semua kecuali film VIP-only (yang khusus di VIP Zone)
-  renderGrid('browseGrid', allFilms.filter(_mainGridFilter));
+  renderGrid('browseGrid', _dedupeSeries(allFilms.filter(_mainGridFilter)));
 }
 function renderWatchlistPage(){
-  const items = allFilms.filter(f=>watchlist.includes(String(f.id)));
+  const items = _dedupeSeries(allFilms.filter(f=>watchlist.includes(String(f.id))));
   if(!items.length){
     document.getElementById('watchlistGrid').innerHTML='';
     document.getElementById('watchlistEmpty').style.display='block';
@@ -2125,12 +2230,12 @@ function renderWatchlistPage(){
 }
 function renderSearchInitial(){
   document.getElementById('searchTitle').textContent='Trending Now';
-  renderGrid('searchGrid', allFilms.slice(0,28));
+  renderGrid('searchGrid', _dedupeSeries(allFilms).slice(0,28));
 }
 function onSearchInput(){
   const q=(document.getElementById('searchInput')?.value||'').toLowerCase().trim();
   const type=(document.getElementById('searchType')?.value||'all');
-  let items=[...allFilms];
+  let items=_dedupeSeries(allFilms);
   if(type==='movie') items=items.filter(f=>f.tipe!=='series');
   if(type==='series') items=items.filter(f=>f.tipe==='series');
   if(q){
@@ -2220,7 +2325,9 @@ async function openFilm(film, opts){
   if(film.tipe==='series'){
     renderEpisodeList(film);
   }else{
-    document.getElementById('episodeListBox').style.display='none';
+    document.getElementById('epPicker').style.display='none';
+    document.getElementById('nowPlayingBar').style.display='none';
+    document.getElementById('nowPlayingCard').style.display='none';
   }
 
   // Init video player
@@ -2241,26 +2348,204 @@ async function openFilm(film, opts){
   loadFilmExtras(film);
 }
 
-function renderEpisodeList(film){
+/* ════════════════════════════════════════════════════════════════════
+   EPISODE PICKER (Netflix-style sidebar)
+   ════════════════════════════════════════════════════════════════════ */
+let epPickerState = {
+  view: (localStorage.getItem('zaein_ep_view') || 'grid'), // 'grid' | 'list'
+  currentSeason: 1,
+  seriesFilms: [],          // semua episode (allFilms filtered by judul)
+  tmdbBySeason: {},         // { season → [{episode_number, name, still_path}] }
+  tmdbId: null,
+};
+
+async function renderEpisodeList(film){
+  const picker = document.getElementById('epPicker');
+  const npb = document.getElementById('nowPlayingBar');
+  const npc = document.getElementById('nowPlayingCard');
+
   // Group all films with same judul where tipe==='series'
-  const eps = allFilms.filter(f=>f.tipe==='series' && f.judul===film.judul).sort((a,b)=>(a.episode||0)-(b.episode||0));
-  if(!eps.length){ document.getElementById('episodeListBox').style.display='none'; return; }
-  document.getElementById('episodeListBox').style.display='block';
-  document.getElementById('episodeListTitle').textContent = `${eps.length} Episode${eps.length>1?'s':''}`;
-  const body=document.getElementById('episodeListBody');
-  body.innerHTML = eps.map(ep=>`
-    <div class="episode-item${ep.id===film.id?' active':''}" data-id="${ep.id}">
-      <div class="episode-num">${ep.episode||'-'}</div>
-      <div class="episode-name">Episode ${ep.episode||'?'}</div>
-    </div>
-  `).join('');
-  body.querySelectorAll('.episode-item').forEach(it=>{
-    it.addEventListener('click',()=>{
-      const id=it.dataset.id;
-      const next = eps.find(e=>String(e.id)===String(id));
+  const eps = allFilms.filter(f=>f.tipe==='series' && f.judul===film.judul);
+  if(!eps.length){
+    picker.style.display='none';
+    npb.style.display='none';
+    npc.style.display='none';
+    return;
+  }
+  picker.style.display='flex';
+  npb.style.display='flex';
+  npc.style.display='block';
+
+  epPickerState.seriesFilms = eps;
+  epPickerState.currentSeason = film.season || 1;
+  epPickerState.tmdbId = film.tmdb_id || null;
+  epPickerState.tmdbBySeason = {};
+
+  // Apply view mode
+  applyEpView();
+
+  // Build season dropdown
+  const seasons = Array.from(new Set(eps.map(e=>e.season||1))).sort((a,b)=>a-b);
+  const sel = document.getElementById('epSeasonSel');
+  sel.innerHTML = seasons.map(s => {
+    const count = eps.filter(e=>(e.season||1)===s).length;
+    return `<option value="${s}" ${s===epPickerState.currentSeason?'selected':''}>Season ${s} (${count} ep)</option>`;
+  }).join('');
+
+  // Set episode number input
+  document.getElementById('epNumInput').value = film.episode || '';
+
+  // Update bottom info bar
+  updateNowPlayingBar(film);
+
+  // Render the list synchronously with whatever metadata we have, then enrich w/ TMDB async
+  renderEpListForSeason(epPickerState.currentSeason, film.id);
+
+  // Try to fetch TMDB tmdb_id if we don't have one — use the same pattern as loadFilmExtras
+  if(!epPickerState.tmdbId){
+    try{
+      if(session){
+        const r = await fetch(`${apiBase()}/api/tmdb/search?type=tv&query=${encodeURIComponent(film.judul||'')}`, {
+          headers: { Authorization: 'Bearer '+session.access_token },
+        });
+        const d = await r.json();
+        if(d.ok && d.data && d.data.results && d.data.results.length){
+          epPickerState.tmdbId = d.data.results[0].id;
+        }
+      }
+    }catch{}
+  }
+  if(epPickerState.tmdbId){
+    fetchTmdbSeasonAndRerender(epPickerState.currentSeason, film.id);
+  }
+}
+
+function applyEpView(){
+  const list = document.getElementById('epList');
+  if(epPickerState.view === 'grid'){
+    list.classList.add('grid-mode');
+    document.getElementById('epViewGridBtn').classList.add('active');
+    document.getElementById('epViewListBtn').classList.remove('active');
+  } else {
+    list.classList.remove('grid-mode');
+    document.getElementById('epViewListBtn').classList.add('active');
+    document.getElementById('epViewGridBtn').classList.remove('active');
+  }
+}
+
+function setEpView(v){
+  epPickerState.view = v;
+  localStorage.setItem('zaein_ep_view', v);
+  applyEpView();
+}
+
+function onEpSeasonChange(seasonStr){
+  const season = parseInt(seasonStr, 10) || 1;
+  epPickerState.currentSeason = season;
+  // Pick first available episode in this season as new "current"
+  const epsInSeason = epPickerState.seriesFilms.filter(e=>(e.season||1)===season).sort((a,b)=>(a.episode||0)-(b.episode||0));
+  const firstEp = epsInSeason[0];
+  if(firstEp && firstEp.id !== (currentFilm && currentFilm.id)){
+    openFilm(firstEp);
+    return;
+  }
+  renderEpListForSeason(season, currentFilm && currentFilm.id);
+  if(epPickerState.tmdbId) fetchTmdbSeasonAndRerender(season, currentFilm && currentFilm.id);
+}
+
+function onEpNumGo(){
+  const epNum = parseInt(document.getElementById('epNumInput').value, 10);
+  if(!epNum || epNum < 1) return;
+  const target = epPickerState.seriesFilms.find(e =>
+    (e.season||1) === epPickerState.currentSeason && (e.episode||0) === epNum
+  );
+  if(target) openFilm(target);
+}
+
+function onEpNumInput(){
+  // (UX) Soft-scroll active card into view if the typed episode exists
+  const epNum = parseInt(document.getElementById('epNumInput').value, 10);
+  if(!epNum) return;
+  const card = document.querySelector(`#epList [data-ep="${epNum}"]`);
+  if(card) card.scrollIntoView({ block:'center', behavior:'smooth' });
+}
+
+function renderEpListForSeason(season, activeId){
+  const eps = epPickerState.seriesFilms
+    .filter(e=>(e.season||1)===season)
+    .sort((a,b)=>(a.episode||0)-(b.episode||0));
+  const tmdbEps = epPickerState.tmdbBySeason[season] || [];
+  const tmdbByNum = {};
+  tmdbEps.forEach(t => { tmdbByNum[t.episode_number] = t; });
+
+  const STILL_BASE = 'https://image.tmdb.org/t/p/w300';
+  const list = document.getElementById('epList');
+  if(!eps.length){
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:.85rem;">Tidak ada episode di Season '+season+'</div>';
+    return;
+  }
+  list.innerHTML = eps.map(ep => {
+    const num = ep.episode || 0;
+    const t = tmdbByNum[num];
+    const epTitle = t && t.name ? t.name : `Episode ${num || '?'}`;
+    const still = t && t.still_path ? STILL_BASE + t.still_path : '';
+    const active = ep.id === activeId;
+    const thumbStyle = still ? `style="background-image:url('${still}')"` : '';
+    const placeholder = still ? '' : `<div class="ph">Ep ${num || '?'}</div>`;
+    return `
+      <div class="ep-card${active?' active':''}" data-id="${ep.id}" data-ep="${num}">
+        <div class="ep-card-thumb" ${thumbStyle}>${placeholder}</div>
+        <div class="ep-card-info">
+          <div class="ep-card-num">Ep ${num || '?'} ${active?'<span class="play-arrow">▶</span>':''}</div>
+          <div class="ep-card-title" title="${escapeHtml(epTitle)}">${escapeHtml(epTitle)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  list.querySelectorAll('.ep-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.dataset.id;
+      const next = eps.find(e => String(e.id) === String(id));
       if(next) openFilm(next);
     });
   });
+}
+
+async function fetchTmdbSeasonAndRerender(season, activeId){
+  if(!epPickerState.tmdbId) return;
+  if(epPickerState.tmdbBySeason[season]){
+    renderEpListForSeason(season, activeId);
+    return;
+  }
+  if(!session) return;
+  try{
+    const r = await fetch(`${apiBase()}/api/tmdb/tv/${epPickerState.tmdbId}/season/${season}`, {
+      headers: { Authorization: 'Bearer '+session.access_token },
+    });
+    const d = await r.json();
+    if(d.ok && d.data && Array.isArray(d.data.episodes)){
+      epPickerState.tmdbBySeason[season] = d.data.episodes.map(e => ({
+        episode_number: e.episode_number,
+        name: e.name,
+        still_path: e.still_path,
+      }));
+      renderEpListForSeason(season, activeId);
+    }
+  }catch{}
+}
+
+function updateNowPlayingBar(film){
+  if(!film || film.tipe!=='series') return;
+  const totalEpsInSeason = epPickerState.seriesFilms.filter(e=>(e.season||1)===(film.season||1)).length;
+  document.getElementById('npbLeft').textContent =
+    `Season ${film.season||1} • Episode ${film.episode||'?'}`;
+  document.getElementById('npbRight').textContent =
+    `${totalEpsInSeason} Episode${totalEpsInSeason>1?'s':''}`;
+  // Now playing card subtitle: TMDB episode title kalau ada
+  const tmdbEps = epPickerState.tmdbBySeason[film.season||1] || [];
+  const t = tmdbEps.find(x => x.episode_number === (film.episode||0));
+  const epTitle = (t && t.name) ? t.name : `Episode ${film.episode||'?'}`;
+  document.getElementById('npcSubtitle').textContent = epTitle;
 }
 
 /* ────────────────────────────────────────────────────────────────────
