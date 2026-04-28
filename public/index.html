@@ -2655,12 +2655,24 @@ async function _resolveFilmSources(film){
     audios.push({ name: 'Original', path: videos[0].path });
   }
   // ── Build subtitles array ──
+  // Merges manual subtitles (from admin upload) with auto-extracted subtitles
+  // (from zaeinstore-processor → zaeinstore-subtitles via jsDelivr).
   const subtitles = [];
   if(Array.isArray(film.subtitles)){
     for(const s of film.subtitles){
       if(!s) continue;
       const url = s.url || s.stream_url || await _resolveDrivePath(s.drive_path);
-      if(url) subtitles.push({ name: s.name || s.language || 'Subtitle', path: url });
+      if(url) subtitles.push({ name: s.name || s.language || 'Subtitle', path: url, language: s.language || '' });
+    }
+  }
+  if(Array.isArray(film.auto_subtitle_tracks)){
+    const seen = new Set(subtitles.map(s => (s.language||'').toLowerCase()));
+    for(const t of film.auto_subtitle_tracks){
+      if(!t || !t.url) continue;
+      const lang = (t.language || '').toLowerCase();
+      if(seen.has(lang)) continue; // manual subtitle wins if same language present
+      seen.add(lang);
+      subtitles.push({ name: t.label || t.language || 'Auto', path: t.url, language: t.language || '' });
     }
   }
   return { videos, audios, subtitles };
