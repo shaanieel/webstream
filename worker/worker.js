@@ -715,7 +715,8 @@ async function catalogList(request, env) {
   // (Home vs VIP Zone). Gate akses pas play tetap dicek di openFilm() + server saat
   // fetch stream URL kalau perlu. Ini biar badge "VIP" tetap keliatan sebagai teaser
   // di grid utama meski user bukan VIP, sama kayak Netflix.
-  const path = '/films?select=*&order=created_at.desc';
+  // Nested-select auto_subtitle_tracks via PostgREST relationship (ON films.id = auto_subtitle_tracks.film_id).
+  const path = '/films?select=*,auto_subtitle_tracks(language,label,url,source)&order=created_at.desc';
   // Backward-compat: frontend lama boleh pakai ?tier=free untuk minta subset non-VIP
   let finalPath = path;
   if (tierFilter === 'free') {
@@ -781,6 +782,128 @@ async function adminFilmDelete(request, env, id) {
     method: 'DELETE',
   });
   if (!r.ok) return err('Gagal hapus', 500);
+  return json({ ok: true });
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Auto-subtitle pipeline (zaeinstore-processor)
+//
+// Flow:
+//   1. Admin clicks "Extract Subtitle" on a film row → POST /api/admin/extract-subs
+//   2. Worker validates admin, inserts subtitle_jobs row(s) (1 per film/episode),
+//      then dispatches the GitHub Actions workflow on zaeinstore-processor.
+//   3. GitHub Actions runs ffprobe/ffmpeg on the Drive Index URL, pushes .vtt
+//      files to zaeinstore-subtitles, upserts auto_subtitle_tracks rows.
+//   4. Player loads film → catalog returns auto_subtitle_tracks → captions menu.
+// ───────────────────────────────────────────────────────────────────
+
+async function dispatchProcessorWorkflow(env) {
+  const repo = env.GITHUB_PROCESSOR_REPO;
+  const token = env.GITHUB_TOKEN;
+  if (!repo || !token) {
+    return { ok: false, status: 0, error: 'GITHUB_PROCESSOR_REPO atau GITHUB_TOKEN belum di-set di Cloudflare worker secrets' };
+  }
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/process.yml/dispatches`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'zaeinstream-worker',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ref: 'main' }),
+  });
+  if (r.ok) return { ok: true, status: r.status };
+  const body = await r.text();
+  return { ok: false, status: r.status, error: body.slice(0, 400) };
+}
+
+// POST /api/admin/extract-subs   body: { film_ids: [bigint] }  or { film_id: bigint }
+async function adminExtractSubsEnqueue(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); }
+  catch { return err('Body harus JSON { film_id } atau { film_ids: [...] }', 400); }
+  let ids = [];
+  if (Array.isArray(body.film_ids)) ids = body.film_ids;
+  else if (body.film_id != null) ids = [body.film_id];
+  ids = ids.map(x => Number(x)).filter(x => Number.isFinite(x) && x > 0);
+  if (!ids.length) return err('Sertakan film_id atau film_ids', 400);
+
+  // Ambil film rows untuk dapat drive_path (job butuh path saat processor jalan).
+  const filmsR = await supabaseRest(
+    env,
+    `/films?id=in.(${ids.join(',')})&select=id,judul,drive_path,tipe`,
+  );
+  if (!filmsR.ok) return err('Gagal ambil films: ' + JSON.stringify(filmsR.data), 500);
+  const films = Array.isArray(filmsR.data) ? filmsR.data : [];
+  if (!films.length) return err('Tidak ada film ditemukan untuk id tersebut', 404);
+
+  const now = new Date().toISOString();
+  const rows = films
+    .filter(f => f.drive_path)
+    .map(f => ({
+      film_id: f.id,
+      drive_path: f.drive_path,
+      status: 'pending',
+      created_at: now,
+    }));
+  if (!rows.length) return err('Film terpilih tidak punya drive_path', 400);
+
+  const insR = await supabaseRest(env, '/subtitle_jobs', {
+    method: 'POST',
+    body: JSON.stringify(rows),
+  });
+  if (!insR.ok) {
+    return err('Gagal insert subtitle_jobs: ' + JSON.stringify(insR.data), 500);
+  }
+  const jobs = Array.isArray(insR.data) ? insR.data : [];
+
+  // Trigger workflow (best-effort; cron cadangan tetap jalan tiap 15 menit).
+  const dispatch = await dispatchProcessorWorkflow(env);
+  return json({
+    ok: true,
+    enqueued: jobs.length,
+    skipped: films.length - rows.length,
+    dispatch,
+    jobs: jobs.map(j => ({ id: j.id, film_id: j.film_id, status: j.status })),
+  });
+}
+
+// GET /api/admin/extract-subs/status?film_id=...&limit=50
+async function adminExtractSubsStatus(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const u = new URL(request.url);
+  const limit = Math.min(200, Math.max(1, parseInt(u.searchParams.get('limit') || '50', 10)));
+  const filmId = u.searchParams.get('film_id');
+  let qs = `?select=id,film_id,drive_path,status,error_msg,attempt,started_at,finished_at,created_at,films(judul,tipe,season,episode)&order=created_at.desc&limit=${limit}`;
+  if (filmId) qs += `&film_id=eq.${encodeURIComponent(filmId)}`;
+  const r = await supabaseRest(env, `/subtitle_jobs${qs}`);
+  if (!r.ok) return err('Gagal load jobs: ' + JSON.stringify(r.data), 500);
+  return json({ ok: true, jobs: r.data || [] });
+}
+
+// POST /api/admin/extract-subs/dispatch  — kick the workflow without enqueueing
+//   (useful kalau ada job pending yang stuck karena dispatch sebelumnya gagal)
+async function adminExtractSubsDispatch(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const dispatch = await dispatchProcessorWorkflow(env);
+  return json({ ok: dispatch.ok, dispatch });
+}
+
+// DELETE /api/admin/extract-subs/:job_id   — cancel/clean a job row
+async function adminExtractSubsDelete(request, env, jobId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, `/subtitle_jobs?id=eq.${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
+  });
+  if (!r.ok) return err('Gagal hapus job', 500);
   return json({ ok: true });
 }
 
@@ -989,6 +1112,21 @@ export default {
       const m = pathname.match(/^\/api\/admin\/films\/([^/]+)$/);
       if (m && request.method === 'PATCH') return adminFilmUpdate(request, env, m[1]);
       if (m && request.method === 'DELETE') return adminFilmDelete(request, env, m[1]);
+    }
+
+    // === Admin: auto-subtitle pipeline (zaeinstore-processor) ===
+    if (pathname === '/api/admin/extract-subs' && request.method === 'POST') {
+      return adminExtractSubsEnqueue(request, env);
+    }
+    if (pathname === '/api/admin/extract-subs/status' && request.method === 'GET') {
+      return adminExtractSubsStatus(request, env);
+    }
+    if (pathname === '/api/admin/extract-subs/dispatch' && request.method === 'POST') {
+      return adminExtractSubsDispatch(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/extract-subs\/([^/]+)$/);
+      if (m && request.method === 'DELETE') return adminExtractSubsDelete(request, env, m[1]);
     }
 
     // === Admin: users ===
