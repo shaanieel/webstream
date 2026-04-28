@@ -2381,6 +2381,14 @@ async function renderEpisodeList(film){
   epPickerState.tmdbId = film.tmdb_id || null;
   epPickerState.tmdbBySeason = {};
 
+  console.log('[ep-picker] open series', {
+    judul: film.judul,
+    tmdb_id_in_db: film.tmdb_id,
+    current_season: epPickerState.currentSeason,
+    episode_count: eps.length,
+    seasons: Array.from(new Set(eps.map(e=>e.season||1))).sort(),
+  });
+
   // Apply view mode
   applyEpView();
 
@@ -2405,18 +2413,23 @@ async function renderEpisodeList(film){
   if(!epPickerState.tmdbId){
     try{
       if(session){
+        console.log('[ep-picker] tmdb search by judul', film.judul);
         const r = await fetch(`${apiBase()}/api/tmdb/search?type=tv&query=${encodeURIComponent(film.judul||'')}`, {
           headers: { Authorization: 'Bearer '+session.access_token },
         });
         const d = await r.json();
+        console.log('[ep-picker] tmdb search result', d);
         if(d.ok && d.data && d.data.results && d.data.results.length){
           epPickerState.tmdbId = d.data.results[0].id;
+          console.log('[ep-picker] resolved tmdb_id from search:', epPickerState.tmdbId, 'name:', d.data.results[0].name);
         }
       }
-    }catch{}
+    }catch(e){ console.warn('[ep-picker] tmdb search err', e); }
   }
   if(epPickerState.tmdbId){
     fetchTmdbSeasonAndRerender(epPickerState.currentSeason, film.id);
+  } else {
+    console.warn('[ep-picker] no tmdb_id resolved — chapter titles will fall back to filename or "Episode N"');
   }
 }
 
@@ -2530,19 +2543,31 @@ async function fetchTmdbSeasonAndRerender(season, activeId){
   }
   if(!session) return;
   try{
+    console.log('[ep-picker] fetch tmdb season', { tmdbId: epPickerState.tmdbId, season });
     const r = await fetch(`${apiBase()}/api/tmdb/tv/${epPickerState.tmdbId}/season/${season}`, {
       headers: { Authorization: 'Bearer '+session.access_token },
     });
     const d = await r.json();
-    if(d.ok && d.data && Array.isArray(d.data.episodes)){
+    if(!d.ok){
+      console.warn('[ep-picker] tmdb season fetch failed', d);
+      return;
+    }
+    if(d.data && Array.isArray(d.data.episodes)){
       epPickerState.tmdbBySeason[season] = d.data.episodes.map(e => ({
         episode_number: e.episode_number,
         name: e.name,
         still_path: e.still_path,
       }));
+      console.log('[ep-picker] tmdb season loaded', {
+        season,
+        episodes_returned: d.data.episodes.length,
+        first_ep: d.data.episodes[0] ? { num: d.data.episodes[0].episode_number, name: d.data.episodes[0].name, has_still: !!d.data.episodes[0].still_path } : null,
+      });
       renderEpListForSeason(season, activeId);
+    } else {
+      console.warn('[ep-picker] tmdb season returned no episodes', d);
     }
-  }catch{}
+  }catch(e){ console.warn('[ep-picker] tmdb season err', e); }
 }
 
 function updateNowPlayingBar(film){
@@ -3524,6 +3549,11 @@ async function loadFilmExtras(film){
         tmdbId = d.data.results[0].id;
       }
     }catch{}
+  }
+  // Bagikan tmdb_id ke episode picker (untuk fetch season episodes) — kalau series & belum ke-set
+  if(film.tipe==='series' && tmdbId && !epPickerState.tmdbId){
+    epPickerState.tmdbId = tmdbId;
+    fetchTmdbSeasonAndRerender(epPickerState.currentSeason, film.id);
   }
   // Helper untuk fallback trailer manual saja (kalau gak ada tmdb_id atau TMDB fail)
   const showManualTrailerOnly = () => {
