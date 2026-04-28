@@ -1692,7 +1692,8 @@ function renderProfilePage(){
    VIP PAGE
    ════════════════════════════════════════════════════════════════════ */
 function renderVipPage(){
-  const vipFilms = allFilms.filter(f=>f.tier==='vip');
+  // VIP Zone: tampilkan film tier 'vip' (VIP saja) + 'free' (Basic + VIP)
+  const vipFilms = allFilms.filter(f=>f.tier==='vip' || f.tier==='free' || !f.tier);
   const grid = document.getElementById('vipGrid');
   const empty = document.getElementById('vipEmpty');
   const heroDesc = document.getElementById('vipHeroDesc');
@@ -1956,11 +1957,17 @@ async function enrichTmdbPosters(){
 /* ════════════════════════════════════════════════════════════════════
    RENDER PAGES
    ════════════════════════════════════════════════════════════════════ */
-function renderHome(){
-  const movies = allFilms.filter(f=>f.tipe!=='series');
-  const tvs = allFilms.filter(f=>f.tipe==='series');
+// Filter yang pas untuk halaman utama (Home/Movies/TV/Trending/Browse):
+// tampilkan film tier 'free' (Basic+VIP) dan 'basic' (Basic saja).
+// Film 'vip' hanya muncul di VIP Zone.
+function _mainGridFilter(f){ return f.tier !== 'vip'; }
 
-  // Hero: pakai film pertama dengan backdrop
+function renderHome(){
+  const mainFilms = allFilms.filter(_mainGridFilter);
+  const movies = mainFilms.filter(f=>f.tipe!=='series');
+  const tvs = mainFilms.filter(f=>f.tipe==='series');
+
+  // Hero: pakai film pertama dengan backdrop (termasuk VIP — oke sebagai teaser)
   const heroFilm = allFilms.find(f=>f.backdrop_url) || allFilms[0];
   if(heroFilm){
     document.getElementById('heroBg').style.backgroundImage = heroFilm.backdrop_url ? `url('${heroFilm.backdrop_url}')` : (heroFilm.poster_url ? `url('${heroFilm.poster_url}')` : '');
@@ -1970,7 +1977,7 @@ function renderHome(){
   }
 
   renderContinueWatching();
-  renderGrid('trendingGrid', allFilms.slice(0,14));
+  renderGrid('trendingGrid', mainFilms.slice(0,14));
   renderGrid('moviesGrid', movies.slice(0,7));
   renderGrid('tvGrid', tvs.slice(0,7));
 }
@@ -2086,13 +2093,13 @@ function rowScroll(id, dir){
 
 function renderMoviesPage(){
   const q=(document.getElementById('moviesSearchInput')?.value||'').toLowerCase().trim();
-  let items = allFilms.filter(f=>f.tipe!=='series');
+  let items = allFilms.filter(f=>f.tipe!=='series' && _mainGridFilter(f));
   if(q) items = items.filter(f=>(f.judul||'').toLowerCase().includes(q));
   renderGrid('moviesPageGrid', items);
 }
 function renderTvPage(){
   const q=(document.getElementById('tvSearchInput')?.value||'').toLowerCase().trim();
-  let items = allFilms.filter(f=>f.tipe==='series');
+  let items = allFilms.filter(f=>f.tipe==='series' && _mainGridFilter(f));
   // Group by judul (series) — pick latest episode as cover
   const map={};
   items.forEach(f=>{
@@ -2103,8 +2110,8 @@ function renderTvPage(){
   renderGrid('tvPageGrid', arr);
 }
 function renderBrowsePage(){
-  // For now, sama dengan all films. Bisa dikembangkan jadi by genre kalau perlu
-  renderGrid('browseGrid', allFilms);
+  // Browse tampilkan semua kecuali film VIP-only (yang khusus di VIP Zone)
+  renderGrid('browseGrid', allFilms.filter(_mainGridFilter));
 }
 function renderWatchlistPage(){
   const items = allFilms.filter(f=>watchlist.includes(String(f.id)));
