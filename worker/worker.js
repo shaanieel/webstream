@@ -494,10 +494,14 @@ async function adminDriveTest(request, env) {
 // Catalog API (films) — public read, admin write
 // ───────────────────────────────────────────────────────────────────
 
-// GET /api/catalog?tier=free|vip|all  → list films
+// GET /api/catalog?tier=free|basic|vip|all  → list films
+// Tier semantics:
+//   free  = Basic + VIP (tampil di semua halaman, semua user bisa nonton)
+//   basic = Basic saja (tampil di halaman utama, semua user bisa nonton)
+//   vip   = VIP saja   (hanya VIP user yang bisa nonton)
 async function catalogList(request, env) {
   const u = new URL(request.url);
-  const tierFilter = u.searchParams.get('tier'); // 'free' | 'vip' | null
+  const tierFilter = u.searchParams.get('tier'); // 'free' | 'basic' | 'vip' | null
 
   // Coba ambil user untuk cek tier akses
   const user = await getUserFromAuth(request, env);
@@ -511,14 +515,22 @@ async function catalogList(request, env) {
     }
   }
 
-  // VIP boleh lihat semua, free hanya tier=free, guest hanya tier=free juga (preview)
-  let path = '/films?select=*&order=created_at.desc';
-  if (tierFilter === 'free' || userTier === 'free' || userTier === 'guest') {
-    path += '&or=(tier.eq.free,tier.is.null)';
+  // Kirim semua film ke frontend — frontend yang tentukan mana yang tampil di mana
+  // (Home vs VIP Zone). Gate akses pas play tetap dicek di openFilm() + server saat
+  // fetch stream URL kalau perlu. Ini biar badge "VIP" tetap keliatan sebagai teaser
+  // di grid utama meski user bukan VIP, sama kayak Netflix.
+  const path = '/films?select=*&order=created_at.desc';
+  // Backward-compat: frontend lama boleh pakai ?tier=free untuk minta subset non-VIP
+  let finalPath = path;
+  if (tierFilter === 'free') {
+    finalPath += '&or=(tier.eq.free,tier.eq.basic,tier.is.null)';
+  } else if (tierFilter === 'vip') {
+    finalPath += '&or=(tier.eq.vip,tier.eq.free,tier.is.null)';
+  } else if (tierFilter === 'basic') {
+    finalPath += '&tier.eq.basic';
   }
-  // VIP tidak filter — boleh lihat semua
 
-  const r = await supabaseRest(env, path);
+  const r = await supabaseRest(env, finalPath);
   if (!r.ok) return err('Gagal load katalog', 500);
   return json({ ok: true, user_tier: userTier, films: r.data || [] });
 }
@@ -537,7 +549,7 @@ async function adminFilmCreate(request, env) {
     tmdb_id: body.tmdb_id || null,
     episode: body.episode || null,
     season: body.season || null,
-    tier: body.tier === 'vip' ? 'vip' : 'free',
+    tier: (body.tier === 'vip' || body.tier === 'basic' || body.tier === 'free') ? body.tier : 'free',
     poster_url: body.poster_url || null,
     overview: body.overview || null,
     genre: body.genre || null,
