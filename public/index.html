@@ -2507,11 +2507,10 @@ function renderEpListForSeason(season, activeId){
   list.innerHTML = eps.map(ep => {
     const num = ep.episode || 0;
     const t = tmdbByNum[num];
-    // Title fallback chain: TMDB chapter title → filename (drive_path tanpa ext) → "Episode N"
+    // Title = nama file dari Drive (tanpa ext .mkv/.mp4). TMDB title TIDAK dipakai — user wants filename only.
     const filename = _filenameFromDrivePath(ep.drive_path);
-    const epTitle = (t && t.name) ? t.name
-                  : (filename ? filename
-                  : `Episode ${num || '?'}`);
+    const epTitle = filename || `Episode ${num || '?'}`;
+    // TMDB still_path tetap dipakai untuk thumbnail kanan (kalau tersedia) — bukan untuk title.
     const still = t && t.still_path ? STILL_BASE + t.still_path : '';
     const active = ep.id === activeId;
     const thumbStyle = still ? `style="background-image:url('${still}')"` : '';
@@ -2577,13 +2576,9 @@ function updateNowPlayingBar(film){
     `Season ${film.season||1} • Episode ${film.episode||'?'}`;
   document.getElementById('npbRight').textContent =
     `${totalEpsInSeason} Episode${totalEpsInSeason>1?'s':''}`;
-  // Now playing card subtitle: TMDB chapter → filename → "Episode N"
-  const tmdbEps = epPickerState.tmdbBySeason[film.season||1] || [];
-  const t = tmdbEps.find(x => x.episode_number === (film.episode||0));
+  // Now playing card subtitle = nama file dari Drive (tanpa ext) — sesuai permintaan user (no TMDB chapter title).
   const filename = _filenameFromDrivePath(film.drive_path);
-  const epTitle = (t && t.name) ? t.name
-                : (filename ? filename
-                : `Episode ${film.episode||'?'}`);
+  const epTitle = filename || `Episode ${film.episode||'?'}`;
   document.getElementById('npcSubtitle').textContent = epTitle;
 }
 
