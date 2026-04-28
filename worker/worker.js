@@ -454,7 +454,39 @@ async function adminHealthHandler(request, env) {
   } });
 }
 
-// POST /api/admin/drive/test — test resolve sebuah path drive (admin only)
+// Helper: detect video-file extensions so admin folder probe bisa decide
+// "series mode". Browser hampir cuma bisa play .mp4/.m4v native, tapi MKV/AVI
+// masih kita izinin karena player external dropdown bisa handle.
+const VIDEO_EXT_RE = /\.(mp4|m4v|mkv|webm|avi|mov)$/i;
+
+// Helper: tebak nomor episode dari nama file. Pattern paling sering kepakai:
+//   "S01E03", "Episode 4", "Ep05", "ep_05", "EP10", "01.", "- 03 -", "[03]"
+// Kalau gak ketemu, return null — caller akan fallback urut alfabet.
+function guessEpisodeNumber(filename) {
+  if (!filename) return null;
+  const base = filename.replace(/\.[^.]+$/, ''); // buang ekstensi
+  const patterns = [
+    /S\d{1,2}\s*[EX]\s*(\d{1,3})/i,           // S01E03, S1x03
+    /\bE(?:p(?:isode)?)?\s*[._-]?\s*(\d{1,3})\b/i, // E03, Ep03, Episode 3
+    /[\s\[\(_-]Ep\.?\s*(\d{1,3})\b/i,         // - Ep 3 -
+    /[\s\[\(_-](\d{1,3})\s*[\]\)_-]/,          // - 03 -, [03]
+    /^(\d{1,3})[\s._-]/,                       // 03 - The...
+  ];
+  for (const re of patterns) {
+    const m = base.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 0 && n < 999) return n;
+    }
+  }
+  return null;
+}
+
+// POST /api/admin/drive/test — test resolve sebuah path drive (admin only).
+// 2 mode:
+//   1. Path file (tidak akhiri "/"): cek bisa di-stream → return stream_url
+//   2. Path folder (akhiri "/"):    cek isi folder → return video_files[]
+//      Kalau ada ≥2 video file → frontend bisa treat sebagai SERIES.
 async function adminDriveTest(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
@@ -465,6 +497,7 @@ async function adminDriveTest(request, env) {
   if (!gdiBase) return err('GDI_WORKER_URL belum di-set', 500);
   const drivePath = normalizeDrivePath(path, gdiBase);
   const fullUrl = `${gdiBase}${drivePath}`;
+  const isFolder = drivePath.endsWith('/');
   try {
     const r = await gdiFetch(env, fullUrl, {
       method: 'POST',
@@ -473,11 +506,52 @@ async function adminDriveTest(request, env) {
     });
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch { data = null; }
-    // ok=true selalu (API call kita berhasil); gdi_ok untuk hasil resolve di GDI.
+
+    // ── Folder mode ───────────────────────────────────────────────
+    if (isFolder && data && data.data && Array.isArray(data.data.files)) {
+      const allFiles = data.data.files;
+      const folderMime = 'application/vnd.google-apps.folder';
+      const videoFiles = allFiles
+        .filter(f => f.mimeType !== folderMime && VIDEO_EXT_RE.test(f.name || ''))
+        .map(f => {
+          const ep = guessEpisodeNumber(f.name);
+          return {
+            name: f.name,
+            path: drivePath + f.name,
+            size: f.size || null,
+            episode_guess: ep,
+          };
+        });
+      // Sort by ep_guess if all have one, else by filename natural sort.
+      const allHaveEp = videoFiles.every(v => v.episode_guess != null);
+      if (allHaveEp) {
+        videoFiles.sort((a, b) => a.episode_guess - b.episode_guess);
+      } else {
+        videoFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+      }
+      return json({
+        ok: true,
+        gdi_ok: r.ok,
+        gdi_status: r.status,
+        is_folder: true,
+        drive_path: drivePath,
+        gdi_url_called: fullUrl,
+        gdi_base: gdiBase,
+        service_binding_used: !!(env.GDI && typeof env.GDI.fetch === 'function'),
+        video_files: videoFiles,
+        non_video_count: allFiles.length - videoFiles.length,
+        // legacy fields supaya frontend lama tetap kebaca tanpa pecah
+        stream_url: null,
+        data: { files_summary: { total: allFiles.length, videos: videoFiles.length } },
+      });
+    }
+
+    // ── File mode (existing behaviour) ────────────────────────────
     return json({
       ok: true,
       gdi_ok: r.ok,
       gdi_status: r.status,
+      is_folder: false,
       drive_path: drivePath,
       gdi_url_called: fullUrl,
       gdi_base: gdiBase,
