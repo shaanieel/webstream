@@ -797,11 +797,45 @@ async function adminFilmDelete(request, env, id) {
 //   4. Player loads film → catalog returns auto_subtitle_tracks → captions menu.
 // ───────────────────────────────────────────────────────────────────
 
+// Hints for actionable next-step when GitHub workflow_dispatch fails.
+// Mapped from observed status codes to a short Indonesian message that
+// surfaces the most likely cause + fix without leaking secret values.
+function dispatchHintFor(status, repo) {
+  if (status === 404) {
+    return `Repo "${repo}" tidak ditemukan oleh GitHub API. Penyebab paling umum: (1) PAT GITHUB_TOKEN tidak punya scope "repo" + "workflow" (classic) atau "Actions: Read and write" (fine-grained); (2) PAT dibuat oleh akun yang tidak punya akses ke repo private ini; (3) GITHUB_PROCESSOR_REPO salah ketik (harus "owner/repo" persis); (4) Actions di-disable di repo settings. Cron 15-menit juga tidak akan jalan kalau Actions disabled.`;
+  }
+  if (status === 401) {
+    return `PAT GITHUB_TOKEN invalid atau expired. Generate baru di github.com/settings/tokens lalu update secret di Cloudflare worker.`;
+  }
+  if (status === 403) {
+    return `PAT GITHUB_TOKEN ditolak (kemungkinan rate-limited atau SSO belum di-authorize untuk repo ini). Cek SSO authorization di github.com/settings/tokens.`;
+  }
+  if (status === 422) {
+    return `GitHub menolak payload (kemungkinan branch "main" tidak ada di ${repo}, atau workflow file process.yml belum ada di branch tersebut).`;
+  }
+  return null;
+}
+
 async function dispatchProcessorWorkflow(env) {
   const repo = env.GITHUB_PROCESSOR_REPO;
   const token = env.GITHUB_TOKEN;
   if (!repo || !token) {
-    return { ok: false, status: 0, error: 'GITHUB_PROCESSOR_REPO atau GITHUB_TOKEN belum di-set di Cloudflare worker secrets' };
+    return {
+      ok: false,
+      status: 0,
+      error: 'GITHUB_PROCESSOR_REPO atau GITHUB_TOKEN belum di-set di Cloudflare worker secrets',
+      hint: 'Set kedua secret tersebut di dashboard Cloudflare → Workers → worker ini → Settings → Variables. Format GITHUB_PROCESSOR_REPO: "owner/repo" (mis. shaanieel/zaeinstore-processor).',
+    };
+  }
+  // Sanity-check repo format: must be "owner/repo" (no scheme, no trailing slash, no spaces).
+  // GitHub API tolerates a trailing slash but rejects URLs/whitespace with a confusing 404.
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+    return {
+      ok: false,
+      status: 0,
+      error: `GITHUB_PROCESSOR_REPO format invalid: "${repo}"`,
+      hint: 'Harus persis "owner/repo" (mis. shaanieel/zaeinstore-processor) — tanpa "https://github.com/", tanpa ".git", tanpa trailing slash, tanpa spasi.',
+    };
   }
   const url = `https://api.github.com/repos/${repo}/actions/workflows/process.yml/dispatches`;
   const r = await fetch(url, {
@@ -816,8 +850,18 @@ async function dispatchProcessorWorkflow(env) {
     body: JSON.stringify({ ref: 'main' }),
   });
   if (r.ok) return { ok: true, status: r.status };
-  const body = await r.text();
-  return { ok: false, status: r.status, error: body.slice(0, 400) };
+  const rawBody = await r.text();
+  let parsedMessage = null;
+  try {
+    const j = JSON.parse(rawBody);
+    if (j && typeof j.message === 'string') parsedMessage = j.message;
+  } catch { /* not JSON; keep raw */ }
+  return {
+    ok: false,
+    status: r.status,
+    error: parsedMessage || rawBody.slice(0, 400),
+    hint: dispatchHintFor(r.status, repo),
+  };
 }
 
 // POST /api/admin/extract-subs   body: { film_ids: [bigint] }  or { film_id: bigint }

@@ -293,3 +293,51 @@ curl "http://localhost:8787/api/subsource/search?q=Avengers&year=2019"
 **Admin panel "Network error / CORS"**
 - Pastikan `webstream` sudah di-deploy.
 - Worker sudah `Access-Control-Allow-Origin: *`, jadi domain `adminweb1.*.workers.dev` boleh akses tanpa perlu setting tambahan.
+
+**"Job di-enqueue, tapi workflow belum jalan" (tombol Sub di adminweb1)**
+
+Pesan ini muncul kalau worker berhasil INSERT row ke Supabase `subtitle_jobs` tapi
+gagal trigger GitHub Actions workflow di [`zaeinstore-processor`](https://github.com/shaanieel/zaeinstore-processor).
+Status code di pesan toast (`HTTP 404`/`401`/`422`) menunjukkan penyebab:
+
+- **HTTP 404** — paling umum. PAT `GITHUB_TOKEN` tidak bisa "lihat" repo processor.
+  Cek satu per satu:
+  1. **Scope PAT.** Classic PAT harus punya **`repo`** + **`workflow`** sekaligus.
+     Fine-grained PAT harus punya **Actions: Read and write** + **Contents: Read and write** untuk repo `zaeinstore-processor`.
+  2. **Akun pemilik PAT.** PAT harus dibuat oleh akun yang punya write access ke repo
+     (biasanya akun owner/`shaanieel`). PAT dari akun lain tanpa akses → 404.
+  3. **Nama repo.** `GITHUB_PROCESSOR_REPO` harus persis `owner/repo` (mis.
+     `shaanieel/zaeinstore-processor`) — tanpa `https://github.com/`, tanpa `.git`,
+     tanpa trailing slash. Worker sekarang validasi format ini dan reject lebih awal
+     kalau salah.
+  4. **Actions enabled.** Buka https://github.com/<owner>/zaeinstore-processor/settings/actions
+     → "Allow all actions and reusable workflows". Kalau Actions di-disable, baik
+     dispatch maupun cron 15-menit tidak akan jalan.
+
+- **HTTP 401** — PAT invalid atau expired. Generate baru di
+  https://github.com/settings/tokens, lalu update secret di Cloudflare worker:
+  ```bash
+  wrangler secret put GITHUB_TOKEN
+  ```
+
+- **HTTP 422** — branch `main` atau file `.github/workflows/process.yml` tidak ada
+  di branch tersebut di repo processor.
+
+Cara cepat verifikasi PAT dari terminal lokal:
+```bash
+curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST \
+  -H "Authorization: Bearer <PAT>" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/<owner>/zaeinstore-processor/actions/workflows/process.yml/dispatches \
+  -d '{"ref":"main"}'
+```
+- `204` = sukses, workflow jalan
+- `404` = scope/akses kurang (lihat di atas)
+- `401` = token salah/expired
+
+Kalau butuh re-trigger workflow tanpa enqueue ulang job (mis. ada job stuck di
+`pending`), panggil `POST /api/admin/extract-subs/dispatch`. Cron `*/15 * * * *`
+di processor juga akan pickup pending jobs otomatis — **tapi cuma kalau Actions
+enabled** dan workflow file bisa dijalankan.
