@@ -2470,6 +2470,13 @@ function onEpNumInput(){
   if(card) card.scrollIntoView({ block:'center', behavior:'smooth' });
 }
 
+// Ambil nama file dari drive_path tanpa ext (.mp4 / .mkv / .webm / .avi / .m4v / .mov)
+function _filenameFromDrivePath(drivePath){
+  if(!drivePath) return '';
+  const last = String(drivePath).split('/').filter(Boolean).pop() || '';
+  return last.replace(/\.(mp4|mkv|webm|avi|m4v|mov)$/i, '');
+}
+
 function renderEpListForSeason(season, activeId){
   const eps = epPickerState.seriesFilms
     .filter(e=>(e.season||1)===season)
@@ -2487,7 +2494,11 @@ function renderEpListForSeason(season, activeId){
   list.innerHTML = eps.map(ep => {
     const num = ep.episode || 0;
     const t = tmdbByNum[num];
-    const epTitle = t && t.name ? t.name : `Episode ${num || '?'}`;
+    // Title fallback chain: TMDB chapter title → filename (drive_path tanpa ext) → "Episode N"
+    const filename = _filenameFromDrivePath(ep.drive_path);
+    const epTitle = (t && t.name) ? t.name
+                  : (filename ? filename
+                  : `Episode ${num || '?'}`);
     const still = t && t.still_path ? STILL_BASE + t.still_path : '';
     const active = ep.id === activeId;
     const thumbStyle = still ? `style="background-image:url('${still}')"` : '';
@@ -2541,10 +2552,13 @@ function updateNowPlayingBar(film){
     `Season ${film.season||1} • Episode ${film.episode||'?'}`;
   document.getElementById('npbRight').textContent =
     `${totalEpsInSeason} Episode${totalEpsInSeason>1?'s':''}`;
-  // Now playing card subtitle: TMDB episode title kalau ada
+  // Now playing card subtitle: TMDB chapter → filename → "Episode N"
   const tmdbEps = epPickerState.tmdbBySeason[film.season||1] || [];
   const t = tmdbEps.find(x => x.episode_number === (film.episode||0));
-  const epTitle = (t && t.name) ? t.name : `Episode ${film.episode||'?'}`;
+  const filename = _filenameFromDrivePath(film.drive_path);
+  const epTitle = (t && t.name) ? t.name
+                : (filename ? filename
+                : `Episode ${film.episode||'?'}`);
   document.getElementById('npcSubtitle').textContent = epTitle;
 }
 

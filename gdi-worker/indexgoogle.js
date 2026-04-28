@@ -88,6 +88,20 @@ const authConfig = {
       "name": "Shared Drive",
       "protect_file_link": false
     },
+    // ── 12 folder tambahan (di-share via Google Drive ke akun yg punya REFRESH_TOKEN) ──
+    // Nama default "Bagikan N" — boleh diganti nanti sesuai isi folder.
+    { "id": "1iPa9y37olDS1RYl9pRrGwPE72sYlpu8N", "type": "folder", "name": "Bagikan 1",  "protect_file_link": false },
+    { "id": "1BAtbuEODvCayaycEZBWz9YkwC6yGO4ew", "type": "folder", "name": "Bagikan 2",  "protect_file_link": false },
+    { "id": "12zGOOkh4r9vC1DE2cbIhzqaVrpxPTHJ7", "type": "folder", "name": "Bagikan 3",  "protect_file_link": false },
+    { "id": "1ENy7-D859LYRYhaS5uW4PmhjK8IyXVBm", "type": "folder", "name": "Bagikan 4",  "protect_file_link": false },
+    { "id": "1xkqQQ0hsUYV_is3YJKQ9yuJeD66ldjhW", "type": "folder", "name": "Bagikan 5",  "protect_file_link": false },
+    { "id": "1VCRtTP2m2GsDDt80u19rVJps7GNEH6W1", "type": "folder", "name": "Bagikan 6",  "protect_file_link": false },
+    { "id": "1jzEvtUvgGurrsD0OlgDGbg3unxXw-bXS", "type": "folder", "name": "Bagikan 7",  "protect_file_link": false },
+    { "id": "1-FLlHwN5dAiAl7EOUo0Gjw1aoyy6x9if", "type": "folder", "name": "Bagikan 8",  "protect_file_link": false },
+    { "id": "1qJ2H7OuWCmLQaPmy5GaMWD0A12Vk-m30", "type": "folder", "name": "Bagikan 9",  "protect_file_link": false },
+    { "id": "18mXI2Aa3oLsN3I2Uoq-1lIO3xrkTIXxc", "type": "folder", "name": "Bagikan 10", "protect_file_link": false },
+    { "id": "1DHWVZ3gAvznluL11unxhttscrPWeSFMu", "type": "folder", "name": "Bagikan 11", "protect_file_link": false },
+    { "id": "19BqeMyKA2LZxZtp_0YOMHdjxZDc1XR1P", "type": "folder", "name": "Bagikan 12", "protect_file_link": false },
   ]
 };
 
