@@ -240,6 +240,20 @@ async function tmdbDetail(request, env, type, id) {
   }
 }
 
+// GET /api/tmdb/tv/:id/season/:n — episode list (dengan still_path & nama episode)
+async function tmdbSeason(request, env, id, season) {
+  if (!/^\d+$/.test(id)) return err('id TMDB harus angka');
+  if (!/^\d+$/.test(season)) return err('season harus angka');
+  try {
+    const r = await tmdbFetch(env, `/tv/${id}/season/${season}`);
+    const data = await r.json();
+    if (!r.ok) return err(`TMDB ${r.status}: ${data.status_message || ''}`, 502);
+    return json({ ok: true, data });
+  } catch (e) {
+    return err('TMDB error: ' + e.message, 502);
+  }
+}
+
 // GET /api/tmdb/multi?query=spider — search movie+tv+person sekaligus (untuk autocomplete)
 async function tmdbMulti(request, env) {
   const u = new URL(request.url);
@@ -945,6 +959,14 @@ export default {
         const u = await getUserFromAuth(request, env);
         if (!u) return err('Login dulu', 401);
         return tmdbDetail(request, env, m[1], m[2]);
+      }
+    }
+    {
+      const m = pathname.match(/^\/api\/tmdb\/tv\/(\d+)\/season\/(\d+)$/);
+      if (m && request.method === 'GET') {
+        const u = await getUserFromAuth(request, env);
+        if (!u) return err('Login dulu', 401);
+        return tmdbSeason(request, env, m[1], m[2]);
       }
     }
 
