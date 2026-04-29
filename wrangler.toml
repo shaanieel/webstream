@@ -28,6 +28,12 @@ SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
 GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
 # Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
+# Nama repo GitHub yang menjalankan workflow auto-subtitle (process.yml).
+# Bukan secret — ini cuma "owner/repo" publik yang dipanggil via GitHub API.
+# Dipin di sini supaya tidak ke-wipe setiap deploy (Cloudflare hapus plaintext
+# var yang tidak ada di [vars] tiap kali deploy). GITHUB_TOKEN tetap harus
+# di-set sebagai Secret via `wrangler secret put GITHUB_TOKEN`.
+GITHUB_PROCESSOR_REPO = "shaanieel/zaeinstore-processor"
 
 # === Service Binding ke gdi-worker ===
 # Cloudflare Workers TIDAK BISA fetch Worker lain di *.workers.dev via URL publik
