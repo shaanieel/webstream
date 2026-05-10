@@ -1369,6 +1369,18 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
         <button class="player-engine-btn" id="peBtn2" type="button" onclick="switchPlayerEngine(2)">Player 2</button>
       </div>
       <div class="player-wrap show-tools" id="playerWrap">
+        <!--
+          Player4Me iframe — primary player for ALL films (basic + vip).
+          When `film.video_url` is set we hide the legacy multi-track / Vidstack
+          players and serve this iframe alone. Drive Index integration only
+          shows BELOW (download / external player) for VIP rows.
+        -->
+        <iframe id="p4mFrame"
+          allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+          allowfullscreen
+          style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:5;"
+        ></iframe>
+
         <!-- Multitrack.JS player container (Quality / Audio / Subtitle / Speed all in built-in Settings menu) -->
         <div id="multitrackPlayer" style="width:100%;height:100%;"></div>
 
@@ -1564,7 +1576,13 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
    STATE & CONFIG
    ════════════════════════════════════════════════════════════════════ */
 let CONFIG = null;
+// `sb` adalah supabase client UTAMA (tempat session disimpan + auto-refresh).
+// Kalau external supabase di-set, kita pakai itu sebagai source-of-truth auth.
+// Kalau tidak, fallback ke local supabase (legacy behavior).
 let sb = null;
+// Secondary client untuk fallback login ketika akun cuma ada di salah satu
+// project. Diset paralel di bootstrap().
+let sbLocal = null;
 let currentUser = null;
 let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
@@ -1589,15 +1607,36 @@ async function bootstrap(){
     const r = await fetch('/api/config');
     CONFIG = await r.json();
     if(!CONFIG.ok && !CONFIG.supabase_url){ throw new Error('Config error'); }
-    sb = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key);
+    // External supabase is the cross-project auth target. When set, we make
+    // it the PRIMARY client (so new sessions live there — and login on this
+    // web also logs the user into the other web). Local supabase becomes the
+    // secondary client used to fall back for accounts that only exist here.
+    if(CONFIG.external_supabase_url && CONFIG.external_supabase_anon_key){
+      sb = supabase.createClient(CONFIG.external_supabase_url, CONFIG.external_supabase_anon_key, {
+        auth: { storageKey: 'sb-auth-external', persistSession: true, autoRefreshToken: true },
+      });
+      sbLocal = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key, {
+        auth: { storageKey: 'sb-auth-local', persistSession: true, autoRefreshToken: true },
+      });
+    }else{
+      sb = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key);
+      sbLocal = sb;
+    }
   }catch(e){
     console.error('Bootstrap error:', e);
     document.getElementById('authPage').innerHTML='<div style="text-align:center;color:#fca5a5;padding:40px;">Gagal memuat konfigurasi server. Coba refresh.</div>';
     return;
   }
 
-  // Cek session
-  const { data:{ session } } = await sb.auth.getSession();
+  // Cek session di external dulu (primary), lalu local sebagai fallback.
+  let session = null;
+  try { session = (await sb.auth.getSession()).data.session; } catch {}
+  if(!session && sbLocal && sbLocal !== sb){
+    try {
+      const local = (await sbLocal.auth.getSession()).data.session;
+      if(local){ session = local; }
+    } catch {}
+  }
   if(session){
     await onAuthSuccess(session);
   }else{
@@ -1622,12 +1661,17 @@ function showApp(){
 
 async function onAuthSuccess(session){
   currentUser = session.user;
-  // Load profile
+  // Profile lives in the LOCAL supabase (films, vip flag, expired_at). When
+  // the user logged in via external, the auth user_id may differ from local;
+  // worker's /api/me handles cross-project lookup by email, so we always go
+  // through the worker for profile data instead of querying supabase JS.
   try{
-    const { data } = await sb.from('users_profile')
-      .select('email,is_vip,expired_at')
-      .eq('user_id', currentUser.id).single();
-    currentProfile = data || null;
+    const r = await fetch('/api/me', {
+      headers: { Authorization: 'Bearer ' + session.access_token },
+    });
+    const d = await r.json();
+    currentProfile = (d && d.profile) || null;
+    if(d && d.tier){ /* worker already computed tier; we recompute below for parity */ }
   }catch{ currentProfile = null; }
 
   // Determine tier
@@ -1687,7 +1731,16 @@ async function doLogin(){
   btn.disabled=true;btn.textContent='Memuat…';
   msg.style.display='none';
   try{
-    const { data, error } = await sb.auth.signInWithPassword({email,password:pass});
+    // Cross-project: try external supabase first (where most accounts live
+    // because the user's other web also writes there). Fall back to local
+    // supabase for legacy webstream-only accounts (e.g. admin).
+    let data = null;
+    let error = null;
+    ({ data, error } = await sb.auth.signInWithPassword({email,password:pass}));
+    if(error && sbLocal && sbLocal !== sb){
+      const localTry = await sbLocal.auth.signInWithPassword({email,password:pass});
+      if(!localTry.error){ data = localTry.data; error = null; }
+    }
     if(error){
       msg.textContent=error.message;
       msg.className='auth-msg error';
@@ -1704,7 +1757,9 @@ async function doLogin(){
 
 async function confirmLogout(){
   if(!confirm('Yakin mau logout?')) return;
-  await sb.auth.signOut();
+  // Sign out of both clients to clear cross-project session storage.
+  try { await sb.auth.signOut(); } catch {}
+  if(sbLocal && sbLocal !== sb){ try { await sbLocal.auth.signOut(); } catch {} }
   // Clear both hash and path so we land on clean /
   history.replaceState(null, '', '/');
   location.reload();
@@ -2341,8 +2396,11 @@ async function openFilm(film, opts){
   document.getElementById('subsStatus').textContent='';
   document.getElementById('subsSearchInput').value=film.judul||'';
 
-  // Auto search subsource
-  setTimeout(()=>subsourceSearch(), 300);
+  // Auto search subsource — only for legacy (non-Player4Me) films. Player4Me
+  // ships its own subtitle picker so we don't need ours.
+  if(!film.video_url){
+    setTimeout(()=>subsourceSearch(), 300);
+  }
 
   // Load TMDB extra (cast, trailer, recommended)
   loadFilmExtras(film);
@@ -2596,12 +2654,24 @@ async function _resolveDrivePath(drivePath){
 }
 
 async function loadVideo(film){
+  // ── Player4Me primary path ─────────────────────────────────────────────
+  // New films are uploaded to Player4Me (iframe player). When `video_url`
+  // is set, that's the ONLY player we show. Drive Index integration is
+  // strictly an "extras" panel below the iframe for VIP films.
+  if(film && film.video_url){
+    return loadVideoPlayer4Me(film);
+  }
+
+  // ── Legacy fallback (films without Player4Me yet) ──────────────────────
   // Restore last engine preference (default Player 1)
   try{
     const saved = parseInt(localStorage.getItem(PLAYER_ENGINE_KEY)||'1', 10);
     activeEngine = (saved === 2) ? 2 : 1;
   }catch{ activeEngine = 1; }
   applyEngineButtons();
+
+  // Show legacy players (in case a previous Player4Me load hid them)
+  _showLegacyPlayer();
 
   // Resolve all sources up front (used by both engines)
   const sources = await _resolveFilmSources(film);
@@ -2616,6 +2686,97 @@ async function loadVideo(film){
   }
   teardownEngine2();
   return loadVideoEngine1(film, sources);
+}
+
+// Show legacy Vidstack/Multitrack players after a Player4Me film closes.
+function _showLegacyPlayer(){
+  const fr = document.getElementById('p4mFrame');
+  if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
+  const peBar = document.getElementById('playerEngineBar');
+  if(peBar) peBar.style.display = '';
+  const mp = document.getElementById('multitrackPlayer');
+  if(mp) mp.style.display = '';
+  const p2 = document.getElementById('player2Wrap');
+  if(p2) p2.style.display = '';
+  const sp = document.getElementById('subsPanel');
+  if(sp) sp.style.display = '';
+  const subBtn = document.getElementById('toolBtnSubs');
+  if(subBtn) subBtn.style.display = '';
+}
+
+// Hide legacy players + show Player4Me iframe. Set up Drive Index extras
+// (download + external player) ONLY for VIP films.
+async function loadVideoPlayer4Me(film){
+  // Tear down whichever legacy engine was last active so it doesn't keep
+  // playing audio / consuming bandwidth in the background.
+  try { teardownEngine1(); } catch {}
+  try { teardownEngine2(); } catch {}
+
+  // Hide legacy players + chrome
+  const peBar = document.getElementById('playerEngineBar');
+  if(peBar) peBar.style.display = 'none';
+  const mp = document.getElementById('multitrackPlayer');
+  if(mp) mp.style.display = 'none';
+  const p2 = document.getElementById('player2Wrap');
+  if(p2) p2.style.display = 'none';
+  // Player4Me has its own subtitle picker — hide ours.
+  const subsPanel = document.getElementById('subsPanel');
+  if(subsPanel){ subsPanel.classList.remove('open'); subsPanel.style.display = 'none'; }
+  const subBtn = document.getElementById('toolBtnSubs');
+  if(subBtn) subBtn.style.display = 'none';
+
+  // Show Player4Me iframe
+  const fr = document.getElementById('p4mFrame');
+  if(fr){
+    // film.video_url may be the share URL OR an embed URL. Always normalize.
+    fr.src = _normalizePlayer4MeEmbedUrl(film.video_url);
+    fr.style.display = 'block';
+  }
+
+  // VIP extras (download + external player) — only when film is VIP AND user
+  // is on a VIP plan. Basic users (and basic-tier rows) get NOTHING below the
+  // player, per spec.
+  const isVipFilm = film.tier === 'vip';
+  const userIsVip = currentTier === 'vip';
+  const showVipExtras = isVipFilm && userIsVip && (film.drive_path || film.drive_link);
+
+  if(showVipExtras){
+    try{
+      const param = film.drive_path
+        ? 'path='+encodeURIComponent(film.drive_path)
+        : 'link='+encodeURIComponent(film.drive_link);
+      const r = await fetch('/api/drive/resolve?'+param);
+      const d = await r.json();
+      if(d.ok && d.stream_url){
+        setStreamActions(d.stream_url, film.judul || film.title || '');
+      }else{
+        document.getElementById('streamActions').style.display = 'none';
+      }
+    }catch{
+      document.getElementById('streamActions').style.display = 'none';
+    }
+  }else{
+    // Hide the entire stream actions row for basic / non-vip
+    document.getElementById('streamActions').style.display = 'none';
+  }
+}
+
+// Convert any Player4Me URL the admin might paste (share, embed, raw id)
+// into the canonical embed URL. This means the streaming page is forgiving
+// of how the admin saves the URL in the DB.
+function _normalizePlayer4MeEmbedUrl(rawUrl){
+  if(!rawUrl) return '';
+  const u = String(rawUrl).trim();
+  // Already an embed URL — pass through.
+  if(/player4me\.com\/embed\//i.test(u)) return u;
+  // Share URL like https://player4me.com/v/<id>
+  let m = u.match(/player4me\.com\/v\/([A-Za-z0-9_-]+)/i);
+  if(m) return 'https://player4me.com/embed/' + m[1];
+  // Iframe embed URL with extra path → keep as-is (admin probably knows what they want)
+  if(/^https?:\/\//i.test(u)) return u;
+  // Bare id
+  if(/^[A-Za-z0-9_-]{6,}$/.test(u)) return 'https://player4me.com/embed/' + u;
+  return u;
 }
 
 async function _resolveFilmSources(film){
@@ -3513,6 +3674,9 @@ function closePlayer(opts){
   teardownEngine1();
   teardownEngine2();
   videoPlayer = null;
+  // Stop Player4Me iframe (avoid background audio after close).
+  const fr = document.getElementById('p4mFrame');
+  if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
   const sa = document.getElementById('streamActions');
   if(sa) sa.style.display='none';
   const sm = document.getElementById('streamExtMenu');
