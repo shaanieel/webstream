@@ -11,6 +11,12 @@
  */
 
 const SUBSOURCE_BASE = 'https://api.subsource.net/api/v1';
+const PLAYER4ME_BASE = 'https://player4me.com/api/v1';
+
+// Build the public embed URL for a Player4Me video id (used by streaming page).
+function player4meEmbedUrl(id) {
+  return id ? `https://player4me.com/embed/${id}` : null;
+}
 
 // ───────────────────────────────────────────────────────────────────
 // Util
@@ -57,12 +63,32 @@ async function supabaseRest(env, path, opts = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
-// Verifikasi JWT user dari frontend → return user record dari Supabase
+// Verifikasi JWT user dari frontend → return user record dari Supabase.
+// Order:
+//   1. EXTERNAL Supabase (awfpxjwfjtyovbrpbcar) — kalau di-set, ini adalah source
+//      of truth untuk auth. User-nya sama yang dipakai web aku yg lain.
+//   2. Local Supabase (gmjudsbreuyyznxtfjve) — fallback supaya akun lama yang
+//      cuma ada di project lokal masih bisa login. Token yang diterima dari
+//      external supabase tidak akan valid di local supabase, jadi fallback ini
+//      akan otomatis fail tanpa side-effect.
 async function getUserFromAuth(request, env) {
   const auth = request.headers.get('Authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
-  // Ambil user dari Supabase Auth via JWT
+
+  if (env.EXTERNAL_SUPABASE_URL) {
+    const r = await fetch(`${env.EXTERNAL_SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: env.EXTERNAL_SUPABASE_SERVICE_KEY || env.EXTERNAL_SUPABASE_ANON_KEY || '',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (r.ok) {
+      const u = await r.json();
+      if (u && u.id) return { ...u, _source: 'external' };
+    }
+  }
+
   const r = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
     headers: {
       apikey: env.SUPABASE_SERVICE_KEY,
@@ -70,16 +96,31 @@ async function getUserFromAuth(request, env) {
     },
   });
   if (!r.ok) return null;
-  return await r.json();
+  const u = await r.json();
+  return u && u.id ? { ...u, _source: 'local' } : null;
 }
 
-async function getUserProfile(env, userId) {
-  const r = await supabaseRest(
-    env,
-    `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at`
-  );
-  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return null;
-  return r.data[0];
+// Lookup users_profile in the LOCAL supabase. We try by user_id first (works
+// when the row was created with the same id, e.g. legacy rows), then fall back
+// to email — this is the cross-project case where the auth user lives in the
+// external supabase but the profile (vip flag, expired_at) lives here.
+async function getUserProfile(env, userId, email) {
+  if (userId) {
+    const r = await supabaseRest(
+      env,
+      `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at`
+    );
+    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+  }
+  if (email) {
+    const e = encodeURIComponent(email.toLowerCase());
+    const r = await supabaseRest(
+      env,
+      `/users_profile?email=eq.${e}&select=user_id,email,is_vip,expired_at`
+    );
+    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+  }
+  return null;
 }
 
 function isAdminEmail(env, email) {
@@ -93,6 +134,203 @@ async function requireAdmin(request, env) {
   if (!user || !user.email) return null;
   if (!isAdminEmail(env, user.email)) return null;
   return user;
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Player4Me proxy (video hosting + player)
+//
+// Admin uses these endpoints to:
+//   - List videos (so they can pick a video URL when adding/editing a film)
+//   - Get a single video by id
+// The Player4Me API token NEVER leaves the worker — frontend just gets the
+// JSON response shaped by the Player4Me REST API.
+// ───────────────────────────────────────────────────────────────────
+
+async function player4meFetch(env, path, opts = {}) {
+  const token = (env.PLAYER4ME_API_TOKEN || '').trim();
+  if (!token) {
+    throw new Error('PLAYER4ME_API_TOKEN belum di-set di Cloudflare worker secrets');
+  }
+  const r = await fetch(`${PLAYER4ME_BASE}${path}`, {
+    ...opts,
+    headers: {
+      'api-token': token,
+      Accept: 'application/json',
+      'User-Agent': 'zaeinstream-worker/1.0',
+      ...(opts.headers || {}),
+    },
+  });
+  return r;
+}
+
+// GET /api/admin/player4me/videos?page=1&perPage=30&search=foo
+// Mirrors GET https://player4me.com/api/v1/video/manage with the worker's
+// stored API token. Each row gets an extra `embed_url` and `share_url` so the
+// admin UI can show a copy-to-clipboard button without hardcoding the URL
+// pattern.
+async function adminPlayer4meVideos(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const u = new URL(request.url);
+  const page = u.searchParams.get('page') || '1';
+  const perPage = u.searchParams.get('perPage') || '30';
+  const search = u.searchParams.get('search') || '';
+  const status = u.searchParams.get('status') || '';
+  const params = new URLSearchParams();
+  params.set('page', page);
+  params.set('perPage', perPage);
+  params.set('sort', 'createdAt');
+  params.set('order', 'desc');
+  if (search) params.set('search', search);
+  if (status) params.set('status', status);
+
+  try {
+    const r = await player4meFetch(env, `/video/manage?${params.toString()}`);
+    const text = await r.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    if (!r.ok) {
+      return err(`Player4Me list ${r.status}: ${typeof body === 'object' ? (body.message || body.error || text.slice(0, 200)) : text.slice(0, 200)}`, 502);
+    }
+    const data = Array.isArray(body && body.data) ? body.data : [];
+    const enriched = data.map(v => ({
+      ...v,
+      embed_url: player4meEmbedUrl(v && v.id),
+      share_url: v && v.id ? `https://player4me.com/v/${v.id}` : null,
+    }));
+    return json({
+      ok: true,
+      data: enriched,
+      metadata: (body && body.metadata) || null,
+    });
+  } catch (e) {
+    return err('Player4Me error: ' + e.message, 502);
+  }
+}
+
+// GET /api/admin/player4me/balance — light health probe (also used by status grid).
+async function adminPlayer4meBalance(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  try {
+    const r = await player4meFetch(env, '/billing/balance');
+    const text = await r.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    if (!r.ok) {
+      return err(`Player4Me balance ${r.status}: ${typeof body === 'object' ? (body.message || body.error || text.slice(0, 200)) : text.slice(0, 200)}`, 502);
+    }
+    return json({ ok: true, data: body });
+  } catch (e) {
+    return err('Player4Me error: ' + e.message, 502);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// External Supabase — cross-project auth helpers.
+//
+// The WEBSTREAM auth project is `awfpxjwfjtyovbrpbcar` (kept in sync with the
+// user's other web). Films, VIP flags and admin metadata live in the LOCAL
+// supabase (`gmjudsbreuyyznxtfjve`). Mirroring is best-effort: if the external
+// project is unreachable or its service key is missing, we still complete the
+// local op and surface a soft warning to the admin.
+// ───────────────────────────────────────────────────────────────────
+
+function hasExternalSupabaseAdmin(env) {
+  return !!(env.EXTERNAL_SUPABASE_URL && env.EXTERNAL_SUPABASE_SERVICE_KEY);
+}
+
+async function externalAuthAdmin(env, path, opts = {}) {
+  if (!hasExternalSupabaseAdmin(env)) {
+    return { ok: false, status: 0, data: null, skipped: true };
+  }
+  const url = `${env.EXTERNAL_SUPABASE_URL}/auth/v1/admin${path}`;
+  const r = await fetch(url, {
+    ...opts,
+    headers: {
+      apikey: env.EXTERNAL_SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.EXTERNAL_SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  });
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  return { ok: r.ok, status: r.status, data };
+}
+
+// Look up a user in the EXTERNAL supabase by email. Returns the auth.user row
+// or null. Uses the admin REST endpoint with `email=eq.` filter (gotrue v2).
+async function externalAuthFindByEmail(env, email) {
+  if (!hasExternalSupabaseAdmin(env) || !email) return null;
+  const e = encodeURIComponent(email.toLowerCase());
+  const r = await externalAuthAdmin(env, `/users?email=${e}`, { method: 'GET' });
+  if (!r.ok) return null;
+  // gotrue returns { users: [...] } or [] depending on version
+  if (Array.isArray(r.data) && r.data.length) return r.data[0];
+  if (r.data && Array.isArray(r.data.users) && r.data.users.length) return r.data.users[0];
+  return null;
+}
+
+// Best-effort mirror to external supabase. Returns { mirrored, error? }.
+async function externalAuthMirrorCreate(env, { email, password }) {
+  if (!hasExternalSupabaseAdmin(env)) return { mirrored: false, skipped: true };
+  const existing = await externalAuthFindByEmail(env, email);
+  if (existing) {
+    // Already exists — just (re)set the password if given so it stays in sync.
+    if (password) {
+      await externalAuthAdmin(env, `/users/${existing.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ password, email_confirm: true }),
+      });
+    }
+    return { mirrored: true, existing: true, id: existing.id };
+  }
+  const r = await externalAuthAdmin(env, '/users', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, email_confirm: true }),
+  });
+  if (!r.ok) {
+    return { mirrored: false, error: `external HTTP ${r.status}: ${typeof r.data === 'object' ? JSON.stringify(r.data).slice(0, 200) : String(r.data || '').slice(0, 200)}` };
+  }
+  return { mirrored: true, id: (r.data && r.data.id) || null };
+}
+
+async function externalAuthMirrorUpdate(env, { email_old, email, password }) {
+  if (!hasExternalSupabaseAdmin(env)) return { mirrored: false, skipped: true };
+  const existing = await externalAuthFindByEmail(env, email_old || email);
+  if (!existing) {
+    // No external account yet — create one if we have a password to set.
+    if (email && password) {
+      return externalAuthMirrorCreate(env, { email, password });
+    }
+    return { mirrored: false, error: 'external account not found and password not provided' };
+  }
+  const patch = {};
+  if (email && email !== existing.email) patch.email = email;
+  if (password) patch.password = password;
+  if (Object.keys(patch).length === 0) return { mirrored: true, noop: true, id: existing.id };
+  if (patch.email) patch.email_confirm = true;
+  const r = await externalAuthAdmin(env, `/users/${existing.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    return { mirrored: false, error: `external HTTP ${r.status}: ${typeof r.data === 'object' ? JSON.stringify(r.data).slice(0, 200) : String(r.data || '').slice(0, 200)}` };
+  }
+  return { mirrored: true, id: existing.id };
+}
+
+async function externalAuthMirrorDelete(env, email) {
+  if (!hasExternalSupabaseAdmin(env)) return { mirrored: false, skipped: true };
+  const existing = await externalAuthFindByEmail(env, email);
+  if (!existing) return { mirrored: true, noop: true };
+  const r = await externalAuthAdmin(env, `/users/${existing.id}`, { method: 'DELETE' });
+  if (!r.ok) {
+    return { mirrored: false, error: `external HTTP ${r.status}` };
+  }
+  return { mirrored: true, id: existing.id };
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -359,7 +597,7 @@ async function driveResolve(request, env) {
 async function meHandler(request, env) {
   const user = await getUserFromAuth(request, env);
   if (!user) return json({ ok: true, authenticated: false });
-  const profile = await getUserProfile(env, user.id);
+  const profile = await getUserProfile(env, user.id, user.email);
   let userTier = 'free';
   let expired = false;
   if (profile) {
@@ -450,7 +688,7 @@ async function adminHealthHandler(request, env) {
     checks.drive = { ok: false, status: 0, message: 'Error reaching GDI: ' + e.message };
   }
 
-  // === Supabase service ===
+  // === Supabase service (local) ===
   try {
     const r = await supabaseRest(env, '/films?select=id&limit=1');
     checks.supabase = { ok: r.ok, status: r.status, message: r.ok ? 'OK' : 'HTTP ' + r.status };
@@ -458,13 +696,52 @@ async function adminHealthHandler(request, env) {
     checks.supabase = { ok: false, status: 0, message: 'Error: ' + e.message };
   }
 
+  // === Player4Me ===
+  try {
+    if (!env.PLAYER4ME_API_TOKEN) {
+      checks.player4me = { ok: false, status: 0, message: 'PLAYER4ME_API_TOKEN belum di-set di Cloudflare' };
+    } else {
+      const r = await player4meFetch(env, '/billing/balance');
+      checks.player4me = {
+        ok: r.ok,
+        status: r.status,
+        message: r.ok ? 'API token valid' : `HTTP ${r.status}`,
+      };
+    }
+  } catch (e) {
+    checks.player4me = { ok: false, status: 0, message: 'Error: ' + e.message };
+  }
+
+  // === External Supabase (cross-project auth) ===
+  try {
+    if (!env.EXTERNAL_SUPABASE_URL) {
+      checks.external_supabase = { ok: false, status: 0, message: 'EXTERNAL_SUPABASE_URL belum di-set (cross-project auth nonaktif)' };
+    } else if (!env.EXTERNAL_SUPABASE_SERVICE_KEY) {
+      checks.external_supabase = { ok: false, status: 0, message: 'EXTERNAL_SUPABASE_SERVICE_KEY belum di-set (mirror akun nonaktif)' };
+    } else {
+      const r = await externalAuthAdmin(env, '/users?per_page=1', { method: 'GET' });
+      checks.external_supabase = {
+        ok: r.ok,
+        status: r.status,
+        message: r.ok ? 'Service key valid' : `HTTP ${r.status}: ${typeof r.data === 'object' ? JSON.stringify(r.data).slice(0, 120) : String(r.data || '').slice(0, 120)}`,
+        url: env.EXTERNAL_SUPABASE_URL,
+      };
+    }
+  } catch (e) {
+    checks.external_supabase = { ok: false, status: 0, message: 'Error: ' + e.message };
+  }
+
   return json({ ok: true, checks, env: {
     has_subsource_key: !!env.SUBSOURCE_API_KEY,
     has_tmdb_key: !!env.TMDB_API_KEY,
     has_supabase_service_key: !!env.SUPABASE_SERVICE_KEY,
+    has_player4me_token: !!env.PLAYER4ME_API_TOKEN,
+    has_external_supabase: !!env.EXTERNAL_SUPABASE_URL,
+    has_external_supabase_service_key: !!env.EXTERNAL_SUPABASE_SERVICE_KEY,
     has_admin_emails: !!env.ADMIN_EMAILS,
     admin_emails: (env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean),
     gdi_worker_url: env.GDI_WORKER_URL || null,
+    external_supabase_url: env.EXTERNAL_SUPABASE_URL || null,
   } });
 }
 
@@ -703,7 +980,7 @@ async function catalogList(request, env) {
   const user = await getUserFromAuth(request, env);
   let userTier = 'guest';
   if (user) {
-    const profile = await getUserProfile(env, user.id);
+    const profile = await getUserProfile(env, user.id, user.email);
     if (profile) {
       const expired = profile.expired_at && new Date(profile.expired_at) < new Date();
       if (expired) userTier = 'expired';
@@ -737,16 +1014,33 @@ async function adminFilmCreate(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
   const body = await request.json();
+  // Tier rules:
+  //   - vip   : iframe Player4Me (ad-free) + drive_path untuk download/external player
+  //   - basic : iframe Player4Me (with-ads) only
+  //   - free  : legacy / dual-tier rows (kept for backward compat)
+  const tier = (body.tier === 'vip' || body.tier === 'basic' || body.tier === 'free') ? body.tier : 'free';
+  const videoUrl = (typeof body.video_url === 'string' ? body.video_url.trim() : '') || null;
+  const drivePath = (typeof body.drive_path === 'string' ? body.drive_path.trim() : '') || null;
+  const driveLink = (typeof body.drive_link === 'string' ? body.drive_link.trim() : '') || drivePath;
+
+  if (tier === 'vip') {
+    if (!videoUrl) return err('VIP: video_url (Player4Me) wajib diisi');
+    if (!drivePath) return err('VIP: drive_path wajib diisi (untuk download + external player)');
+  } else if (tier === 'basic') {
+    if (!videoUrl) return err('Basic: video_url (Player4Me) wajib diisi');
+  }
+
   const row = {
     judul: body.judul,
     tipe: body.tipe || 'movie',
-    drive_link: body.drive_link || body.drive_path || null,
-    drive_path: body.drive_path || body.drive_link || null,
+    drive_link: driveLink,
+    drive_path: drivePath,
+    video_url: videoUrl,
     tahun: body.tahun || null,
     tmdb_id: body.tmdb_id || null,
     episode: body.episode || null,
     season: body.season || null,
-    tier: (body.tier === 'vip' || body.tier === 'basic' || body.tier === 'free') ? body.tier : 'free',
+    tier,
     poster_url: body.poster_url || null,
     overview: body.overview || null,
     genre: body.genre || null,
@@ -767,9 +1061,26 @@ async function adminFilmUpdate(request, env, id) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
   const body = await request.json();
+  // Whitelist editable columns. We never let the client overwrite primary key
+  // / created_at / created_by metadata.
+  const allowed = [
+    'judul', 'tipe', 'drive_link', 'drive_path', 'video_url',
+    'tahun', 'tmdb_id', 'episode', 'season', 'tier',
+    'poster_url', 'overview', 'genre', 'trailer_url',
+    'audio_tracks', 'videos', 'subtitles',
+  ];
+  const patch = {};
+  for (const k of allowed) if (k in body) patch[k] = body[k];
+  // Trim string URL fields so the streaming page never sees stray whitespace.
+  for (const k of ['drive_link', 'drive_path', 'video_url']) {
+    if (typeof patch[k] === 'string') {
+      const v = patch[k].trim();
+      patch[k] = v === '' ? null : v;
+    }
+  }
   const r = await supabaseRest(env, `/films?id=eq.${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: JSON.stringify(body),
+    body: JSON.stringify(patch),
   });
   if (!r.ok) return err('Gagal update', 500);
   return json({ ok: true });
@@ -951,6 +1262,75 @@ async function adminExtractSubsDelete(request, env, jobId) {
   return json({ ok: true });
 }
 
+// POST /api/auth/signup — public-facing self-service registration.
+//
+// Creates the account in BOTH supabase projects (external first) so that the
+// new user can log into either web with the same credentials. We always
+// create with `email_confirm: true` because the streaming UI expects to log
+// in immediately after signup (matches existing UX). users_profile gets a
+// default 30-day basic membership.
+async function signupHandler(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON'); }
+  const email = (body.email || '').trim().toLowerCase();
+  const password = body.password || '';
+  if (!email || !password) return err('email & password wajib');
+  if (password.length < 6) return err('Password minimal 6 karakter');
+
+  // 1. Mirror to external first (the user's "other web" supabase).
+  const externalResult = await externalAuthMirrorCreate(env, { email, password });
+
+  // 2. Create in local supabase. If the email already exists locally we treat
+  //    that as "ok, you can already log in" instead of erroring out.
+  const authRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password, email_confirm: true }),
+  });
+  let authData = null;
+  try { authData = await authRes.json(); } catch { /* ignore */ }
+  let localId = authData && authData.id;
+  if (!authRes.ok) {
+    const msg = (authData && (authData.msg || authData.message || authData.error_description)) || '';
+    if (!/already|registered|exists|duplicate/i.test(msg)) {
+      return err('Auth (local): ' + (msg || 'gagal'), 500);
+    }
+    // already exists locally — fetch their id by email so we can attach profile
+    const lookup = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+    });
+    if (lookup.ok) {
+      const ldata = await lookup.json().catch(() => null);
+      const arr = (ldata && (Array.isArray(ldata) ? ldata : ldata.users)) || [];
+      if (arr.length) localId = arr[0].id;
+    }
+  }
+
+  // 3. Upsert profile with default 30-day basic.
+  const exp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  if (localId) {
+    await supabaseRest(env, '/users_profile?on_conflict=email', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({
+        user_id: localId,
+        email,
+        expired_at: exp,
+        is_vip: false,
+      }),
+    });
+  }
+
+  return json({ ok: true, email, external: externalResult });
+}
+
 // GET /api/admin/users — list users
 async function adminUserList(request, env) {
   const admin = await requireAdmin(request, env);
@@ -964,6 +1344,14 @@ async function adminUserList(request, env) {
 }
 
 // POST /api/admin/users  — create user (signup + insert profile)
+//
+// Cross-project flow:
+//   1. Create auth user in EXTERNAL supabase (the user's other web). When the
+//      cross-project env vars are not set this step is silently skipped — the
+//      account stays purely local.
+//   2. Create auth user in LOCAL supabase too. user_id may differ between the
+//      two projects — that's ok, we match by email at lookup time.
+//   3. Insert / upsert users_profile row in LOCAL supabase (vip flag, expiry).
 async function adminUserCreate(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
@@ -971,7 +1359,11 @@ async function adminUserCreate(request, env) {
   const { email, password, expired_at, is_vip } = body;
   if (!email || !password) return err('email & password wajib');
 
-  // 1. Buat akun di Supabase Auth pakai Admin API
+  // 1. Mirror to EXTERNAL supabase first (so the user can immediately log into
+  //    the other web with the same credentials).
+  const externalResult = await externalAuthMirrorCreate(env, { email, password });
+
+  // 2. Buat akun di LOCAL Supabase Auth pakai Admin API.
   const authRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
     method: 'POST',
     headers: {
@@ -982,12 +1374,13 @@ async function adminUserCreate(request, env) {
     body: JSON.stringify({ email, password, email_confirm: true }),
   });
   const authData = await authRes.json();
-  if (!authRes.ok) return err('Auth: ' + (authData.msg || 'gagal'), 500);
+  if (!authRes.ok) return err('Auth (local): ' + (authData.msg || authData.message || 'gagal'), 500);
 
-  // 2. Insert profile
+  // 3. Upsert profile (idempotent on email so re-running doesn't duplicate).
   const exp = expired_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const r = await supabaseRest(env, '/users_profile', {
+  const r = await supabaseRest(env, '/users_profile?on_conflict=email', {
     method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify({
       user_id: authData.id,
       email,
@@ -996,13 +1389,28 @@ async function adminUserCreate(request, env) {
     }),
   });
   if (!r.ok) return err('Profile: ' + JSON.stringify(r.data), 500);
-  return json({ ok: true, user: { id: authData.id, email, expired_at: exp, is_vip: !!is_vip } });
+  return json({
+    ok: true,
+    user: { id: authData.id, email, expired_at: exp, is_vip: !!is_vip },
+    external: externalResult,
+  });
 }
 
 async function adminUserUpdate(request, env, userId) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
   const body = await request.json();
+
+  // Read the current profile row by user_id (local). We need the OLD email so
+  // the external mirror can match by email even if the admin renames it.
+  let oldEmail = null;
+  try {
+    const cur = await supabaseRest(
+      env,
+      `/users_profile?user_id=eq.${encodeURIComponent(userId)}&select=email`
+    );
+    if (cur.ok && Array.isArray(cur.data) && cur.data[0]) oldEmail = cur.data[0].email;
+  } catch { /* non-fatal */ }
 
   // 1. Update users_profile (vip / expired_at / email cache)
   const profilePatch = {};
@@ -1038,15 +1446,34 @@ async function adminUserUpdate(request, env, userId) {
     }
   }
 
-  return json({ ok: true });
+  // 3. Mirror to EXTERNAL supabase (best-effort — returns soft warning).
+  let externalResult = { mirrored: false, skipped: true };
+  if (Object.keys(authPatch).length) {
+    externalResult = await externalAuthMirrorUpdate(env, {
+      email_old: oldEmail,
+      email: authPatch.email || oldEmail,
+      password: authPatch.password,
+    });
+  }
+
+  return json({ ok: true, external: externalResult });
 }
 
 async function adminUserDelete(request, env, userId) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
+  // Read email first so we can mirror the delete to external supabase.
+  let email = null;
+  try {
+    const cur = await supabaseRest(
+      env,
+      `/users_profile?user_id=eq.${encodeURIComponent(userId)}&select=email`
+    );
+    if (cur.ok && Array.isArray(cur.data) && cur.data[0]) email = cur.data[0].email;
+  } catch { /* non-fatal */ }
   // Hapus dari users_profile dulu
   await supabaseRest(env, `/users_profile?user_id=eq.${userId}`, { method: 'DELETE' });
-  // Hapus dari auth
+  // Hapus dari local auth
   await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
     method: 'DELETE',
     headers: {
@@ -1054,7 +1481,10 @@ async function adminUserDelete(request, env, userId) {
       Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
     },
   });
-  return json({ ok: true });
+  // Mirror delete to external (best-effort)
+  let externalResult = { mirrored: false, skipped: true };
+  if (email) externalResult = await externalAuthMirrorDelete(env, email);
+  return json({ ok: true, external: externalResult });
 }
 
 // ───────────────────────────────────────────────────────────────────
@@ -1072,11 +1502,17 @@ export default {
 
     // === Public expose config (NON-secret only) ===
     // Frontend butuh tahu Supabase URL + anon key. Service key TIDAK pernah di-expose.
+    //
+    // We now expose BOTH the local supabase (films/profiles) and the external
+    // supabase (auth source-of-truth). Frontend sb client logs into the
+    // external one; the worker handles cross-checking with the local one.
     if (pathname === '/api/config' && request.method === 'GET') {
       return json({
         ok: true,
         supabase_url: env.SUPABASE_URL,
         supabase_anon_key: env.SUPABASE_ANON_KEY || '',
+        external_supabase_url: env.EXTERNAL_SUPABASE_URL || '',
+        external_supabase_anon_key: env.EXTERNAL_SUPABASE_ANON_KEY || '',
         gdi_worker_url: env.GDI_WORKER_URL,
         tmdb_image_base: 'https://image.tmdb.org/t/p/w500',
       });
@@ -1148,6 +1584,11 @@ export default {
       return adminDriveTest(request, env);
     }
 
+    // === Auth: signup (mirrors to external supabase) ===
+    if (pathname === '/api/auth/signup' && request.method === 'POST') {
+      return signupHandler(request, env);
+    }
+
     // === Admin: films ===
     if (pathname === '/api/admin/films' && request.method === 'POST') {
       return adminFilmCreate(request, env);
@@ -1158,19 +1599,20 @@ export default {
       if (m && request.method === 'DELETE') return adminFilmDelete(request, env, m[1]);
     }
 
-    // === Admin: auto-subtitle pipeline (zaeinstore-processor) ===
-    if (pathname === '/api/admin/extract-subs' && request.method === 'POST') {
-      return adminExtractSubsEnqueue(request, env);
+    // === Admin: Player4Me (video listing for admin UI) ===
+    if (pathname === '/api/admin/player4me/videos' && request.method === 'GET') {
+      return adminPlayer4meVideos(request, env);
     }
-    if (pathname === '/api/admin/extract-subs/status' && request.method === 'GET') {
-      return adminExtractSubsStatus(request, env);
+    if (pathname === '/api/admin/player4me/balance' && request.method === 'GET') {
+      return adminPlayer4meBalance(request, env);
     }
-    if (pathname === '/api/admin/extract-subs/dispatch' && request.method === 'POST') {
-      return adminExtractSubsDispatch(request, env);
-    }
-    {
-      const m = pathname.match(/^\/api\/admin\/extract-subs\/([^/]+)$/);
-      if (m && request.method === 'DELETE') return adminExtractSubsDelete(request, env, m[1]);
+
+    // === Admin: auto-subtitle pipeline (DEPRECATED — zaeinstore-processor)
+    // Routes intentionally removed. Subtitle upload now goes through Player4Me.
+    // The existing handler functions remain in this file for git history but
+    // are no longer reachable from the router.
+    if (pathname.startsWith('/api/admin/extract-subs')) {
+      return err('Endpoint dihapus — sub sekarang via Player4Me', 410);
     }
 
     // === Admin: users ===

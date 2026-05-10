@@ -16,7 +16,8 @@ not_found_handling = "single-page-application"
 #
 # CATATAN PENTING: Cloudflare AKAN MENGHAPUS plaintext variable yang tidak ada
 # di [vars] section ini setiap kali deploy. Tapi SECRET (encrypted) PERSISTEN.
-# Selalu pakai tipe Secret untuk: SUBSOURCE_API_KEY, TMDB_API_KEY, SUPABASE_SERVICE_KEY.
+# Selalu pakai tipe Secret untuk: SUBSOURCE_API_KEY, TMDB_API_KEY, SUPABASE_SERVICE_KEY,
+# PLAYER4ME_API_TOKEN, EXTERNAL_SUPABASE_SERVICE_KEY, EXTERNAL_SUPABASE_ANON_KEY.
 
 [vars]
 SUPABASE_URL = "https://gmjudsbreuyyznxtfjve.supabase.co"
@@ -28,12 +29,22 @@ SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
 GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
 # Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
-# Nama repo GitHub yang menjalankan workflow auto-subtitle (process.yml).
-# Bukan secret — ini cuma "owner/repo" publik yang dipanggil via GitHub API.
-# Dipin di sini supaya tidak ke-wipe setiap deploy (Cloudflare hapus plaintext
-# var yang tidak ada di [vars] tiap kali deploy). GITHUB_TOKEN tetap harus
-# di-set sebagai Secret via `wrangler secret put GITHUB_TOKEN`.
-GITHUB_PROCESSOR_REPO = "shaanieel/zaeinstore-processor"
+
+# === Player4Me ===
+# Service migration: video hosting & player pindah dari Drive Index → Player4Me.
+# PLAYER4ME_API_TOKEN harus di-set sebagai Secret di Cloudflare:
+#   wrangler secret put PLAYER4ME_API_TOKEN
+
+# === External Supabase (cross-project auth) ===
+# URL Supabase project lain yang dipakai web kamu yg lain. Auth (login) di
+# webstream akan verifikasi token ke project ini DULU sebelum fallback ke
+# project lokal. Insert/update/delete user juga di-mirror ke sini supaya akun
+# tetap satu di kedua web.
+EXTERNAL_SUPABASE_URL = "https://awfpxjwfjtyovbrpbcar.supabase.co"
+# EXTERNAL_SUPABASE_ANON_KEY dan EXTERNAL_SUPABASE_SERVICE_KEY harus di-set
+# sebagai Secret di Cloudflare:
+#   wrangler secret put EXTERNAL_SUPABASE_ANON_KEY
+#   wrangler secret put EXTERNAL_SUPABASE_SERVICE_KEY
 
 # === Service Binding ke gdi-worker ===
 # Cloudflare Workers TIDAK BISA fetch Worker lain di *.workers.dev via URL publik
