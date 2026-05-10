@@ -24,6 +24,10 @@ already-migrated databases is safe.
 4. **`0004_films_drive_link_nullable.sql`** — drops the NOT NULL
    constraint on `films.drive_link` and `films.drive_path` so basic-tier
    films (no Drive backend) can be created.
+5. **`0005_films_tier_allow_basic.sql`** — expands the `films_tier_check`
+   CHECK constraint so `tier='basic'` is accepted alongside the legacy
+   `'free'` and `'vip'`. Without this, the new admin form fails with
+   `films_tier_check` violation when saving a basic-tier film.
 
 ## Required tables
 
