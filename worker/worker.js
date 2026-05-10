@@ -1105,74 +1105,18 @@ async function adminFilmDelete(request, env, id) {
 // removed from the router below.
 // ───────────────────────────────────────────────────────────────────
 
-// POST /api/auth/signup — public-facing self-service registration.
+// (DEPRECATED) /api/auth/signup
 //
-// Creates the account in BOTH supabase projects (external first) so that the
-// new user can log into either web with the same credentials. We always
-// create with `email_confirm: true` because the streaming UI expects to log
-// in immediately after signup (matches existing UX). users_profile gets a
-// default 30-day basic membership.
-async function signupHandler(request, env) {
-  let body;
-  try { body = await request.json(); } catch { return err('Body harus JSON'); }
-  const email = (body.email || '').trim().toLowerCase();
-  const password = body.password || '';
-  if (!email || !password) return err('email & password wajib');
-  if (password.length < 6) return err('Password minimal 6 karakter');
-
-  // 1. Mirror to external first (the user's "other web" supabase).
-  const externalResult = await externalAuthMirrorCreate(env, { email, password });
-
-  // 2. Create in local supabase. If the email already exists locally we treat
-  //    that as "ok, you can already log in" instead of erroring out.
-  const authRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
-    method: 'POST',
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password, email_confirm: true }),
-  });
-  let authData = null;
-  try { authData = await authRes.json(); } catch { /* ignore */ }
-  let localId = authData && authData.id;
-  if (!authRes.ok) {
-    const msg = (authData && (authData.msg || authData.message || authData.error_description)) || '';
-    if (!/already|registered|exists|duplicate/i.test(msg)) {
-      return err('Auth (local): ' + (msg || 'gagal'), 500);
-    }
-    // already exists locally — fetch their id by email so we can attach profile
-    const lookup = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      },
-    });
-    if (lookup.ok) {
-      const ldata = await lookup.json().catch(() => null);
-      const arr = (ldata && (Array.isArray(ldata) ? ldata : ldata.users)) || [];
-      if (arr.length) localId = arr[0].id;
-    }
-  }
-
-  // 3. Upsert profile with default 30-day basic.
-  const exp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  if (localId) {
-    await supabaseRest(env, '/users_profile?on_conflict=email', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-      body: JSON.stringify({
-        user_id: localId,
-        email,
-        expired_at: exp,
-        is_vip: false,
-      }),
-    });
-  }
-
-  return json({ ok: true, email, external: externalResult });
-}
+// Self-service signup is no longer handled by webstream. Registration now
+// happens exclusively on Project 1 (Zaeinstore at zaein.semuapro.store).
+// New rows in `accounts` (P1) are mirrored into `users_profile` (P2) by a
+// Supabase Edge Function + Database Webhook. The webstream login form
+// continues to verify against the Project 1 auth.users via supabase-js,
+// so credentials remain a single source of truth.
+//
+// The route is kept in the router (returning 410 Gone) so that any clients
+// still pointing at it get a clear, actionable error instead of a generic
+// 404. The handler body is intentionally minimal.
 
 // GET /api/admin/users — list users
 async function adminUserList(request, env) {
@@ -1194,50 +1138,9 @@ async function adminUserList(request, env) {
 //      account stays purely local.
 //   2. Create auth user in LOCAL supabase too. user_id may differ between the
 //      two projects — that's ok, we match by email at lookup time.
-//   3. Insert / upsert users_profile row in LOCAL supabase (vip flag, expiry).
-async function adminUserCreate(request, env) {
-  const admin = await requireAdmin(request, env);
-  if (!admin) return err('Forbidden', 403);
-  const body = await request.json();
-  const { email, password, expired_at, is_vip } = body;
-  if (!email || !password) return err('email & password wajib');
-
-  // 1. Mirror to EXTERNAL supabase first (so the user can immediately log into
-  //    the other web with the same credentials).
-  const externalResult = await externalAuthMirrorCreate(env, { email, password });
-
-  // 2. Buat akun di LOCAL Supabase Auth pakai Admin API.
-  const authRes = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
-    method: 'POST',
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password, email_confirm: true }),
-  });
-  const authData = await authRes.json();
-  if (!authRes.ok) return err('Auth (local): ' + (authData.msg || authData.message || 'gagal'), 500);
-
-  // 3. Upsert profile (idempotent on email so re-running doesn't duplicate).
-  const exp = expired_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const r = await supabaseRest(env, '/users_profile?on_conflict=email', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({
-      user_id: authData.id,
-      email,
-      expired_at: exp,
-      is_vip: !!is_vip,
-    }),
-  });
-  if (!r.ok) return err('Profile: ' + JSON.stringify(r.data), 500);
-  return json({
-    ok: true,
-    user: { id: authData.id, email, expired_at: exp, is_vip: !!is_vip },
-    external: externalResult,
-  });
-}
+// (DEPRECATED) adminUserCreate — admin-driven account creation removed.
+// All registrations now flow through Project 1 (Zaeinstore) and arrive in
+// users_profile via the cross-project mirror webhook.
 
 async function adminUserUpdate(request, env, userId) {
   const admin = await requireAdmin(request, env);
@@ -1427,9 +1330,12 @@ export default {
       return adminDriveTest(request, env);
     }
 
-    // === Auth: signup (mirrors to external supabase) ===
+    // === Auth: signup (DEPRECATED — registration owned by Project 1) ===
     if (pathname === '/api/auth/signup' && request.method === 'POST') {
-      return signupHandler(request, env);
+      return err(
+        'Pendaftaran sekarang dilakukan di Zaeinstore: https://zaein.semuapro.store/#/register',
+        410
+      );
     }
 
     // === Admin: films ===
@@ -1463,7 +1369,10 @@ export default {
       return adminUserList(request, env);
     }
     if (pathname === '/api/admin/users' && request.method === 'POST') {
-      return adminUserCreate(request, env);
+      return err(
+        'Pembuatan akun via admin sudah dinonaktifkan — user mendaftar di Zaeinstore',
+        410
+      );
     }
     {
       const m = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
