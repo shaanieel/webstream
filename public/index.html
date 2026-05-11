@@ -2761,9 +2761,20 @@ async function loadVideoPlayer4Me(film){
   // Show Player4Me iframe
   const fr = document.getElementById('p4mFrame');
   if(fr){
-    // film.video_url may be the share URL OR an embed URL. Always normalize.
-    fr.src = _normalizePlayer4MeEmbedUrl(film.video_url);
-    fr.style.display = 'block';
+    // film.video_url may be the share URL, an embed URL, or — historically
+    // — even a full <iframe…> tag the admin accidentally pasted. Always
+    // normalize. If we cannot extract a Player4Me id, refuse to render
+    // the iframe instead of feeding a relative path that would self-embed
+    // webstream.
+    const src = _normalizePlayer4MeEmbedUrl(film.video_url);
+    if(src){
+      fr.src = src;
+      fr.style.display = 'block';
+    } else {
+      fr.removeAttribute('src');
+      fr.style.display = 'none';
+      showToast('URL Player4Me film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
+    }
   }
 
   // VIP extras (download + external player + drive/gdrive link) — ONLY when
@@ -2796,10 +2807,25 @@ async function loadVideoPlayer4Me(film){
 }
 
 // Extract the Player4Me video id from any URL/string the admin might have
-// saved in the DB (share URL, embed URL, or bare id).
+// saved in the DB. Handles:
+//   - https://player4me.com/embed/<id>   (legacy public embed)
+//   - https://player4me.com/v/<id>       (legacy share link)
+//   - https://<custom-domain>/#<id>      (white-label, current default)
+//   - <iframe src="https://<custom-domain>/#<id>" …></iframe>   (admin
+//        pasted the full iframe tag instead of just the URL — recover
+//        gracefully instead of breaking the page)
+//   - bare id like "allnx"
 function _extractPlayer4MeId(rawUrl){
   if(!rawUrl) return null;
-  const u = String(rawUrl).trim();
+  let u = String(rawUrl).trim();
+
+  // If the admin pasted a full <iframe …> tag, pull the src out first.
+  // This is what used to send the player into a self-embedding loop:
+  // iframe.src starting with `<` resolves as a relative path, which
+  // loaded webstream itself inside webstream ("web dalam web").
+  const iframeMatch = u.match(/<\s*iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i);
+  if (iframeMatch) u = iframeMatch[1].trim();
+
   let m = u.match(/player4me\.com\/(?:embed|v)\/([A-Za-z0-9_-]+)/i);
   if(m) return m[1];
   // Custom domain hash style: https://my.domain/#abc123
@@ -2811,11 +2837,15 @@ function _extractPlayer4MeId(rawUrl){
 
 // Build the iframe URL for a film. VIP users get the white-label custom
 // domain (ad-free). Basic users get the standard player4me.com embed
-// (with ads). Falls back to the raw URL if we can't extract an id.
+// (with ads). If the stored video_url can't be parsed at all we return
+// '' so the caller can show a friendly error — we deliberately do NOT
+// fall through to the raw string, because that caused the recursive
+// self-embedding bug (iframe.src = "<iframe …>" → loads webstream
+// itself).
 function _normalizePlayer4MeEmbedUrl(rawUrl){
   if(!rawUrl) return '';
   const id = _extractPlayer4MeId(rawUrl);
-  if(!id) return String(rawUrl).trim();
+  if(!id) return '';
   const customDomain = (CONFIG && CONFIG.player4me_public_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
   if(currentTier === 'vip' && customDomain){
     return 'https://' + customDomain + '/#' + id;
