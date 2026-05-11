@@ -28,6 +28,16 @@ already-migrated databases is safe.
    CHECK constraint so `tier='basic'` is accepted alongside the legacy
    `'free'` and `'vip'`. Without this, the new admin form fails with
    `films_tier_check` violation when saving a basic-tier film.
+6. **`0006_users_profile_expired_at_nullable.sql`** — drops the NOT NULL
+   constraint on `users_profile.expired_at` so new admin-created accounts
+   without a fixed expiry can be saved.
+7. **`0007_player4me_domains.sql`** — adds the `player4me_domains` table
+   used by the adminweb1 Player4Me Videos menu. Each row represents a
+   white-label / ad-free Player4Me player domain (e.g.
+   `https://zaeinstore.qzz.io`). Embed URLs are built as
+   `https://{domain}/#{videoId}`. Exactly one row may be `is_default`;
+   the worker API enforces that invariant on insert/update. Seed inserts
+   `Zaeinstore QZZ → https://zaeinstore.qzz.io` as the default.
 
 ## Required tables
 

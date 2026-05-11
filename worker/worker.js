@@ -221,6 +221,147 @@ async function adminPlayer4meBalance(request, env) {
 }
 
 // ───────────────────────────────────────────────────────────────────
+// Player4Me custom player domains (admin CRUD)
+//
+// Backed by public.player4me_domains (see migration 0007). Admin picks one
+// of these in adminweb1 to build copy-paste embed URLs of the form
+//   https://{domain}/#{videoId}
+// which is the white-label / ad-free player. Exactly one row may be
+// `is_default = true`; the API enforces that invariant on insert.
+// ───────────────────────────────────────────────────────────────────
+
+// Normalize a user-typed domain to a clean origin (no trailing slash, with
+// scheme). Mirrors the spec:
+//   "zaeinstore.qzz.io"           -> "https://zaeinstore.qzz.io"
+//   "https://zaeinstore.qzz.io/"  -> "https://zaeinstore.qzz.io"
+function normalizePlayer4meDomain(input) {
+  if (typeof input !== 'string') return '';
+  let s = input.trim();
+  if (!s) return '';
+  // Drop any path/query/hash the user may have pasted; we only keep the origin.
+  s = s.replace(/\s+/g, '');
+  if (!/^https?:\/\//i.test(s)) {
+    s = 'https://' + s;
+  }
+  // Strip trailing slashes and anything after the host.
+  try {
+    const u = new URL(s);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return s.replace(/\/+$/, '');
+  }
+}
+
+// GET /api/admin/player4me/domains — list every registered domain.
+async function adminPlayer4meDomainsList(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(
+    env,
+    '/player4me_domains?select=id,name,domain,is_default,created_at,updated_at&order=is_default.desc,created_at.asc'
+  );
+  if (!r.ok) return err(`Supabase ${r.status}: ${typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 200)}`, 502);
+  return json({ ok: true, data: Array.isArray(r.data) ? r.data : [] });
+}
+
+// POST /api/admin/player4me/domains — create a new domain.
+// Body: { name, domain, is_default? }
+async function adminPlayer4meDomainCreate(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); } catch { return err('JSON body wajib'); }
+
+  const name = (typeof body.name === 'string' ? body.name.trim() : '');
+  const domain = normalizePlayer4meDomain(body.domain);
+  const isDefault = !!body.is_default;
+  if (!name) return err('Field "name" wajib');
+  if (!domain) return err('Field "domain" wajib');
+  // Sanity-check the normalized URL.
+  try {
+    const u = new URL(domain);
+    if (!u.host) throw new Error('host kosong');
+  } catch (e) {
+    return err('Domain tidak valid: ' + (e.message || domain));
+  }
+
+  // If the new row is the default, clear any prior default first so the
+  // "exactly one default" invariant holds.
+  if (isDefault) {
+    const u = await supabaseRest(env, '/player4me_domains?is_default=eq.true', {
+      method: 'PATCH',
+      body: JSON.stringify({ is_default: false }),
+      prefer: 'return=minimal',
+    });
+    if (!u.ok && u.status !== 404) {
+      return err(`Gagal reset default: ${u.status}`, 502);
+    }
+  }
+
+  const r = await supabaseRest(env, '/player4me_domains', {
+    method: 'POST',
+    body: JSON.stringify({ name, domain, is_default: isDefault }),
+  });
+  if (!r.ok) {
+    // Postgres unique violation -> 409.
+    if (r.status === 409 || (typeof r.data === 'object' && r.data && /duplicate|unique/i.test(r.data.message || ''))) {
+      return err('Domain ini sudah terdaftar', 409);
+    }
+    return err(`Supabase ${r.status}: ${typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 200)}`, 502);
+  }
+  const row = Array.isArray(r.data) ? r.data[0] : r.data;
+  return json({ ok: true, data: row });
+}
+
+// PATCH /api/admin/player4me/domains/:id — partial update.
+// Allows renaming, normalizing domain, or flipping is_default.
+async function adminPlayer4meDomainUpdate(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); } catch { return err('JSON body wajib'); }
+
+  const patch = {};
+  if (typeof body.name === 'string') patch.name = body.name.trim();
+  if (typeof body.domain === 'string') {
+    const norm = normalizePlayer4meDomain(body.domain);
+    if (!norm) return err('Domain tidak valid');
+    patch.domain = norm;
+  }
+  if (typeof body.is_default === 'boolean') patch.is_default = body.is_default;
+  if (!Object.keys(patch).length) return err('Tidak ada field untuk di-update');
+
+  if (patch.is_default === true) {
+    const u = await supabaseRest(env, '/player4me_domains?is_default=eq.true', {
+      method: 'PATCH',
+      body: JSON.stringify({ is_default: false }),
+      prefer: 'return=minimal',
+    });
+    if (!u.ok && u.status !== 404) return err(`Gagal reset default: ${u.status}`, 502);
+  }
+
+  const r = await supabaseRest(env, `/player4me_domains?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) return err(`Supabase ${r.status}: ${typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 200)}`, 502);
+  const row = Array.isArray(r.data) ? r.data[0] : r.data;
+  return json({ ok: true, data: row });
+}
+
+// DELETE /api/admin/player4me/domains/:id
+async function adminPlayer4meDomainDelete(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, `/player4me_domains?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal',
+  });
+  if (!r.ok) return err(`Supabase ${r.status}: ${typeof r.data === 'string' ? r.data : JSON.stringify(r.data).slice(0, 200)}`, 502);
+  return json({ ok: true });
+}
+
+// ───────────────────────────────────────────────────────────────────
 // (REMOVED) External Supabase / cross-project mirror helpers
 //
 // The dual-project auth architecture has been removed. Auth (login,
@@ -1312,6 +1453,19 @@ export default {
     }
     if (pathname === '/api/admin/player4me/balance' && request.method === 'GET') {
       return adminPlayer4meBalance(request, env);
+    }
+
+    // === Admin: Player4Me player domains (white-label / VIP embed) ===
+    if (pathname === '/api/admin/player4me/domains' && request.method === 'GET') {
+      return adminPlayer4meDomainsList(request, env);
+    }
+    if (pathname === '/api/admin/player4me/domains' && request.method === 'POST') {
+      return adminPlayer4meDomainCreate(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/player4me\/domains\/([^/]+)$/);
+      if (m && request.method === 'PATCH') return adminPlayer4meDomainUpdate(request, env, m[1]);
+      if (m && request.method === 'DELETE') return adminPlayer4meDomainDelete(request, env, m[1]);
     }
 
     // === Admin: auto-subtitle pipeline (DEPRECATED — zaeinstore-processor)
