@@ -251,14 +251,22 @@ async function localAuthAdmin(env, path, opts = {}) {
 
 // Look up an auth user by email in the local Supabase. Returns null if not
 // found. Used by signup so we don't create duplicates.
+//
+// Supabase GoTrue admin /users supports `filter=<term>` for fuzzy matching;
+// the legacy `?email=` query param is silently ignored, which means querying
+// it returns ALL users (the first page) and a naive `array.length > 0` check
+// would incorrectly conclude that every email already exists. Always
+// post-filter the result by exact (case-insensitive) email match.
 async function localAuthFindByEmail(env, email) {
   if (!email) return null;
-  const e = encodeURIComponent(email.toLowerCase());
-  const r = await localAuthAdmin(env, `/users?email=${e}`, { method: 'GET' });
+  const needle = email.toLowerCase();
+  const e = encodeURIComponent(needle);
+  const r = await localAuthAdmin(env, `/users?filter=${e}`, { method: 'GET' });
   if (!r.ok) return null;
-  if (Array.isArray(r.data) && r.data.length) return r.data[0];
-  if (r.data && Array.isArray(r.data.users) && r.data.users.length) return r.data.users[0];
-  return null;
+  const users = Array.isArray(r.data) ? r.data
+    : (r.data && Array.isArray(r.data.users)) ? r.data.users
+    : [];
+  return users.find(u => ((u && u.email) || '').toLowerCase() === needle) || null;
 }
 
 // ───────────────────────────────────────────────────────────────────
