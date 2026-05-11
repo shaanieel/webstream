@@ -1026,19 +1026,21 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
     </div>
 
     <div id="registerPanel" style="display:none;">
-      <!-- Pendaftaran sekarang dilakukan di Zaeinstore (Project 1). Akun yang
-           dibuat di sana otomatis ter-mirror ke Zaeinstream sehingga user
-           bisa langsung login ke kedua web pakai akun yang sama. -->
-      <div class="wa-block">
-        <div class="emoji">🎬</div>
-        <h3>Daftar di Zaeinstore</h3>
-        <p>Pendaftaran ZAEINSTREAM sekarang dilakukan di <strong>Zaeinstore</strong>. Satu akun dipakai untuk semua web kami — daftar sekali, login di mana saja.</p>
-        <a class="btn-wa" href="https://zaein.semuapro.store/#/register" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
-          Daftar di Zaeinstore
-        </a>
-        <p style="margin-top:14px;font-size:.78rem;opacity:.7;">Butuh bantuan? <a href="https://wa.me/6282171872771?text=Halo+Admin%2C+saya+butuh+bantuan+daftar+ZAEINSTREAM" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">WhatsApp admin</a>.</p>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="regEmail" placeholder="email@kamu.com" autocomplete="email" />
       </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="regPass" placeholder="min. 6 karakter" autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label>Ulangi Password</label>
+        <input type="password" id="regPass2" placeholder="••••••••" autocomplete="new-password" />
+      </div>
+      <button class="btn-primary" id="registerBtn" onclick="doRegister()">Daftar &amp; Masuk</button>
+      <div class="auth-msg" id="registerMsg"></div>
+      <p style="margin-top:12px;font-size:.78rem;opacity:.7;text-align:center;">Pendaftaran <strong>tanpa verifikasi email</strong> — langsung bisa login.</p>
     </div>
   </div>
 </div>
@@ -1366,11 +1368,10 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 
   <div class="player-body">
     <div class="player-main">
-      <!-- ── Player engine selector ─ user picks which player to use ── -->
-      <div class="player-engine-bar" id="playerEngineBar">
-        <span class="pe-label">Player</span>
-        <button class="player-engine-btn active" id="peBtn1" type="button" onclick="switchPlayerEngine(1)">Player 1</button>
-        <button class="player-engine-btn" id="peBtn2" type="button" onclick="switchPlayerEngine(2)">Player 2</button>
+      <!-- (Player engine selector removed — single player only via Player4Me.) -->
+      <div class="player-engine-bar" id="playerEngineBar" style="display:none !important;">
+        <button class="player-engine-btn active" id="peBtn1" type="button" style="display:none;"></button>
+        <button class="player-engine-btn" id="peBtn2" type="button" style="display:none;"></button>
       </div>
       <div class="player-wrap show-tools" id="playerWrap">
         <!--
@@ -1580,28 +1581,28 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
    STATE & CONFIG
    ════════════════════════════════════════════════════════════════════ */
 let CONFIG = null;
-// `sb` adalah supabase client UTAMA (tempat session disimpan + auto-refresh).
-// Kalau external supabase di-set, kita pakai itu sebagai source-of-truth auth.
-// Kalau tidak, fallback ke local supabase (legacy behavior).
+// One supabase client — single project, single session, single signOut.
+// (The previous external/local dual-client layout has been removed. All
+// auth state lives in one storage key now.)
 let sb = null;
-// Secondary client untuk fallback login ketika akun cuma ada di salah satu
-// project. Diset paralel di bootstrap().
-let sbLocal = null;
 let currentUser = null;
 let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
 let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
 let currentFilm = null;
-let mtPlayer = null;        // Multitrack.JS instance (Player 1)
-let videoPlayer = null;     // legacy compat shim (delegates to active engine)
-let activeEngine = 1;       // 1 = Multitrack.JS, 2 = Player 2 (custom)
-let p2State = null;         // Player 2 runtime state
-const PLAYER_ENGINE_KEY = 'streamex-player-engine';
 let currentResumeFrom = 0;
 let currentTmdbExtras = null;
 let currentTrailerKey = null;
 let _currentSubBlobUrl = null;
+// Legacy globals — kept as `null` shims so dead legacy player functions
+// (teardownEngine1/2 etc.) don't ReferenceError if called by accident.
+// All playback now goes through loadVideoPlayer4Me().
+let mtPlayer = null;
+let videoPlayer = null;
+let activeEngine = 1;
+let p2State = null;
+const PLAYER_ENGINE_KEY = 'streamex-player-engine';
 
 /* ════════════════════════════════════════════════════════════════════
    BOOT
@@ -1611,43 +1612,34 @@ async function bootstrap(){
     const r = await fetch('/api/config');
     CONFIG = await r.json();
     if(!CONFIG.ok && !CONFIG.supabase_url){ throw new Error('Config error'); }
-    // External supabase is the cross-project auth target. When set, we make
-    // it the PRIMARY client (so new sessions live there — and login on this
-    // web also logs the user into the other web). Local supabase becomes the
-    // secondary client used to fall back for accounts that only exist here.
-    if(CONFIG.external_supabase_url && CONFIG.external_supabase_anon_key){
-      sb = supabase.createClient(CONFIG.external_supabase_url, CONFIG.external_supabase_anon_key, {
-        auth: { storageKey: 'sb-auth-external', persistSession: true, autoRefreshToken: true },
-      });
-      sbLocal = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key, {
-        auth: { storageKey: 'sb-auth-local', persistSession: true, autoRefreshToken: true },
-      });
-    }else{
-      sb = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key);
-      sbLocal = sb;
-    }
+    // Defensive cleanup: older builds stored sessions under two keys
+    // ('sb-auth-external' + 'sb-auth-local'). If a stale external session
+    // is sitting in localStorage from before the migration, the supabase
+    // client will rehydrate it on bootstrap and the user appears "logged
+    // in" to a phantom account they cannot log out of. Wipe both legacy
+    // keys so we always start from a clean single-project state.
+    try {
+      for (const k of ['sb-auth-external', 'sb-auth-local']) {
+        localStorage.removeItem(k);
+      }
+    } catch {}
+    sb = supabase.createClient(CONFIG.supabase_url, CONFIG.supabase_anon_key, {
+      auth: { storageKey: 'sb-auth', persistSession: true, autoRefreshToken: true },
+    });
   }catch(e){
     console.error('Bootstrap error:', e);
     document.getElementById('authPage').innerHTML='<div style="text-align:center;color:#fca5a5;padding:40px;">Gagal memuat konfigurasi server. Coba refresh.</div>';
     return;
   }
 
-  // Cek session di external dulu (primary), lalu local sebagai fallback.
   let session = null;
   try { session = (await sb.auth.getSession()).data.session; } catch {}
-  if(!session && sbLocal && sbLocal !== sb){
-    try {
-      const local = (await sbLocal.auth.getSession()).data.session;
-      if(local){ session = local; }
-    } catch {}
-  }
   if(session){
     await onAuthSuccess(session);
   }else{
     showAuthPage();
   }
 
-  // Listen auth state
   sb.auth.onAuthStateChange((event)=>{
     if(event==='SIGNED_OUT'){ location.reload(); }
   });
@@ -1729,58 +1721,99 @@ async function doLogin(){
   if(!email || !pass){
     msg.textContent='Email dan password wajib diisi.';
     msg.className='auth-msg error';
+    msg.style.display='block';
     return;
   }
 
   btn.disabled=true;btn.textContent='Memuat…';
   msg.style.display='none';
   try{
-    // Cross-project: try external supabase first (where most accounts live
-    // because the user's other web also writes there). Fall back to local
-    // supabase for legacy webstream-only accounts (e.g. admin).
-    let data = null;
-    let error = null;
-    ({ data, error } = await sb.auth.signInWithPassword({email,password:pass}));
-    if(error && sbLocal && sbLocal !== sb){
-      const localTry = await sbLocal.auth.signInWithPassword({email,password:pass});
-      if(!localTry.error){ data = localTry.data; error = null; }
-    }
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
     if(error){
-      // Detect "user not found / invalid credentials" and steer the visitor to
-      // Zaeinstore for signup since registration is now P1-owned.
-      const m = (error.message || '').toLowerCase();
-      const looksLikeNoAccount =
-        m.includes('invalid') || m.includes('not found') ||
-        m.includes('credentials') || m.includes('email');
-      if(looksLikeNoAccount){
-        msg.innerHTML =
-          'Akun tidak ditemukan. Silahkan daftar di Zaeinstore dulu.<br>' +
-          '<a href="https://zaein.semuapro.store/#/register" target="_blank" rel="noopener" ' +
-          'style="display:inline-block;margin-top:10px;padding:8px 14px;border-radius:8px;' +
-          'background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;font-weight:600;font-size:.85rem;">' +
-          'Daftar di Zaeinstore →</a>';
-      } else {
-        msg.textContent = error.message;
-      }
+      msg.textContent = error.message || 'Login gagal.';
       msg.className='auth-msg error';
       msg.style.display='block';
-      btn.disabled=false;btn.textContent='Masuk';
+      btn.disabled=false; btn.textContent='Masuk';
       return;
     }
     await onAuthSuccess(data.session);
   }catch(e){
     msg.textContent='Error: '+e.message;
     msg.className='auth-msg error';
-    btn.disabled=false;btn.textContent='Masuk';
+    msg.style.display='block';
+    btn.disabled=false; btn.textContent='Masuk';
+  }
+}
+
+async function doRegister(){
+  const email = document.getElementById('regEmail').value.trim();
+  const pass = document.getElementById('regPass').value;
+  const pass2 = document.getElementById('regPass2').value;
+  const msg = document.getElementById('registerMsg');
+  const btn = document.getElementById('registerBtn');
+
+  msg.style.display='none';
+  if(!email || !pass){
+    msg.textContent='Email dan password wajib diisi.';
+    msg.className='auth-msg error';
+    msg.style.display='block';
+    return;
+  }
+  if(pass.length < 6){
+    msg.textContent='Password minimal 6 karakter.';
+    msg.className='auth-msg error';
+    msg.style.display='block';
+    return;
+  }
+  if(pass !== pass2){
+    msg.textContent='Password tidak cocok.';
+    msg.className='auth-msg error';
+    msg.style.display='block';
+    return;
+  }
+
+  btn.disabled=true; btn.textContent='Mendaftarkan…';
+  try{
+    const r = await fetch('/api/auth/signup', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ email, password: pass }),
+    });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok){
+      msg.textContent = d && (d.error || d.message) ? (d.error || d.message) : ('Gagal daftar (HTTP '+r.status+')');
+      msg.className='auth-msg error';
+      msg.style.display='block';
+      btn.disabled=false; btn.textContent='Daftar & Masuk';
+      return;
+    }
+    // Auto-login after successful signup.
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+    if(error){
+      msg.textContent = 'Akun dibuat tapi auto-login gagal: ' + error.message;
+      msg.className='auth-msg error';
+      msg.style.display='block';
+      btn.disabled=false; btn.textContent='Daftar & Masuk';
+      return;
+    }
+    await onAuthSuccess(data.session);
+  }catch(e){
+    msg.textContent='Error: ' + e.message;
+    msg.className='auth-msg error';
+    msg.style.display='block';
+    btn.disabled=false; btn.textContent='Daftar & Masuk';
   }
 }
 
 async function confirmLogout(){
   if(!confirm('Yakin mau logout?')) return;
-  // Sign out of both clients to clear cross-project session storage.
   try { await sb.auth.signOut(); } catch {}
-  if(sbLocal && sbLocal !== sb){ try { await sbLocal.auth.signOut(); } catch {} }
-  // Clear both hash and path so we land on clean /
+  // Belt-and-suspenders: nuke any stale legacy storage keys too.
+  try {
+    for (const k of ['sb-auth', 'sb-auth-external', 'sb-auth-local']) {
+      localStorage.removeItem(k);
+    }
+  } catch {}
   history.replaceState(null, '', '/');
   location.reload();
 }
@@ -2674,39 +2707,19 @@ async function _resolveDrivePath(drivePath){
 }
 
 async function loadVideo(film){
-  // ── Player4Me primary path ─────────────────────────────────────────────
-  // New films are uploaded to Player4Me (iframe player). When `video_url`
-  // is set, that's the ONLY player we show. Drive Index integration is
-  // strictly an "extras" panel below the iframe for VIP films.
+  // Single-player mode: every film plays via the Player4Me iframe.
+  // Films missing video_url are misconfigured — surface a clear toast
+  // instead of silently rendering a blank iframe.
   if(film && film.video_url){
     return loadVideoPlayer4Me(film);
   }
-
-  // ── Legacy fallback (films without Player4Me yet) ──────────────────────
-  // Restore last engine preference (default Player 1)
-  try{
-    const saved = parseInt(localStorage.getItem(PLAYER_ENGINE_KEY)||'1', 10);
-    activeEngine = (saved === 2) ? 2 : 1;
-  }catch{ activeEngine = 1; }
-  applyEngineButtons();
-
-  // Show legacy players (in case a previous Player4Me load hid them)
-  _showLegacyPlayer();
-
-  // Resolve all sources up front (used by both engines)
-  const sources = await _resolveFilmSources(film);
-  if(!sources){ return; } // already showed toast
-
-  // Stash on currentFilm so engine swap mid-playback re-uses
-  currentFilm._sources = sources;
-
-  if(activeEngine === 2){
-    teardownEngine1();
-    return loadVideoEngine2(film, sources);
-  }
-  teardownEngine2();
-  return loadVideoEngine1(film, sources);
+  showToast('Film ini belum punya video Player4Me. Hubungi admin.', 'error');
 }
+
+// Stub kept so any stale UI handlers don't crash. There is only one player
+// engine now (Player4Me iframe).
+function switchPlayerEngine(){ /* no-op */ }
+function applyEngineButtons(){ /* no-op */ }
 
 // Show legacy Vidstack/Multitrack players after a Player4Me film closes.
 function _showLegacyPlayer(){
@@ -2753,12 +2766,13 @@ async function loadVideoPlayer4Me(film){
     fr.style.display = 'block';
   }
 
-  // VIP extras (download + external player) — only when film is VIP AND user
-  // is on a VIP plan. Basic users (and basic-tier rows) get NOTHING below the
-  // player, per spec.
-  const isVipFilm = film.tier === 'vip';
+  // VIP extras (download + external player + drive/gdrive link) — ONLY when
+  // the user is on a VIP plan AND the film row has a drive backend. Basic
+  // users see NOTHING below the player, per spec:
+  //   "di basic gaada lagi yg didalam kotak saya tandain itu, itu hanya ada
+  //    di video player yg bagian vip"
   const userIsVip = currentTier === 'vip';
-  const showVipExtras = isVipFilm && userIsVip && (film.drive_path || film.drive_link);
+  const showVipExtras = userIsVip && (film.drive_path || film.drive_link);
 
   if(showVipExtras){
     try{
@@ -2781,22 +2795,32 @@ async function loadVideoPlayer4Me(film){
   }
 }
 
-// Convert any Player4Me URL the admin might paste (share, embed, raw id)
-// into the canonical embed URL. This means the streaming page is forgiving
-// of how the admin saves the URL in the DB.
+// Extract the Player4Me video id from any URL/string the admin might have
+// saved in the DB (share URL, embed URL, or bare id).
+function _extractPlayer4MeId(rawUrl){
+  if(!rawUrl) return null;
+  const u = String(rawUrl).trim();
+  let m = u.match(/player4me\.com\/(?:embed|v)\/([A-Za-z0-9_-]+)/i);
+  if(m) return m[1];
+  // Custom domain hash style: https://my.domain/#abc123
+  m = u.match(/^https?:\/\/[^\/]+\/#\/?([A-Za-z0-9_-]+)/i);
+  if(m) return m[1];
+  if(/^[A-Za-z0-9_-]{4,}$/.test(u)) return u;
+  return null;
+}
+
+// Build the iframe URL for a film. VIP users get the white-label custom
+// domain (ad-free). Basic users get the standard player4me.com embed
+// (with ads). Falls back to the raw URL if we can't extract an id.
 function _normalizePlayer4MeEmbedUrl(rawUrl){
   if(!rawUrl) return '';
-  const u = String(rawUrl).trim();
-  // Already an embed URL — pass through.
-  if(/player4me\.com\/embed\//i.test(u)) return u;
-  // Share URL like https://player4me.com/v/<id>
-  let m = u.match(/player4me\.com\/v\/([A-Za-z0-9_-]+)/i);
-  if(m) return 'https://player4me.com/embed/' + m[1];
-  // Iframe embed URL with extra path → keep as-is (admin probably knows what they want)
-  if(/^https?:\/\//i.test(u)) return u;
-  // Bare id
-  if(/^[A-Za-z0-9_-]{6,}$/.test(u)) return 'https://player4me.com/embed/' + u;
-  return u;
+  const id = _extractPlayer4MeId(rawUrl);
+  if(!id) return String(rawUrl).trim();
+  const customDomain = (CONFIG && CONFIG.player4me_public_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  if(currentTier === 'vip' && customDomain){
+    return 'https://' + customDomain + '/#' + id;
+  }
+  return 'https://player4me.com/embed/' + id;
 }
 
 async function _resolveFilmSources(film){
