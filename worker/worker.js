@@ -52,6 +52,8 @@ const json = (data, status = 200, extraHeaders = {}) =>
   });
 
 const err = (msg, status = 400) => json({ ok: false, error: msg }, status);
+const VIP_DOWNLOAD_LIMIT = 2;
+const VIP_DOWNLOAD_TTL_MS = 30 * 60 * 1000;
 
 function corsHeaders() {
   return {
@@ -79,6 +81,13 @@ async function supabaseRest(env, path, opts = {}) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   return { ok: res.ok, status: res.status, data };
+}
+
+async function supabaseRpc(env, name, body) {
+  return supabaseRest(env, `/rpc/${name}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  });
 }
 
 // Verifikasi JWT user dari frontend → return user record dari Supabase.
@@ -120,6 +129,15 @@ async function getUserProfile(env, userId, email) {
     if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
   }
   return null;
+}
+
+function nowIsoMinus(ms) {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function isVipProfileActive(profile) {
+  if (!profile || !profile.is_vip) return false;
+  return !(profile.expired_at && new Date(profile.expired_at) < new Date());
 }
 
 function isAdminEmail(env, email) {
@@ -633,8 +651,53 @@ function normalizeDrivePath(input, gdiBase) {
   return s;
 }
 
+async function acquireVipDownloadSlot(request, env, drivePath) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return { ok: false, response: err('Login dulu', 401) };
+
+  const profile = await getUserProfile(env, user.id, user.email);
+  if (!isVipProfileActive(profile)) {
+    return { ok: false, response: err('Download VIP hanya untuk member VIP aktif', 403) };
+  }
+
+  const userId = profile.user_id || user.id;
+  const token = crypto.randomUUID();
+  const staleBefore = nowIsoMinus(VIP_DOWNLOAD_TTL_MS);
+
+  const rpc = await supabaseRpc(env, 'acquire_vip_download_slot', {
+    p_user_id: userId,
+    p_film_path: drivePath,
+    p_token: token,
+    p_limit: VIP_DOWNLOAD_LIMIT,
+    p_stale_before: staleBefore,
+  });
+
+  if (rpc.ok && rpc.data === true) return { ok: true, token };
+  if (rpc.ok && rpc.data === false) {
+    return {
+      ok: false,
+      response: err(`Maksimal ${VIP_DOWNLOAD_LIMIT} download VIP berjalan sekaligus per user`, 429),
+    };
+  }
+
+  return { ok: false, response: err('Limit download VIP belum siap. Jalankan migration Supabase terbaru.', 500) };
+}
+
+async function releaseVipDownloadSlot(request, env) {
+  let body;
+  try { body = await request.json(); } catch { body = {}; }
+  const token = body && body.token ? String(body.token) : '';
+  if (!token) return err('Token wajib', 400);
+  const r = await supabaseRest(env, `/active_downloads?token=eq.${encodeURIComponent(token)}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal',
+  });
+  if (!r.ok) return err('Gagal release download slot', 500);
+  return json({ ok: true });
+}
+
 // GET /api/drive/resolve?path=/Movies/Foo.mp4  (atau ?link=full-url)
-async function driveResolve(request, env) {
+async function driveResolve(request, env, opts = {}) {
   const u = new URL(request.url);
   const raw = u.searchParams.get('path') || u.searchParams.get('link');
   if (!raw) return err('Parameter path atau link wajib');
@@ -642,6 +705,11 @@ async function driveResolve(request, env) {
   if (!gdiBase) return err('GDI_WORKER_URL belum di-set di env worker', 500);
   const drivePath = normalizeDrivePath(raw, gdiBase);
   if (!drivePath) return err('Path drive tidak valid');
+  let slot = null;
+  if (opts.acquireSlot) {
+    slot = await acquireVipDownloadSlot(request, env, drivePath);
+    if (!slot.ok) return slot.response;
+  }
   // Path file (bukan folder) → POST ke GDI dengan body kosong, GDI return { link: '/download.aspx?...' }
   try {
     const r = await gdiFetch(env, `${gdiBase}${drivePath}`, {
@@ -652,9 +720,17 @@ async function driveResolve(request, env) {
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch { data = null; }
     if (!r.ok || !data) {
+      if (slot) await supabaseRest(env, `/active_downloads?token=eq.${encodeURIComponent(slot.token)}`, {
+        method: 'DELETE',
+        prefer: 'return=minimal',
+      });
       return err(`GDI ${r.status}: ${text.slice(0, 200)}`, 502);
     }
     if (!data.link) {
+      if (slot) await supabaseRest(env, `/active_downloads?token=eq.${encodeURIComponent(slot.token)}`, {
+        method: 'DELETE',
+        prefer: 'return=minimal',
+      });
       return err('File tidak ditemukan di Drive Index', 404);
     }
     const streamUrl = `${gdiBase}${data.link}`;
@@ -665,8 +741,13 @@ async function driveResolve(request, env) {
       mime_type: data.mimeType || null,
       size: data.size || null,
       name: data.name || null,
+      download_token: slot ? slot.token : null,
     });
   } catch (e) {
+    if (slot) await supabaseRest(env, `/active_downloads?token=eq.${encodeURIComponent(slot.token)}`, {
+      method: 'DELETE',
+      prefer: 'return=minimal',
+    });
     return err('GDI error: ' + e.message, 502);
   }
 }
@@ -1226,7 +1307,7 @@ async function authSignupHandler(request, env) {
   };
   const pr = await supabaseRest(env, '/users_profile', {
     method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    prefer: 'resolution=merge-duplicates,return=representation',
     body: JSON.stringify(profileRow),
   });
   if (!pr.ok) {
@@ -1287,7 +1368,7 @@ async function adminUserCreate(request, env) {
   };
   const pr = await supabaseRest(env, '/users_profile', {
     method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    prefer: 'resolution=merge-duplicates,return=representation',
     body: JSON.stringify(profileRow),
   });
   if (!pr.ok) {
@@ -1387,7 +1468,10 @@ export default {
 
     // === Drive ===
     if (pathname === '/api/drive/resolve' && request.method === 'GET') {
-      return driveResolve(request, env);
+      return driveResolve(request, env, { acquireSlot: url.searchParams.get('download') === '1' });
+    }
+    if (pathname === '/api/drive/release' && request.method === 'POST') {
+      return releaseVipDownloadSlot(request, env);
     }
 
     // === Catalog (public read) ===
