@@ -820,6 +820,7 @@ async function adminHealthHandler(request, env) {
     admin_emails: (env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean),
     gdi_worker_url: env.GDI_WORKER_URL || null,
     player4me_public_domain: env.PLAYER4ME_PUBLIC_DOMAIN || null,
+    video_host_domain: env.PLAYER4ME_PUBLIC_DOMAIN || null,
   } });
 }
 
@@ -1071,10 +1072,12 @@ async function catalogList(request, env) {
   // fetch stream URL kalau perlu. Ini biar badge "VIP" tetap keliatan sebagai teaser
   // di grid utama meski user bukan VIP, sama kayak Netflix.
   // Nested-select auto_subtitle_tracks via PostgREST relationship (ON films.id = auto_subtitle_tracks.film_id).
-  // Also nested-select player4me_domain so the frontend can build the right
-  // embed URL per film (admin can assign different white-label domains to
-  // different films via films.player4me_domain_id — see migration 0009).
-  const path = '/films?select=*,auto_subtitle_tracks(language,label,url,source),player4me_domain:player4me_domains(id,name,domain,is_default)&order=created_at.desc';
+  // Also nested-select the per-film host domain so the frontend can build
+  // the right embed URL (admin can assign different white-label domains
+  // to different films via films.player4me_domain_id — see migration
+  // 0009). The PostgREST alias `video_host:` keeps the public JSON key
+  // generic so the underlying DB column name doesn't leak via inspect.
+  const path = '/films?select=*,auto_subtitle_tracks(language,label,url,source),video_host:player4me_domains(id,name,domain,is_default)&order=created_at.desc';
   // Backward-compat: frontend lama boleh pakai ?tier=free untuk minta subset non-VIP
   let finalPath = path;
   if (tierFilter === 'free') {
@@ -1402,7 +1405,8 @@ export default {
         supabase_anon_key: env.SUPABASE_ANON_KEY || '',
         gdi_worker_url: env.GDI_WORKER_URL,
         tmdb_image_base: 'https://image.tmdb.org/t/p/w500',
-        player4me_public_domain: env.PLAYER4ME_PUBLIC_DOMAIN || '',
+        // Public CONFIG — keep this minimal; no backend identifiers leak.
+        video_host_domain: env.PLAYER4ME_PUBLIC_DOMAIN || '',
       });
     }
 
