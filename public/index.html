@@ -2766,7 +2766,7 @@ async function loadVideoPlayer4Me(film){
     // normalize. If we cannot extract a Player4Me id, refuse to render
     // the iframe instead of feeding a relative path that would self-embed
     // webstream.
-    const src = _normalizePlayer4MeEmbedUrl(film.video_url);
+    const src = _normalizePlayer4MeEmbedUrl(film.video_url, film);
     if(src){
       fr.src = src;
       fr.style.display = 'block';
@@ -2835,21 +2835,47 @@ function _extractPlayer4MeId(rawUrl){
   return null;
 }
 
-// Build the iframe URL for a film. ALWAYS uses the admin's branded
-// custom domain (CONFIG.player4me_public_domain → wrangler env
-// PLAYER4ME_PUBLIC_DOMAIN). Both VIP and Basic tiers play through the
-// same custom domain — Player4Me's public player4me.com/embed/<id> is
-// a separate id-space and 404s for ids that live on our white-label
-// account, so we never use it. If we can't extract a Player4Me id, or
-// the custom domain isn't configured, return '' so the caller shows
+// Build the iframe URL for a film. Resolves the white-label Player4Me
+// domain in this priority order (first non-empty wins):
+//   1. film.player4me_domain.domain  — per-film override picked by the
+//      admin in adminweb1 (films.player4me_domain_id FK, see migration
+//      0009). Lets the admin route different films to different
+//      Player4Me domains without changing any global config.
+//   2. CONFIG.player4me_public_domain  — global default from the worker
+//      env (PLAYER4ME_PUBLIC_DOMAIN). Used when the admin hasn't
+//      assigned a specific domain to this film.
+//   3. The host part of the saved video_url itself — when the admin
+//      pasted a full https://<dom>/#<id> URL we can just reuse the host
+//      they typed.
+// Player4Me's public player4me.com/embed/<id> is a separate id-space and
+// 404s for ids that live on our white-label account, so we never fall
+// back to it. If everything is missing we return '' so the caller shows
 // a friendly error toast instead of producing a broken iframe.
-function _normalizePlayer4MeEmbedUrl(rawUrl){
+function _normalizePlayer4MeEmbedUrl(rawUrl, film){
   if(!rawUrl) return '';
   const id = _extractPlayer4MeId(rawUrl);
   if(!id) return '';
-  const customDomain = (CONFIG && CONFIG.player4me_public_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  if(!customDomain) return '';
-  return 'https://' + customDomain + '/#' + id;
+
+  const stripScheme = (s) => (s || '').toString().trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+
+  // 1) per-film domain.
+  let dom = '';
+  if(film && film.player4me_domain && film.player4me_domain.domain){
+    dom = stripScheme(film.player4me_domain.domain);
+  }
+  // 2) env default.
+  if(!dom){
+    dom = stripScheme(CONFIG && CONFIG.player4me_public_domain);
+  }
+  // 3) host from the original raw URL (works when admin pasted a full
+  //    https://<dom>/#<id> URL).
+  if(!dom){
+    const hostMatch = String(rawUrl).trim().match(/^https?:\/\/([^\/#?]+)/i);
+    if(hostMatch) dom = hostMatch[1];
+  }
+
+  if(!dom) return '';
+  return 'https://' + dom + '/#' + id;
 }
 
 async function _resolveFilmSources(film){
