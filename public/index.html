@@ -3005,7 +3005,7 @@ async function loadVideoHost(film){
     // normalize. If we cannot extract a host video id, refuse to render
     // the iframe instead of feeding a relative path that would self-embed
     // webstream.
-    const src = _normalizeHostEmbedUrl(film.video_url);
+    const src = _normalizeHostEmbedUrl(film.video_url, film);
     if(src){
       fr.src = src;
       fr.style.display = 'block';
@@ -3070,20 +3070,41 @@ function _extractHostId(rawUrl){
   return null;
 }
 
-// Build the iframe URL for a film. Uses the admin's branded custom
-// domain exposed by the worker as CONFIG.video_host_domain. Both VIP
-// and Basic tiers play through the same domain. If we can't extract a
-// host id, or the custom domain isn't configured, return '' so the
-// caller shows a friendly toast instead of producing a broken iframe.
-function _normalizeHostEmbedUrl(rawUrl){
+// Build the iframe URL for a film. Resolves the white-label host domain
+// in this priority order (first non-empty wins):
+//   1. film.video_host.domain  — per-film override picked by the admin
+//      in the admin web app. Lets admin route different films to
+//      different hosts without changing any global config.
+//   2. CONFIG.video_host_domain — global default from the backend.
+//   3. host part of the saved video_url itself — when the admin pasted
+//      a full https://<dom>/#<id> URL we just reuse the host they typed.
+// If everything is missing we return '' so the caller shows a friendly
+// toast instead of producing a broken iframe.
+function _normalizeHostEmbedUrl(rawUrl, film){
   if(!rawUrl) return '';
   const id = _extractHostId(rawUrl);
   if(!id) return '';
-  // Backend exposes the host domain under `video_host_domain`.
-  const rawDom = (CONFIG && CONFIG.video_host_domain) || '';
-  const customDomain = rawDom.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  if(!customDomain) return '';
-  return 'https://' + customDomain + '/#' + id;
+
+  const stripScheme = (s) => (s || '').toString().trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+
+  // 1) per-film domain (aliased FK row).
+  let dom = '';
+  if(film && film.video_host && film.video_host.domain){
+    dom = stripScheme(film.video_host.domain);
+  }
+  // 2) env default.
+  if(!dom){
+    dom = stripScheme(CONFIG && CONFIG.video_host_domain);
+  }
+  // 3) host from the original raw URL (works when admin pasted a full
+  //    https://<dom>/#<id> URL).
+  if(!dom){
+    const hostMatch = String(rawUrl).trim().match(/^https?:\/\/([^\/#?]+)/i);
+    if(hostMatch) dom = hostMatch[1];
+  }
+
+  if(!dom) return '';
+  return 'https://' + dom + '/#' + id;
 }
 
 async function _resolveFilmSources(film){
