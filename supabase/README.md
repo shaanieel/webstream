@@ -38,6 +38,13 @@ already-migrated databases is safe.
    `https://{domain}/#{videoId}`. Exactly one row may be `is_default`;
    the worker API enforces that invariant on insert/update. Seed inserts
    `Zaeinstore QZZ → https://zaeinstore.qzz.io` as the default.
+8. **`0008_rewrite_legacy_player4me_urls.sql`** — rewrites legacy
+   Player4Me URLs to the current custom-domain hash URL format.
+9. **`0009_active_downloads_limit.sql`** — adds `active_downloads` plus
+   `acquire_vip_download_slot(...)` so VIP Drive downloads are limited to
+   2 simultaneous active downloads per user. Slots auto-expire after the
+   worker's stale window and are released by the frontend when the player
+   closes.
 
 ## Required tables
 

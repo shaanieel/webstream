@@ -380,12 +380,15 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   cursor:pointer;
   display:block;
   position:relative;
+  min-width:0;
   transition:transform .2s ease;
 }
 .card:hover{transform:translateY(-3px);}
 .card-poster{
   position:relative;
   aspect-ratio:2/3;
+  width:100%;
+  min-height:0;
   border-radius:10px;
   overflow:hidden;
   background:var(--surface);
@@ -393,7 +396,11 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
 }
 .card-poster img{width:100%;height:100%;object-fit:cover;transition:transform .3s ease,filter .3s ease;}
 .card:hover .card-poster img,.card:focus-within .card-poster img,.card.touched .card-poster img{transform:scale(1.04);filter:blur(2px) brightness(.55);}
-.card-poster.placeholder{display:flex;align-items:center;justify-content:center;color:var(--muted-2);font-size:.75rem;text-align:center;padding:8px;}
+.card-poster-placeholder{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  width:100%;height:100%;color:var(--muted-2);font-size:.75rem;text-align:center;
+  padding:8px;background:var(--surface);
+}
 .card-play-overlay{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   opacity:0;transition:opacity .25s ease;pointer-events:none;z-index:2;
@@ -984,7 +991,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
    desktop and the mobile drawer (since the drawer reuses the sidebar). */
 .sidebar-theme-row{
   display:flex;align-items:center;justify-content:flex-end;
-  padding:0 4px 8px;
+  padding:8px 4px 0;
 }
 .sidebar.collapsed .sidebar-theme-row{justify-content:center;padding:8px 0;}
 .sidebar-theme-toggle{
@@ -1247,10 +1254,13 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     </nav>
 
     <div class="sidebar-footer">
-      <!--
-        Theme toggle. Sits ABOVE the profile chip on desktop and inside the
-        mobile drawer (which is just the sidebar slid in from the left).
-      -->
+      <div class="profile-chip" onclick="goPage('profile')" title="Lihat detail akun">
+        <div class="profile-avatar" id="profileAvatar">Z</div>
+        <div class="profile-info">
+          <div class="profile-name" id="profileName">user@…</div>
+          <div class="profile-tier" id="profileTier">Free</div>
+        </div>
+      </div>
       <div class="sidebar-theme-row">
         <label for="themeToggleSidebar"
                class="themeToggle st-sunMoonThemeToggleBtn sidebar-theme-toggle"
@@ -1273,13 +1283,6 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
             </g>
           </svg>
         </label>
-      </div>
-      <div class="profile-chip" onclick="goPage('profile')" title="Lihat detail akun">
-        <div class="profile-avatar" id="profileAvatar">Z</div>
-        <div class="profile-info">
-          <div class="profile-name" id="profileName">user@…</div>
-          <div class="profile-tier" id="profileTier">Free</div>
-        </div>
       </div>
     </div>
   </aside>
@@ -2520,7 +2523,7 @@ function cardHTML(f, vipStyle, opts){
   const posterHTML = poster
     ? `<img src="${poster}" loading="lazy" alt="${escapeHtml(f.judul||'')}"/>`
     : '';
-  const placeholder = poster ? '' : `<div class="card-poster-placeholder" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#666;font-size:.75rem;text-align:center;padding:8px;">${escapeHtml(f.judul||'No image')}</div>`;
+  const placeholder = poster ? '' : `<div class="card-poster-placeholder">${escapeHtml(f.judul||'No image')}</div>`;
   const cwDelete = opts.cw ? `<button class="card-cw-delete show" data-cw-delete="${f.id}" aria-label="Hapus dari Continue Watching" onclick="event.stopPropagation();removeContinueWatching('${f.id}');">×</button>` : '';
   const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
   const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
@@ -2962,6 +2965,7 @@ function applyEngineButtons(){ /* no-op */ }
 
 // Show legacy Vidstack/Multitrack players after a host-iframe film closes.
 function _showLegacyPlayer(){
+  releaseVipDownloadSlot();
   const fr = document.getElementById('vhFrame');
   if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
   const peBar = document.getElementById('playerEngineBar');
@@ -2979,6 +2983,7 @@ function _showLegacyPlayer(){
 // Hide legacy players + show video host iframe. Set up Drive Index extras
 // (download + external player) ONLY for VIP films.
 async function loadVideoHost(film){
+  releaseVipDownloadSlot();
   // Tear down whichever legacy engine was last active so it doesn't keep
   // playing audio / consuming bandwidth in the background.
   try { teardownEngine1(); } catch {}
@@ -3029,12 +3034,13 @@ async function loadVideoHost(film){
       const param = film.drive_path
         ? 'path='+encodeURIComponent(film.drive_path)
         : 'link='+encodeURIComponent(film.drive_link);
-      const r = await fetch('/api/drive/resolve?'+param);
+      const r = await fetch('/api/drive/resolve?download=1&'+param);
       const d = await r.json();
       if(d.ok && d.stream_url){
-        setStreamActions(d.stream_url, film.judul || film.title || '');
+        setStreamActions(d.stream_url, film.judul || film.title || '', d.download_token || '');
       }else{
         document.getElementById('streamActions').style.display = 'none';
+        if(d && d.error) showToast(d.error, 'error');
       }
     }catch{
       document.getElementById('streamActions').style.display = 'none';
@@ -3283,13 +3289,14 @@ async function loadVideoEngine1(film, sources){
 }
 
 // ── Stream actions: download + external player URL schemes ──
-function setStreamActions(url, title){
+function setStreamActions(url, title, downloadToken){
   if(!url){ document.getElementById('streamActions').style.display='none'; return; }
   const enc = encodeURIComponent(title || '');
   let b64 = '';
   try{ b64 = btoa(unescape(encodeURIComponent(url))); }catch{}
   const dl = document.getElementById('streamDlBtn');
   dl.href = url;
+  dl.dataset.downloadToken = downloadToken || '';
   // Hint filename agar browser pakai nama film, bukan "download.aspx"
   dl.setAttribute('download', (title || 'video') + '.mp4');
   document.getElementById('streamUrlField').value = url;
@@ -3307,6 +3314,26 @@ function setStreamActions(url, title){
   document.getElementById('streamExt1DMLite').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.adm.lite/idm.internet.download.manager.Downloader;S.title='+enc+';end';
   document.getElementById('streamExt1DMPlus').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.plus/idm.internet.download.manager.Downloader;S.title='+enc+';end';
   document.getElementById('streamActions').style.display = 'block';
+}
+
+function releaseVipDownloadSlot(){
+  const dl = document.getElementById('streamDlBtn');
+  const token = dl ? dl.dataset.downloadToken : '';
+  if(!token) return;
+  if(dl) dl.dataset.downloadToken = '';
+  try{
+    const blob = new Blob([JSON.stringify({ token })], { type:'application/json' });
+    if(navigator.sendBeacon){
+      navigator.sendBeacon('/api/drive/release', blob);
+      return;
+    }
+  }catch{}
+  fetch('/api/drive/release', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ token }),
+    keepalive:true,
+  }).catch(()=>{});
 }
 
 function toggleStreamExtMenu(){
@@ -3329,6 +3356,7 @@ document.addEventListener('click', function(e){
   if(!m || !b) return;
   if(!b.contains(e.target) && !m.contains(e.target)) m.style.display='none';
 });
+window.addEventListener('beforeunload', releaseVipDownloadSlot);
 
 /* ═══════════════════════════════════════════════════════════════════
    PLAYER 2 — Vidstack web components.
@@ -3966,6 +3994,7 @@ function _p2AssToVtt(ass){
 
 function closePlayer(opts){
   opts = opts || {};
+  releaseVipDownloadSlot();
   document.getElementById('playerModal').classList.remove('open');
   document.body.style.overflow='';
   // If we pushed a /film/{id} URL, navigate back one step so URL reverts
