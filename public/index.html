@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
 <!-- Multitrack.JS player (CSS injected by JS bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<!-- Vidstack player (Player 2 — same library used by player4me). Default theme. -->
+<!-- Vidstack player (Player 2). Default theme. -->
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 <script src="https://cdn.vidstack.io/player" type="module"></script>
@@ -600,7 +600,7 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .player-engine-chip-item:hover{ background:rgba(255,255,255,.08); }
 .player-engine-chip-item.active{ color:var(--brand,#3461ff); font-weight:600; }
 
-/* ── Player 2 (Vidstack web components — same library player4me uses) ── */
+/* ── Player 2 (Vidstack web components) ── */
 #player2Wrap{
   position:absolute; inset:0; display:none;
   background:#000;
@@ -910,7 +910,7 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 }
 #menuToggle .bar{
   position:absolute;left:0;right:0;height:3px;border-radius:1.5px;
-  background:#7b52b9;color:inherit;opacity:1;
+  background:var(--accent);color:inherit;opacity:1;
   transition:none .35s cubic-bezier(.5,-.35,.35,1.5) 0s;
 }
 #menuToggle .bar--top{
@@ -980,14 +980,21 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 }
 @keyframes showRay1832{0%{transform:scale(0);}100%{transform:scale(1);}}
 
-/* Sidebar theme toggle — sits in the sidebar logo row on desktop.
-   On mobile the sidebar is a drawer so the toggle appears at the top of
-   the drawer (left of where the close button sits). */
+/* Sidebar-footer theme toggle row — sits above the profile chip on both
+   desktop and the mobile drawer (since the drawer reuses the sidebar). */
+.sidebar-theme-row{
+  display:flex;align-items:center;justify-content:flex-end;
+  padding:0 4px 8px;
+}
+.sidebar.collapsed .sidebar-theme-row{justify-content:center;padding:8px 0;}
 .sidebar-theme-toggle{
-  margin-left:auto;
   display:inline-flex;align-items:center;justify-content:center;
 }
-.sidebar.collapsed .sidebar-theme-toggle{display:none;}
+/* Mobile topbar theme toggle — sits LEFT of the hamburger. */
+.mobile-topbar-theme-toggle{
+  flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:var(--topbar-h);
+}
 
 /* ════════════════════════════════════════════════════════════════════
    MOBILE LAYOUT (< 768px)
@@ -1196,32 +1203,6 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     <div class="sidebar-logo">
       <img src="https://iili.io/BPFTO6x.md.png" alt="" class="sidebar-logo-img"
            onerror="this.style.display='none'"/>
-      <!--
-        Theme toggle. On desktop this sits at the right edge of the sidebar
-        logo row (visible all the time). On mobile the sidebar is a drawer
-        so this same control appears at the top of the drawer when opened.
-      -->
-      <label for="themeToggle"
-             class="themeToggle st-sunMoonThemeToggleBtn sidebar-theme-toggle"
-             aria-label="Toggle theme"
-             title="Toggle theme">
-        <input type="checkbox" id="themeToggle" class="themeToggleInput" onchange="toggleTheme()"/>
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" stroke="none">
-          <mask id="moon-mask">
-            <rect x="0" y="0" width="20" height="20" fill="white"></rect>
-            <circle cx="11" cy="3" r="8" fill="black"></circle>
-          </mask>
-          <circle class="sunMoon" cx="10" cy="10" r="8" mask="url(#moon-mask)"></circle>
-          <g>
-            <circle class="sunRay sunRay1" cx="18" cy="10" r="1.5"></circle>
-            <circle class="sunRay sunRay2" cx="14" cy="16.928" r="1.5"></circle>
-            <circle class="sunRay sunRay3" cx="6" cy="16.928" r="1.5"></circle>
-            <circle class="sunRay sunRay4" cx="2" cy="10" r="1.5"></circle>
-            <circle class="sunRay sunRay5" cx="6" cy="3.1718" r="1.5"></circle>
-            <circle class="sunRay sunRay6" cx="14" cy="3.1718" r="1.5"></circle>
-          </g>
-        </svg>
-      </label>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section">
@@ -1266,6 +1247,33 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     </nav>
 
     <div class="sidebar-footer">
+      <!--
+        Theme toggle. Sits ABOVE the profile chip on desktop and inside the
+        mobile drawer (which is just the sidebar slid in from the left).
+      -->
+      <div class="sidebar-theme-row">
+        <label for="themeToggleSidebar"
+               class="themeToggle st-sunMoonThemeToggleBtn sidebar-theme-toggle"
+               aria-label="Toggle theme"
+               title="Toggle theme">
+          <input type="checkbox" id="themeToggleSidebar" class="themeToggleInput" onchange="toggleTheme()"/>
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+            <mask id="moon-mask-sidebar">
+              <rect x="0" y="0" width="20" height="20" fill="white"></rect>
+              <circle cx="11" cy="3" r="8" fill="black"></circle>
+            </mask>
+            <circle class="sunMoon" cx="10" cy="10" r="8" mask="url(#moon-mask-sidebar)"></circle>
+            <g>
+              <circle class="sunRay sunRay1" cx="18" cy="10" r="1.5"></circle>
+              <circle class="sunRay sunRay2" cx="14" cy="16.928" r="1.5"></circle>
+              <circle class="sunRay sunRay3" cx="6" cy="16.928" r="1.5"></circle>
+              <circle class="sunRay sunRay4" cx="2" cy="10" r="1.5"></circle>
+              <circle class="sunRay sunRay5" cx="6" cy="3.1718" r="1.5"></circle>
+              <circle class="sunRay sunRay6" cx="14" cy="3.1718" r="1.5"></circle>
+            </g>
+          </svg>
+        </label>
+      </div>
       <div class="profile-chip" onclick="goPage('profile')" title="Lihat detail akun">
         <div class="profile-avatar" id="profileAvatar">Z</div>
         <div class="profile-info">
@@ -1288,6 +1296,28 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     <div class="mobile-topbar">
       <div class="brand-wordmark" aria-label="ZAEINSTREAM">Z A E I N S T R E A M</div>
       <div class="mobile-topbar-spacer"></div>
+      <!-- Theme toggle sits LEFT of the hamburger on mobile. -->
+      <label for="themeToggleMobile"
+             class="themeToggle st-sunMoonThemeToggleBtn mobile-topbar-theme-toggle"
+             aria-label="Toggle theme"
+             title="Toggle theme">
+        <input type="checkbox" id="themeToggleMobile" class="themeToggleInput" onchange="toggleTheme()"/>
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <mask id="moon-mask-mobile">
+            <rect x="0" y="0" width="20" height="20" fill="white"></rect>
+            <circle cx="11" cy="3" r="8" fill="black"></circle>
+          </mask>
+          <circle class="sunMoon" cx="10" cy="10" r="8" mask="url(#moon-mask-mobile)"></circle>
+          <g>
+            <circle class="sunRay sunRay1" cx="18" cy="10" r="1.5"></circle>
+            <circle class="sunRay sunRay2" cx="14" cy="16.928" r="1.5"></circle>
+            <circle class="sunRay sunRay3" cx="6" cy="16.928" r="1.5"></circle>
+            <circle class="sunRay sunRay4" cx="2" cy="10" r="1.5"></circle>
+            <circle class="sunRay sunRay5" cx="6" cy="3.1718" r="1.5"></circle>
+            <circle class="sunRay sunRay6" cx="14" cy="3.1718" r="1.5"></circle>
+          </g>
+        </svg>
+      </label>
       <div id="menuToggle" class="mobile-topbar-menu-wrap">
         <input id="checkbox" type="checkbox" onchange="toggleSidebar(this.checked)"/>
         <label class="toggle" for="checkbox" aria-label="Menu">
@@ -1536,19 +1566,19 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 
   <div class="player-body">
     <div class="player-main">
-      <!-- (Player engine selector removed — single player only via Player4Me.) -->
+      <!-- (Player engine selector removed — single video host iframe only.) -->
       <div class="player-engine-bar" id="playerEngineBar" style="display:none !important;">
         <button class="player-engine-btn active" id="peBtn1" type="button" style="display:none;"></button>
         <button class="player-engine-btn" id="peBtn2" type="button" style="display:none;"></button>
       </div>
       <div class="player-wrap show-tools" id="playerWrap">
         <!--
-          Player4Me iframe — primary player for ALL films (basic + vip).
+          Video host iframe — primary player for ALL films (basic + vip).
           When `film.video_url` is set we hide the legacy multi-track / Vidstack
           players and serve this iframe alone. Drive Index integration only
           shows BELOW (download / external player) for VIP rows.
         -->
-        <iframe id="p4mFrame"
+        <iframe id="vhFrame"
           allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
           allowfullscreen
           style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:5;"
@@ -1557,7 +1587,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
         <!-- Multitrack.JS player container (Quality / Audio / Subtitle / Speed all in built-in Settings menu) -->
         <div id="multitrackPlayer" style="width:100%;height:100%;"></div>
 
-        <!-- Player 2 ─ Vidstack web component (same library player4me uses) -->
+        <!-- Player 2 ─ Vidstack web component -->
         <div id="player2Wrap">
           <media-player
             id="p2VsPlayer"
@@ -1765,7 +1795,7 @@ let currentTrailerKey = null;
 let _currentSubBlobUrl = null;
 // Legacy globals — kept as `null` shims so dead legacy player functions
 // (teardownEngine1/2 etc.) don't ReferenceError if called by accident.
-// All playback now goes through loadVideoPlayer4Me().
+// All playback now goes through loadVideoHost().
 let mtPlayer = null;
 let videoPlayer = null;
 let activeEngine = 1;
@@ -2658,7 +2688,7 @@ async function openFilm(film, opts){
   document.getElementById('subsStatus').textContent='';
   document.getElementById('subsSearchInput').value=film.judul||'';
 
-  // Auto search subsource — only for legacy (non-Player4Me) films. Player4Me
+  // Auto search subsource — only for legacy (non-iframe) films. The iframe
   // ships its own subtitle picker so we don't need ours.
   if(!film.video_url){
     setTimeout(()=>subsourceSearch(), 300);
@@ -2916,23 +2946,23 @@ async function _resolveDrivePath(drivePath){
 }
 
 async function loadVideo(film){
-  // Single-player mode: every film plays via the Player4Me iframe.
+  // Single-player mode: every film plays via the video host iframe.
   // Films missing video_url are misconfigured — surface a clear toast
   // instead of silently rendering a blank iframe.
   if(film && film.video_url){
-    return loadVideoPlayer4Me(film);
+    return loadVideoHost(film);
   }
-  showToast('Film ini belum punya video Player4Me. Hubungi admin.', 'error');
+  showToast('Film ini belum punya video. Hubungi admin.', 'error');
 }
 
 // Stub kept so any stale UI handlers don't crash. There is only one player
-// engine now (Player4Me iframe).
+// engine now (video host iframe).
 function switchPlayerEngine(){ /* no-op */ }
 function applyEngineButtons(){ /* no-op */ }
 
-// Show legacy Vidstack/Multitrack players after a Player4Me film closes.
+// Show legacy Vidstack/Multitrack players after a host-iframe film closes.
 function _showLegacyPlayer(){
-  const fr = document.getElementById('p4mFrame');
+  const fr = document.getElementById('vhFrame');
   if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
   const peBar = document.getElementById('playerEngineBar');
   if(peBar) peBar.style.display = '';
@@ -2946,9 +2976,9 @@ function _showLegacyPlayer(){
   if(subBtn) subBtn.style.display = '';
 }
 
-// Hide legacy players + show Player4Me iframe. Set up Drive Index extras
+// Hide legacy players + show video host iframe. Set up Drive Index extras
 // (download + external player) ONLY for VIP films.
-async function loadVideoPlayer4Me(film){
+async function loadVideoHost(film){
   // Tear down whichever legacy engine was last active so it doesn't keep
   // playing audio / consuming bandwidth in the background.
   try { teardownEngine1(); } catch {}
@@ -2961,28 +2991,28 @@ async function loadVideoPlayer4Me(film){
   if(mp) mp.style.display = 'none';
   const p2 = document.getElementById('player2Wrap');
   if(p2) p2.style.display = 'none';
-  // Player4Me has its own subtitle picker — hide ours.
+  // The host has its own subtitle picker — hide ours.
   const subsPanel = document.getElementById('subsPanel');
   if(subsPanel){ subsPanel.classList.remove('open'); subsPanel.style.display = 'none'; }
   const subBtn = document.getElementById('toolBtnSubs');
   if(subBtn) subBtn.style.display = 'none';
 
-  // Show Player4Me iframe
-  const fr = document.getElementById('p4mFrame');
+  // Show video host iframe
+  const fr = document.getElementById('vhFrame');
   if(fr){
     // film.video_url may be the share URL, an embed URL, or — historically
     // — even a full <iframe…> tag the admin accidentally pasted. Always
-    // normalize. If we cannot extract a Player4Me id, refuse to render
+    // normalize. If we cannot extract a host video id, refuse to render
     // the iframe instead of feeding a relative path that would self-embed
     // webstream.
-    const src = _normalizePlayer4MeEmbedUrl(film.video_url);
+    const src = _normalizeHostEmbedUrl(film.video_url);
     if(src){
       fr.src = src;
       fr.style.display = 'block';
     } else {
       fr.removeAttribute('src');
       fr.style.display = 'none';
-      showToast('URL Player4Me film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
+      showToast('URL video film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
     }
   }
 
@@ -3015,16 +3045,14 @@ async function loadVideoPlayer4Me(film){
   }
 }
 
-// Extract the Player4Me video id from any URL/string the admin might have
+// Extract the video host id from any URL/string the admin might have
 // saved in the DB. Handles:
-//   - https://player4me.com/embed/<id>   (legacy public embed)
-//   - https://player4me.com/v/<id>       (legacy share link)
 //   - https://<custom-domain>/#<id>      (white-label, current default)
 //   - <iframe src="https://<custom-domain>/#<id>" …></iframe>   (admin
 //        pasted the full iframe tag instead of just the URL — recover
 //        gracefully instead of breaking the page)
 //   - bare id like "allnx"
-function _extractPlayer4MeId(rawUrl){
+function _extractHostId(rawUrl){
   if(!rawUrl) return null;
   let u = String(rawUrl).trim();
 
@@ -3035,28 +3063,25 @@ function _extractPlayer4MeId(rawUrl){
   const iframeMatch = u.match(/<\s*iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i);
   if (iframeMatch) u = iframeMatch[1].trim();
 
-  let m = u.match(/player4me\.com\/(?:embed|v)\/([A-Za-z0-9_-]+)/i);
-  if(m) return m[1];
   // Custom domain hash style: https://my.domain/#abc123
-  m = u.match(/^https?:\/\/[^\/]+\/#\/?([A-Za-z0-9_-]+)/i);
+  let m = u.match(/^https?:\/\/[^\/]+\/#\/?([A-Za-z0-9_-]+)/i);
   if(m) return m[1];
   if(/^[A-Za-z0-9_-]{4,}$/.test(u)) return u;
   return null;
 }
 
-// Build the iframe URL for a film. ALWAYS uses the admin's branded
-// custom domain (CONFIG.player4me_public_domain → wrangler env
-// PLAYER4ME_PUBLIC_DOMAIN). Both VIP and Basic tiers play through the
-// same custom domain — Player4Me's public player4me.com/embed/<id> is
-// a separate id-space and 404s for ids that live on our white-label
-// account, so we never use it. If we can't extract a Player4Me id, or
-// the custom domain isn't configured, return '' so the caller shows
-// a friendly error toast instead of producing a broken iframe.
-function _normalizePlayer4MeEmbedUrl(rawUrl){
+// Build the iframe URL for a film. Uses the admin's branded custom
+// domain exposed by the worker as CONFIG.video_host_domain. Both VIP
+// and Basic tiers play through the same domain. If we can't extract a
+// host id, or the custom domain isn't configured, return '' so the
+// caller shows a friendly toast instead of producing a broken iframe.
+function _normalizeHostEmbedUrl(rawUrl){
   if(!rawUrl) return '';
-  const id = _extractPlayer4MeId(rawUrl);
+  const id = _extractHostId(rawUrl);
   if(!id) return '';
-  const customDomain = (CONFIG && CONFIG.player4me_public_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  // Backend exposes the host domain under `video_host_domain`.
+  const rawDom = (CONFIG && CONFIG.video_host_domain) || '';
+  const customDomain = rawDom.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
   if(!customDomain) return '';
   return 'https://' + customDomain + '/#' + id;
 }
@@ -3306,7 +3331,7 @@ document.addEventListener('click', function(e){
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   PLAYER 2 — Vidstack web components (same library as player4me).
+   PLAYER 2 — Vidstack web components.
    Default-theme video layout provides the entire player UI:
      play/pause/seek/volume/captions/PiP/fullscreen/keyboard/gestures.
    Multi-quality + multi-audio dropdowns are added next to the engine
@@ -3956,8 +3981,8 @@ function closePlayer(opts){
   teardownEngine1();
   teardownEngine2();
   videoPlayer = null;
-  // Stop Player4Me iframe (avoid background audio after close).
-  const fr = document.getElementById('p4mFrame');
+  // Stop video host iframe (avoid background audio after close).
+  const fr = document.getElementById('vhFrame');
   if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
   const sa = document.getElementById('streamActions');
   if(sa) sa.style.display='none';
@@ -3987,6 +4012,24 @@ async function loadFilmExtras(film){
   document.getElementById('recBox').style.display='none';
   currentTmdbExtras = null;
   currentTrailerKey = null;
+
+  // ALWAYS pre-populate the trailer button from `film.trailer_url` first so
+  // the button shows up immediately even if TMDB isn't reachable (no session,
+  // no tmdb_id, network error, etc). TMDB will override below when available.
+  const _extractYouTubeId = (u) => {
+    if(!u) return null;
+    const m = String(u).match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
+  };
+  if(film.trailer_url){
+    const key = _extractYouTubeId(film.trailer_url);
+    if(key){
+      currentTrailerKey = key;
+      document.getElementById('prTrailerLabel').textContent = 'Trailer';
+      document.getElementById('prTrailerSection').style.display='block';
+    }
+  }
+
   if(!session) return; // butuh login (TMDB endpoint butuh auth)
 
   let tmdbId = film.tmdb_id;
@@ -4008,23 +4051,15 @@ async function loadFilmExtras(film){
     epPickerState.tmdbId = tmdbId;
     fetchTmdbSeasonAndRerender(epPickerState.currentSeason, film.id);
   }
-  // Helper untuk fallback trailer manual saja (kalau gak ada tmdb_id atau TMDB fail)
-  const showManualTrailerOnly = () => {
-    if(!film.trailer_url) return;
-    const m = film.trailer_url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/);
-    if(!m) return;
-    currentTrailerKey = m[1];
-    document.getElementById('prTrailerSection').style.display='block';
-  };
 
-  if(!tmdbId){ showManualTrailerOnly(); return; }
+  if(!tmdbId) return;
 
   try{
     const r = await fetch(`${apiBase()}/api/tmdb/${mediaType}/${tmdbId}`, {
       headers: { Authorization: 'Bearer '+session.access_token },
     });
     const d = await r.json();
-    if(!d.ok){ showManualTrailerOnly(); return; }
+    if(!d.ok) return; // manual trailer already shown above if available
     currentTmdbExtras = d.data;
 
     // Enrich right panel with TMDB details

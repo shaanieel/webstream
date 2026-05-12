@@ -805,6 +805,7 @@ async function adminHealthHandler(request, env) {
     admin_emails: (env.ADMIN_EMAILS || '').split(',').map(s => s.trim()).filter(Boolean),
     gdi_worker_url: env.GDI_WORKER_URL || null,
     player4me_public_domain: env.PLAYER4ME_PUBLIC_DOMAIN || null,
+    video_host_domain: env.PLAYER4ME_PUBLIC_DOMAIN || null,
   } });
 }
 
@@ -1367,7 +1368,8 @@ export default {
         supabase_anon_key: env.SUPABASE_ANON_KEY || '',
         gdi_worker_url: env.GDI_WORKER_URL,
         tmdb_image_base: 'https://image.tmdb.org/t/p/w500',
-        player4me_public_domain: env.PLAYER4ME_PUBLIC_DOMAIN || '',
+        // Public CONFIG — keep this minimal; no backend identifiers leak.
+        video_host_domain: env.PLAYER4ME_PUBLIC_DOMAIN || '',
       });
     }
 
