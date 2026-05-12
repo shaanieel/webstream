@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0a0a0f" />
 <title>ZAEINSTREAM</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230ea5e9'/><polygon points='38,28 38,72 72,50' fill='white'/></svg>" type="image/svg+xml" />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
 <!-- Multitrack.JS player (CSS injected by JS bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <!-- Vidstack player (Player 2 — same library used by player4me). Default theme. -->
@@ -40,6 +40,31 @@
   --sidebar-w-collapsed:64px;
   --bottom-nav-h:64px;
   --topbar-h:56px;
+}
+/* Light theme. Activated by setting <html data-theme="light"> from the
+   sun/moon toggle. We override exactly the surface tokens — every other
+   component reads through CSS vars so it picks the new palette up for
+   free. */
+html[data-theme="light"]{
+  --bg:#f4f5f8;
+  --bg-2:#ffffff;
+  --surface:#ffffff;
+  --surface-2:#eef0f4;
+  --border:#dfe2ea;
+  --border-2:#cdd2dc;
+  --text:#15151f;
+  --muted:#5b6071;
+  --muted-2:#90939f;
+  --accent:#0284c7;
+  --accent-2:#0ea5e9;
+  --accent-w:#0a0a0f;
+}
+/* Smooth theme transition. Limited to the few props that actually swap
+   so individual element transitions (hover, modal slide, etc) aren't
+   slowed down. */
+html, body, .sidebar, .main, .mobile-topbar, .mobile-bottomnav,
+.card, .hero, .row, .pr-section{
+  transition:background-color .25s ease, color .25s ease, border-color .25s ease;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;}
@@ -858,6 +883,113 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .btn-wa:hover{opacity:.9;}
 
 /* ════════════════════════════════════════════════════════════════════
+   ZAEINSTREAM HEADER LOGO (Bebas Neue) — replaces the old breadcrumb
+   shield + URL in the mobile topbar.
+   ════════════════════════════════════════════════════════════════════ */
+.brand-wordmark{
+  font-family:'Bebas Neue',system-ui,-apple-system,sans-serif;
+  font-weight:400;
+  letter-spacing:.18em;
+  font-size:1.45rem;
+  color:var(--text);
+  white-space:nowrap;
+  user-select:none;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TORNADO HAMBURGER (replaces the old 3-dot kebab on the mobile topbar)
+   ════════════════════════════════════════════════════════════════════ */
+#menuToggle{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:var(--topbar-h);
+}
+#menuToggle #checkbox{display:none;}
+#menuToggle .toggle{
+  position:relative;width:32px;cursor:pointer;margin:auto;display:block;
+  height:calc(3px * 3 + 8px * 2);
+}
+#menuToggle .bar{
+  position:absolute;left:0;right:0;height:3px;border-radius:1.5px;
+  background:#7b52b9;color:inherit;opacity:1;
+  transition:none .35s cubic-bezier(.5,-.35,.35,1.5) 0s;
+}
+#menuToggle .bar--top{
+  bottom:calc(50% + 8px + 1.5px);
+  transition-property:bottom,transform;
+  transition-delay:.21s;
+}
+#menuToggle .bar--middle{
+  top:calc(50% - 1.5px);
+  transition-property:opacity,transform;
+  transition-delay:.105s;
+}
+#menuToggle .bar--bottom{
+  top:calc(50% + 8px + 1.5px);
+  transition-property:top,transform;
+  transition-delay:0s;
+}
+#menuToggle #checkbox:checked + .toggle .bar--top{
+  transform:rotate(-135deg);transition-delay:0s;bottom:calc(50% - 1.5px);
+}
+#menuToggle #checkbox:checked + .toggle .bar--middle{
+  opacity:0;transform:rotate(-135deg);transition-delay:.105s;
+}
+#menuToggle #checkbox:checked + .toggle .bar--bottom{
+  top:calc(50% - 1.5px);transform:rotate(-225deg);transition-delay:.21s;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   THEME TOGGLE (sun/moon) — pure-CSS animation
+   ════════════════════════════════════════════════════════════════════ */
+.themeToggle{
+  color:#cfcfd6;width:2.4em;height:2.4em;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+html[data-theme="light"] .themeToggle{color:#f59e0b;}
+.st-sunMoonThemeToggleBtn{position:relative;cursor:pointer;}
+.st-sunMoonThemeToggleBtn .themeToggleInput{
+  position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;
+  margin:0;padding:0;
+}
+.st-sunMoonThemeToggleBtn svg{
+  width:1.5em;height:1.5em;
+  transition:transform .4s ease;transform:rotate(40deg);
+}
+.st-sunMoonThemeToggleBtn svg .sunMoon{
+  transform-origin:center center;transition:inherit;transform:scale(1);
+}
+.st-sunMoonThemeToggleBtn svg .sunRay{
+  transform-origin:center center;transform:scale(0);
+}
+.st-sunMoonThemeToggleBtn svg mask > circle{
+  transition:transform .64s cubic-bezier(.41,.64,.32,1.575);
+  transform:translate(0,0);
+}
+.st-sunMoonThemeToggleBtn svg .sunRay2{animation-delay:.05s !important;}
+.st-sunMoonThemeToggleBtn svg .sunRay3{animation-delay:.1s  !important;}
+.st-sunMoonThemeToggleBtn svg .sunRay4{animation-delay:.17s !important;}
+.st-sunMoonThemeToggleBtn svg .sunRay5{animation-delay:.25s !important;}
+.st-sunMoonThemeToggleBtn svg .sunRay6{animation-delay:.29s !important;}
+.st-sunMoonThemeToggleBtn .themeToggleInput:checked + svg{transform:rotate(90deg);}
+.st-sunMoonThemeToggleBtn .themeToggleInput:checked + svg mask > circle{
+  transform:translate(12px,-3px);
+}
+.st-sunMoonThemeToggleBtn .themeToggleInput:checked + svg .sunMoon{transform:scale(.55);}
+.st-sunMoonThemeToggleBtn .themeToggleInput:checked + svg .sunRay{
+  animation:showRay1832 .4s ease 0s 1 forwards;
+}
+@keyframes showRay1832{0%{transform:scale(0);}100%{transform:scale(1);}}
+
+/* Sidebar theme toggle — sits in the sidebar logo row on desktop.
+   On mobile the sidebar is a drawer so the toggle appears at the top of
+   the drawer (left of where the close button sits). */
+.sidebar-theme-toggle{
+  margin-left:auto;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.sidebar.collapsed .sidebar-theme-toggle{display:none;}
+
+/* ════════════════════════════════════════════════════════════════════
    MOBILE LAYOUT (< 768px)
    ════════════════════════════════════════════════════════════════════ */
 .mobile-topbar{display:none;}
@@ -888,35 +1020,39 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
     position:sticky;top:0;z-index:30;
     height:var(--topbar-h);
   }
-  .mobile-topbar-shield{
-    width:18px;height:18px;border-radius:4px;background:#22c55e;
-    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  .mobile-topbar .brand-wordmark{
+    flex:0 0 auto;font-size:1.15rem;letter-spacing:.12em;
   }
-  .mobile-topbar-shield svg{width:12px;height:12px;color:#fff;}
-  .mobile-topbar-url{
-    flex:1;font-size:.92rem;color:var(--text);
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  }
-  .mobile-topbar-menu{
-    width:24px;color:var(--muted);
-  }
+  .mobile-topbar-spacer{flex:1 1 auto;}
+  .mobile-topbar-menu-wrap{flex:0 0 auto;}
 
   /* Hero on mobile */
-  .hero{height:280px;border-radius:14px;margin-bottom:24px;}
-  .hero-inner{padding:20px;}
-  .hero-title{font-size:2rem;}
-  .hero-desc{font-size:.85rem;-webkit-line-clamp:2;}
+  .hero{height:260px;border-radius:14px;margin-bottom:22px;}
+  .hero-inner{padding:18px;}
+  .hero-title{font-size:1.85rem;}
+  .hero-desc{font-size:.82rem;-webkit-line-clamp:2;}
 
-  /* Grid: 3 columns on mobile */
+  /* Grid: poster rows stay 3 columns, but the Browse page wants
+     wider cards (2 columns) so titles and meta are readable. */
   .grid{grid-template-columns:repeat(3,1fr);gap:10px;}
   .row .grid{grid-template-columns:repeat(3,1fr);gap:10px;}
+  #page-browse .grid{grid-template-columns:repeat(2,1fr);gap:14px;}
   .row{margin-bottom:24px;}
   .row-arrow{width:30px;height:30px;}
+
+  /* VIP hero compressed for mobile so it doesn't dominate the page. */
+  .vip-hero{padding:28px 18px;margin-bottom:22px;border-radius:14px;}
+  .vip-crown{font-size:2.6rem;}
+  .vip-hero h1{font-size:1.7rem;letter-spacing:.5px;}
+  .vip-hero p{font-size:.85rem;}
 
   /* Card meta smaller */
   .card-meta{font-size:.62rem;}
   .card-title{font-size:.78rem;}
   .rating-badge{font-size:.65rem;padding:2px 5px;}
+  /* Browse cards (wider) — give them more breathing room */
+  #page-browse .card-title{font-size:.85rem;}
+  #page-browse .card-meta{font-size:.68rem;}
 
   /* Search */
   .search-wrap{flex-wrap:wrap;}
@@ -934,12 +1070,15 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
     z-index:40;
   }
   .bottom-item{
-    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-    color:var(--muted);font-size:.65rem;font-weight:600;
+    flex:1 1 0;min-width:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    color:var(--muted);font-size:.62rem;font-weight:600;
     transition:color .15s;
+    padding:6px 4px;
+    white-space:nowrap;
   }
   .bottom-item.active{color:var(--text);background:var(--surface);}
-  .bottom-item svg{width:22px;height:22px;}
+  .bottom-item svg{width:20px;height:20px;flex-shrink:0;}
 
   /* Player on mobile */
   .player-body{grid-template-columns:1fr;padding:16px;gap:18px;}
@@ -1057,6 +1196,32 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
     <div class="sidebar-logo">
       <img src="https://iili.io/BPFTO6x.md.png" alt="" class="sidebar-logo-img"
            onerror="this.style.display='none'"/>
+      <!--
+        Theme toggle. On desktop this sits at the right edge of the sidebar
+        logo row (visible all the time). On mobile the sidebar is a drawer
+        so this same control appears at the top of the drawer when opened.
+      -->
+      <label for="themeToggle"
+             class="themeToggle st-sunMoonThemeToggleBtn sidebar-theme-toggle"
+             aria-label="Toggle theme"
+             title="Toggle theme">
+        <input type="checkbox" id="themeToggle" class="themeToggleInput" onchange="toggleTheme()"/>
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <mask id="moon-mask">
+            <rect x="0" y="0" width="20" height="20" fill="white"></rect>
+            <circle cx="11" cy="3" r="8" fill="black"></circle>
+          </mask>
+          <circle class="sunMoon" cx="10" cy="10" r="8" mask="url(#moon-mask)"></circle>
+          <g>
+            <circle class="sunRay sunRay1" cx="18" cy="10" r="1.5"></circle>
+            <circle class="sunRay sunRay2" cx="14" cy="16.928" r="1.5"></circle>
+            <circle class="sunRay sunRay3" cx="6" cy="16.928" r="1.5"></circle>
+            <circle class="sunRay sunRay4" cx="2" cy="10" r="1.5"></circle>
+            <circle class="sunRay sunRay5" cx="6" cy="3.1718" r="1.5"></circle>
+            <circle class="sunRay sunRay6" cx="14" cy="3.1718" r="1.5"></circle>
+          </g>
+        </svg>
+      </label>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-section">
@@ -1121,13 +1286,16 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 
     <!-- Mobile topbar -->
     <div class="mobile-topbar">
-      <div class="mobile-topbar-shield" title="Secure">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      <div class="brand-wordmark" aria-label="ZAEINSTREAM">Z A E I N S T R E A M</div>
+      <div class="mobile-topbar-spacer"></div>
+      <div id="menuToggle" class="mobile-topbar-menu-wrap">
+        <input id="checkbox" type="checkbox" onchange="toggleSidebar(this.checked)"/>
+        <label class="toggle" for="checkbox" aria-label="Menu">
+          <div class="bar bar--top"></div>
+          <div class="bar bar--middle"></div>
+          <div class="bar bar--bottom"></div>
+        </label>
       </div>
-      <div class="mobile-topbar-url" id="mobileUrl">zaeinstream.net</div>
-      <button class="mobile-topbar-menu" onclick="openSidebar()" aria-label="Menu">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-      </button>
     </div>
 
     <!-- ════ HOME ════ -->
@@ -1988,9 +2156,9 @@ function goPage(name, opts){
       history.pushState({ kind:'page', name }, '', target);
     }
   }
-  // Update mobile topbar URL
-  const top = document.getElementById('mobileUrl');
-  if(top) top.textContent = location.host + pagePath(name);
+  // The mobile topbar used to show the current page URL (breadcrumb);
+  // it's been replaced by the ZAEINSTREAM wordmark, so there's nothing
+  // to update here anymore.
 
   window.scrollTo({top:0});
 }
@@ -2058,11 +2226,52 @@ window.addEventListener('popstate', ()=>applyRoute({ fromPopState:true }));
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sidebarOverlay').classList.add('show');
+  // keep the tornado hamburger checkbox in sync when sidebar is opened
+  // via another control (e.g. the "More" item in the bottom nav).
+  const cb = document.getElementById('checkbox');
+  if(cb && !cb.checked) cb.checked = true;
 }
 function closeSidebar(){
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebarOverlay').classList.remove('show');
+  const cb = document.getElementById('checkbox');
+  if(cb && cb.checked) cb.checked = false;
 }
+// Bound directly to the hamburger checkbox change event so the tornado
+// animation drives the drawer (instead of click->state->click->state).
+function toggleSidebar(open){
+  if(open) openSidebar(); else closeSidebar();
+}
+
+// ── Theme toggle (sun/moon) ──────────────────────────────────────────
+// Sync the <input type="checkbox"> state on every theme toggle in the
+// DOM (sidebar + any future mirror) so they all flip together. Persist
+// to localStorage so it survives reloads.
+function applyTheme(mode){
+  const html = document.documentElement;
+  if(mode === 'light'){
+    html.setAttribute('data-theme', 'light');
+  } else {
+    html.removeAttribute('data-theme');
+  }
+  // Match the iOS/Android browser chrome to the active theme.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute('content', mode === 'light' ? '#ffffff' : '#0a0a0f');
+  // Reflect into every theme toggle input (mobile drawer + sidebar).
+  document.querySelectorAll('.themeToggleInput').forEach(el => {
+    el.checked = (mode === 'light');
+  });
+  try{ localStorage.setItem('zaein.theme', mode); }catch{}
+}
+function toggleTheme(){
+  const curr = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  applyTheme(curr === 'light' ? 'dark' : 'light');
+}
+(function initTheme(){
+  let saved = null;
+  try{ saved = localStorage.getItem('zaein.theme'); }catch{}
+  applyTheme(saved === 'light' ? 'light' : 'dark');
+})();
 
 // ── Sidebar collapse (desktop) ──
 function toggleSidebarCollapse(){
