@@ -13,22 +13,27 @@
 const SUBSOURCE_BASE = 'https://api.subsource.net/api/v1';
 const PLAYER4ME_BASE = 'https://player4me.com/api/v1';
 
-// Build the public player URL for a Player4Me video id. When the user has a
-// branded "public domain" set on their Player4Me account (e.g.
-// `zaeinstore.qzz.io`), we use that — it serves the ad-free / VIP player.
-// Otherwise fall back to the canonical player4me.com embed URL.
+// Build the public player URL for a Player4Me video id. Always uses the
+// admin's branded custom domain (PLAYER4ME_PUBLIC_DOMAIN, e.g.
+// `zaeinstore.qzz.io`). The legacy fallback to `player4me.com/embed/<id>`
+// was removed on purpose — that URL 404s for users who only own the
+// white-label domain (the public player4me.com only serves THEIR id
+// namespace, not ours). If the env var is not configured we return null
+// so the caller surfaces a clear error instead of silently producing a
+// broken iframe URL.
 function player4meEmbedUrl(env, id) {
   if (!id) return null;
   const dom = (env && env.PLAYER4ME_PUBLIC_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  if (dom) return `https://${dom}/#${id}`;
-  return `https://player4me.com/embed/${id}`;
+  if (!dom) return null;
+  return `https://${dom}/#${id}`;
 }
 
+// Share URL is the same hash-style URL as the embed URL — Player4Me's
+// custom domain uses ONE format (https://<dom>/#<id>) for both the player
+// iframe AND the share link. The previous /#/<id> shape (with a slash
+// after the hash) was a mis-read of the spec and 404s in practice.
 function player4meShareUrl(env, id) {
-  if (!id) return null;
-  const dom = (env && env.PLAYER4ME_PUBLIC_DOMAIN || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  if (dom) return `https://${dom}/#/${id}`;
-  return `https://player4me.com/v/${id}`;
+  return player4meEmbedUrl(env, id);
 }
 
 // ───────────────────────────────────────────────────────────────────

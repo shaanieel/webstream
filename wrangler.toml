@@ -29,12 +29,16 @@ SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
 GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
 # Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
-# Domain custom Player4Me (white-label / ad-free). Worker pakai ini untuk
-# membentuk URL embed VIP: https://<domain>/#<id>
-# Basic tier tetap pakai https://player4me.com/embed/<id> (yang ada iklan).
-# Kosongkan kalau belum punya custom domain — fallback ke player4me.com/embed
-# untuk kedua tier.
-PLAYER4ME_PUBLIC_DOMAIN = ""
+# Domain custom Player4Me (white-label). Worker pakai ini untuk membentuk
+# URL embed untuk SEMUA tier (VIP & Basic): https://<domain>/#<id>
+#
+# Tidak ada fallback ke player4me.com/embed lagi — kalau env ini kosong,
+# worker akan return null + tampilkan error "PLAYER4ME_PUBLIC_DOMAIN
+# belum di-set" supaya admin tahu harus diisi. Player4Me public embed
+# (player4me.com/embed/<id>) tidak bisa kita pakai karena id space-nya
+# berbeda — yang ada di akun Player4Me kita HANYA reachable lewat custom
+# domain kita sendiri.
+PLAYER4ME_PUBLIC_DOMAIN = "zaeinstore.qzz.io"
 
 # === Player4Me ===
 # Service migration: video hosting & player pindah dari Drive Index → Player4Me.

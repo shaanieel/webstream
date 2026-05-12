@@ -2835,22 +2835,21 @@ function _extractPlayer4MeId(rawUrl){
   return null;
 }
 
-// Build the iframe URL for a film. VIP users get the white-label custom
-// domain (ad-free). Basic users get the standard player4me.com embed
-// (with ads). If the stored video_url can't be parsed at all we return
-// '' so the caller can show a friendly error — we deliberately do NOT
-// fall through to the raw string, because that caused the recursive
-// self-embedding bug (iframe.src = "<iframe …>" → loads webstream
-// itself).
+// Build the iframe URL for a film. ALWAYS uses the admin's branded
+// custom domain (CONFIG.player4me_public_domain → wrangler env
+// PLAYER4ME_PUBLIC_DOMAIN). Both VIP and Basic tiers play through the
+// same custom domain — Player4Me's public player4me.com/embed/<id> is
+// a separate id-space and 404s for ids that live on our white-label
+// account, so we never use it. If we can't extract a Player4Me id, or
+// the custom domain isn't configured, return '' so the caller shows
+// a friendly error toast instead of producing a broken iframe.
 function _normalizePlayer4MeEmbedUrl(rawUrl){
   if(!rawUrl) return '';
   const id = _extractPlayer4MeId(rawUrl);
   if(!id) return '';
   const customDomain = (CONFIG && CONFIG.player4me_public_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
-  if(currentTier === 'vip' && customDomain){
-    return 'https://' + customDomain + '/#' + id;
-  }
-  return 'https://player4me.com/embed/' + id;
+  if(!customDomain) return '';
+  return 'https://' + customDomain + '/#' + id;
 }
 
 async function _resolveFilmSources(film){
