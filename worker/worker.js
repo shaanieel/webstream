@@ -54,6 +54,10 @@ const json = (data, status = 200, extraHeaders = {}) =>
 const err = (msg, status = 400) => json({ ok: false, error: msg }, status);
 const VIP_DOWNLOAD_LIMIT = 2;
 const VIP_DOWNLOAD_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MOVIE_PRICE = 5000;
+const DEFAULT_SERIES_SEASON_PRICE = 10000;
+const VIP_MONTH_PRICE = 49000;
+const VIP_WEEK_PRICE = 19000;
 
 function corsHeaders() {
   return {
@@ -116,7 +120,7 @@ async function getUserProfile(env, userId, email) {
   if (userId) {
     const r = await supabaseRest(
       env,
-      `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at,password_plain`
+      `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
     if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
   }
@@ -124,7 +128,7 @@ async function getUserProfile(env, userId, email) {
     const e = encodeURIComponent(email.toLowerCase());
     const r = await supabaseRest(
       env,
-      `/users_profile?email=eq.${e}&select=user_id,email,is_vip,expired_at,password_plain`
+      `/users_profile?email=eq.${e}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
     if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
   }
@@ -773,6 +777,7 @@ async function meHandler(request, env) {
     authenticated: true,
     user: { id: user.id, email: user.email, created_at: user.created_at },
     profile: profile || null,
+    entitlements: await userEntitlements(env, profile?.user_id || user.id),
     tier: userTier,
     expired,
     is_admin: isAdminEmail(env, user.email || ''),
@@ -1330,7 +1335,12 @@ async function adminUserList(request, env) {
     '/users_profile?select=user_id,email,is_vip,expired_at,created_at,password_plain&order=created_at.desc'
   );
   if (!r.ok) return err('Gagal load users', 500);
-  return json({ ok: true, users: r.data || [] });
+  const users = Array.isArray(r.data) ? r.data : [];
+  for (const u of users) {
+    const ents = await userEntitlements(env, u.user_id);
+    u.entitlement_count = ents.length;
+  }
+  return json({ ok: true, users });
 }
 
 // POST /api/admin/users — admin creates a user manually.
@@ -1426,6 +1436,295 @@ async function adminUserDelete(request, env, userId) {
   return json({ ok: true });
 }
 
+
+// ───────────────────────────────────────────────────────────────────
+// Payments / entitlements (Violet Media Pay)
+// ───────────────────────────────────────────────────────────────────
+
+function cleanPaymentBase(env) {
+  const mode = String(env.VIOLET_MODE || 'live').toLowerCase();
+  return (env.VIOLET_API_BASE || (mode === 'sandbox'
+    ? 'https://violetmediapay.com/api/sanbox'
+    : 'https://violetmediapay.com/api/live')).replace(/\/$/, '');
+}
+
+function normalizeFilmKind(film) {
+  return film && film.tipe === 'series' ? 'series_season' : 'movie';
+}
+
+function entitlementKeyForFilm(film) {
+  if (!film) return null;
+  if (normalizeFilmKind(film) === 'series_season') {
+    return `series:${film.judul || film.tmdb_id || film.id}:season:${film.season || 1}`;
+  }
+  return `movie:${film.id}`;
+}
+
+function parseOrderMetadata(meta) {
+  if (!meta) return {};
+  if (typeof meta === 'object') return meta;
+  try { return JSON.parse(meta); } catch { return {}; }
+}
+
+async function getFilmById(env, id) {
+  const r = await supabaseRest(env, `/films?id=eq.${encodeURIComponent(id)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return null;
+  return r.data[0];
+}
+
+async function getPaymentSettings(env) {
+  const defaults = {
+    movie_price: DEFAULT_MOVIE_PRICE,
+    series_season_price: DEFAULT_SERIES_SEASON_PRICE,
+    vip_month_price: VIP_MONTH_PRICE,
+    vip_week_price: VIP_WEEK_PRICE,
+  };
+  const r = await supabaseRest(env, '/payment_settings?select=key,value');
+  if (!r.ok || !Array.isArray(r.data)) return defaults;
+  for (const row of r.data) {
+    const n = Number(row.value);
+    if (Number.isFinite(n) && n >= 0 && row.key in defaults) defaults[row.key] = n;
+  }
+  return defaults;
+}
+
+async function userEntitlements(env, userId) {
+  if (!userId) return [];
+  const now = encodeURIComponent(new Date().toISOString());
+  const r = await supabaseRest(
+    env,
+    `/film_entitlements?user_id=eq.${encodeURIComponent(userId)}&or=(expires_at.is.null,expires_at.gt.${now})&select=id,user_id,film_id,kind,entitlement_key,title,season,created_at,expires_at&order=created_at.desc`
+  );
+  if (!r.ok || !Array.isArray(r.data)) return [];
+  return r.data;
+}
+
+async function hasFilmEntitlement(env, userId, film) {
+  if (!userId || !film) return false;
+  const key = entitlementKeyForFilm(film);
+  const r = await supabaseRest(
+    env,
+    `/film_entitlements?user_id=eq.${encodeURIComponent(userId)}&entitlement_key=eq.${encodeURIComponent(key)}&select=id&limit=1`
+  );
+  return r.ok && Array.isArray(r.data) && r.data.length > 0;
+}
+
+async function grantVip(env, userId, days) {
+  const current = await supabaseRest(env, `/users_profile?user_id=eq.${encodeURIComponent(userId)}&select=expired_at`);
+  const row = current.ok && Array.isArray(current.data) ? current.data[0] : null;
+  const base = row && row.expired_at && new Date(row.expired_at) > new Date() ? new Date(row.expired_at) : new Date();
+  const exp = new Date(base.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+  return supabaseRest(env, `/users_profile?user_id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_vip: true, expired_at: exp }),
+  });
+}
+
+async function grantFilmAccess(env, order) {
+  const meta = parseOrderMetadata(order.metadata);
+  if (!order.user_id || !meta.film_id || !meta.entitlement_key) return;
+  await supabaseRest(env, '/film_entitlements', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: JSON.stringify({
+      user_id: order.user_id,
+      film_id: meta.film_id,
+      kind: meta.kind || 'movie',
+      entitlement_key: meta.entitlement_key,
+      title: meta.title || order.product_name || 'Film',
+      season: meta.season || null,
+      payment_ref: order.ref,
+      expires_at: null,
+    }),
+  });
+}
+
+async function applyPaidOrder(env, order) {
+  const meta = parseOrderMetadata(order.metadata);
+  if (order.product_type === 'vip_month') return grantVip(env, order.user_id, 30);
+  if (order.product_type === 'vip_week') return grantVip(env, order.user_id, 7);
+  if (order.product_type === 'film') return grantFilmAccess(env, order);
+  if (meta.vip_days) return grantVip(env, order.user_id, Number(meta.vip_days));
+}
+
+async function createVioletTransaction(env, order, userEmail) {
+  const apiKey = env.VIOLET_API_KEY || '';
+  const secret = env.VIOLET_SECRET_KEY || '';
+  if (!apiKey || !secret) throw new Error('VIOLET_API_KEY / VIOLET_SECRET_KEY belum di-set di Cloudflare secrets');
+  const base = cleanPaymentBase(env);
+  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${order.amount}`);
+  const origin = (env.PUBLIC_BASE_URL || 'https://webstream.zaeinstreamx.workers.dev').replace(/\/$/, '');
+  const body = {
+    api_key: apiKey,
+    secret_key: secret,
+    channel_payment: env.VIOLET_DEFAULT_CHANNEL || 'QRIS',
+    ref_kode: order.ref,
+    nominal: order.amount,
+    cus_nama: userEmail.split('@')[0] || 'Pelanggan',
+    cus_email: userEmail,
+    cus_phone: env.VIOLET_DEFAULT_PHONE || '081234567890',
+    produk: order.product_name,
+    url_redirect: `${origin}/payment/success?ref=${encodeURIComponent(order.ref)}`,
+    url_callback: `${origin}/api/payments/violet/callback`,
+    expired_time: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+    signature,
+  };
+  const res = await fetch(`${base}/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  if (!res.ok) throw new Error(`Violet HTTP ${res.status}: ${text.slice(0, 180)}`);
+  return data;
+}
+
+async function paymentCheckout(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON'); }
+  const settings = await getPaymentSettings(env);
+  let productType = String(body.type || '').trim();
+  let amount = 0;
+  let productName = '';
+  let metadata = {};
+
+  if (productType === 'vip_month') {
+    amount = settings.vip_month_price || VIP_MONTH_PRICE;
+    productName = 'VIP Premium 1 Bulan';
+    metadata = { vip_days: 30 };
+  } else if (productType === 'vip_week') {
+    amount = settings.vip_week_price || VIP_WEEK_PRICE;
+    productName = 'VIP Premium 1 Minggu';
+    metadata = { vip_days: 7 };
+  } else if (productType === 'film') {
+    const film = await getFilmById(env, body.film_id);
+    if (!film) return err('Film tidak ditemukan', 404);
+    const kind = normalizeFilmKind(film);
+    amount = kind === 'series_season' ? settings.series_season_price : settings.movie_price;
+    const seasonText = kind === 'series_season' ? ` Season ${film.season || 1}` : '';
+    productName = `Akses Full ${film.judul || 'Film'}${seasonText}`;
+    metadata = {
+      film_id: film.id,
+      kind,
+      entitlement_key: entitlementKeyForFilm(film),
+      title: film.judul || 'Film',
+      season: film.season || null,
+    };
+  } else {
+    return err('Tipe checkout tidak valid');
+  }
+
+  const ref = `ZS-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const insert = await supabaseRest(env, '/payment_orders', {
+    method: 'POST',
+    body: JSON.stringify({
+      ref,
+      user_id: user.id,
+      email: user.email,
+      product_type: productType,
+      product_name: productName,
+      amount,
+      status: 'pending',
+      metadata,
+    }),
+  });
+  if (!insert.ok) return err('Gagal membuat order: ' + JSON.stringify(insert.data).slice(0, 200), 500);
+  const order = Array.isArray(insert.data) ? insert.data[0] : insert.data;
+  try {
+    const violet = await createVioletTransaction(env, order, user.email || '');
+    const checkoutUrl = violet.checkout_url || violet.data?.checkout_url || violet.result?.checkout_url || violet.url || null;
+    const patch = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ gateway_response: violet, checkout_url: checkoutUrl }),
+    });
+    return json({ ok: true, order: patch.ok && Array.isArray(patch.data) ? patch.data[0] : order, checkout_url: checkoutUrl, gateway: violet });
+  } catch (e) {
+    await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'failed', gateway_response: { error: e.message } }),
+    });
+    return err('Gagal membuat checkout: ' + e.message, 502);
+  }
+}
+
+async function paymentStatus(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const u = new URL(request.url);
+  const ref = u.searchParams.get('ref') || '';
+  if (!ref) return err('ref wajib');
+  const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&user_id=eq.${encodeURIComponent(user.id)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
+  return json({ ok: true, order: r.data[0] });
+}
+
+async function violetCallback(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
+  const ref = body.ref_kode || body.id_reference || body.reference || body.ref || '';
+  if (!ref) return err('ref kosong', 400);
+  const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
+  const order = r.data[0];
+  const statusRaw = String(body.status || body.payment_status || '').toLowerCase();
+  const paid = ['success', 'paid', 'berhasil', 'settlement'].some(s => statusRaw.includes(s));
+  const failed = ['kadaluarsa', 'expired', 'failed', 'cancel'].some(s => statusRaw.includes(s));
+  const newStatus = paid ? 'success' : failed ? 'failed' : 'pending';
+  const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: newStatus, gateway_response: body, paid_at: paid ? new Date().toISOString() : order.paid_at }),
+  });
+  const updated = up.ok && Array.isArray(up.data) ? up.data[0] : { ...order, status: newStatus };
+  if (paid) await applyPaidOrder(env, updated);
+  return json({ ok: true });
+}
+
+async function adminPaymentList(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, '/payment_orders?select=*&order=created_at.desc&limit=300');
+  if (!r.ok) return err('Gagal load pembelian', 500);
+  return json({ ok: true, orders: r.data || [] });
+}
+
+async function adminSettingsGet(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  return json({ ok: true, settings: await getPaymentSettings(env) });
+}
+
+async function adminSettingsUpdate(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON'); }
+  const allowed = ['movie_price', 'series_season_price', 'vip_month_price', 'vip_week_price'];
+  const rows = [];
+  for (const key of allowed) {
+    if (body[key] === undefined) continue;
+    const value = Number(body[key]);
+    if (!Number.isFinite(value) || value < 0) return err(`Harga ${key} tidak valid`);
+    rows.push({ key, value: String(Math.round(value)) });
+  }
+  if (!rows.length) return err('Tidak ada setting untuk disimpan');
+  const r = await supabaseRest(env, '/payment_settings', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: JSON.stringify(rows),
+  });
+  if (!r.ok) return err('Gagal simpan setting: ' + JSON.stringify(r.data).slice(0, 200), 500);
+  return json({ ok: true, settings: await getPaymentSettings(env) });
+}
+
+async function adminUserEntitlements(request, env, userId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  return json({ ok: true, entitlements: await userEntitlements(env, userId) });
+}
 // ───────────────────────────────────────────────────────────────────
 // Router
 // ───────────────────────────────────────────────────────────────────
@@ -1492,6 +1791,16 @@ export default {
       return meHandler(request, env);
     }
 
+    // === Payments / purchases ===
+    if (pathname === '/api/payments/checkout' && request.method === 'POST') {
+      return paymentCheckout(request, env);
+    }
+    if (pathname === '/api/payments/status' && request.method === 'GET') {
+      return paymentStatus(request, env);
+    }
+    if (pathname === '/api/payments/violet/callback' && request.method === 'POST') {
+      return violetCallback(request, env);
+    }
     // === TMDB (any authenticated user; key tetap di-server, gak ke browser) ===
     if (pathname === '/api/tmdb/search' && request.method === 'GET') {
       const u = await getUserFromAuth(request, env);
@@ -1520,6 +1829,20 @@ export default {
       }
     }
 
+    // === Admin: payments / pricing ===
+    if (pathname === '/api/admin/payments' && request.method === 'GET') {
+      return adminPaymentList(request, env);
+    }
+    if (pathname === '/api/admin/payment-settings' && request.method === 'GET') {
+      return adminSettingsGet(request, env);
+    }
+    if (pathname === '/api/admin/payment-settings' && request.method === 'PATCH') {
+      return adminSettingsUpdate(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements$/);
+      if (m && request.method === 'GET') return adminUserEntitlements(request, env, m[1]);
+    }
     // === Admin: identity / health (untuk gating adminweb1 + diagnostik) ===
     if (pathname === '/api/admin/me' && request.method === 'GET') {
       return adminMeHandler(request, env);

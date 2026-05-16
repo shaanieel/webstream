@@ -1571,10 +1571,46 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   .mobile-bottomnav{display:flex;}
   .mobile-topbar{display:flex;}
 }
+
+/* Payments, cart, and preview gate */
+.nav-cart-count{margin-left:auto;min-width:20px;height:20px;border-radius:999px;background:var(--accent);color:#fff;font-size:.68rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;}
+.collection-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.35);color:var(--green);font-size:.74rem;font-weight:800;margin-top:7px;}
+.full-access-bar{margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid rgba(14,165,233,.32);border-radius:12px;background:linear-gradient(135deg,rgba(14,165,233,.12),rgba(245,197,24,.08));}
+.full-access-bar strong{font-size:.92rem;}
+.full-access-bar span{color:var(--muted);font-size:.78rem;}
+.btn-full-access{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f5c518,#f59e0b);color:#17120a;font-weight:900;border-radius:10px;padding:10px 14px;box-shadow:0 10px 28px rgba(245,158,11,.25);}
+.preview-gate{position:absolute;inset:0;z-index:9;display:none;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,rgba(245,197,24,.18),rgba(0,0,0,.92) 55%);padding:24px;text-align:center;}
+.preview-gate.show{display:flex;}
+.preview-gate-box{max-width:480px;background:rgba(21,21,31,.92);border:1px solid rgba(245,197,24,.38);border-radius:16px;padding:26px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+.preview-gate-box h3{font-size:1.25rem;margin-bottom:8px;color:#facc15;}
+.preview-gate-box p{color:var(--muted);margin-bottom:16px;}
+.pay-modal{position:fixed;inset:0;z-index:260;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);padding:18px;}
+.pay-modal.show{display:flex;}
+.pay-box{width:100%;max-width:500px;background:var(--surface);border:1px solid var(--border-2);border-radius:18px;padding:24px;box-shadow:0 25px 80px rgba(0,0,0,.55);position:relative;animation:payPop .22s ease-out;}
+@keyframes payPop{from{transform:translateY(14px) scale(.98);opacity:0;}to{transform:translateY(0) scale(1);opacity:1;}}
+.pay-close{position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);color:var(--muted);font-size:1.2rem;}
+.pay-title{text-align:center;font-size:1.35rem;font-weight:900;margin-bottom:6px;}
+.pay-sub{text-align:center;color:var(--muted);margin-bottom:18px;}
+.pay-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.pay-choice{position:relative;text-align:left;border:1px solid var(--border);border-radius:14px;background:var(--surface-2);padding:16px;transition:transform .15s,border-color .15s;}
+.pay-choice:hover{transform:translateY(-2px);border-color:var(--accent);}
+.pay-choice.premium{background:linear-gradient(135deg,rgba(245,197,24,.18),rgba(14,165,233,.06));border-color:rgba(245,197,24,.42);}
+.pay-choice b{display:block;font-size:1rem;margin-bottom:4px;}
+.pay-price{font-size:1.35rem;font-weight:900;color:var(--gold);}
+.pay-strike{text-decoration:line-through;color:var(--muted);font-size:.8rem;margin-right:8px;}
+.cart-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:13px;border-bottom:1px solid var(--border);}
+.cart-row:last-child{border-bottom:none;}
+.cart-row-title{font-weight:700;}
+.cart-row-meta{color:var(--muted);font-size:.78rem;margin-top:3px;}
+.cart-total{display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);font-weight:900;}
+.expiry-badge.red{animation:expiryPulse 1.4s ease-in-out infinite;}
+@keyframes expiryPulse{0%,100%{box-shadow:0 0 0 rgba(239,68,68,0);}50%{box-shadow:0 0 24px rgba(239,68,68,.42);}}
+@media(max-width:640px){.pay-actions{grid-template-columns:1fr}.full-access-bar{align-items:stretch;flex-direction:column}.btn-full-access{justify-content:center}}
 </style>
 </head>
 <body>
 
+</div>
 <!-- ══════════════════════════════════════════════════════════════════
      AUTH PAGE
      ══════════════════════════════════════════════════════════════════ -->
@@ -1622,6 +1658,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   </div>
 </div>
 
+</div>
 <!-- ══════════════════════════════════════════════════════════════════
      APP (after login)
      ══════════════════════════════════════════════════════════════════ -->
@@ -1665,7 +1702,14 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           <span class="nav-item-label">Watchlist</span>
         </button>
-        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);" title="VIP Zone">
+        <button class="nav-item" data-page="cart" onclick="goPage('cart')" title="Keranjang">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h8.95a2 2 0 0 0 1.95-1.57l1.35-6.43H5.12"/></svg>
+          <span class="nav-item-label">Keranjang</span><span class="nav-cart-count" id="cartCount" style="display:none;">0</span>
+        </button>
+        <button class="nav-item" data-page="collections" onclick="goPage('collections')" title="Collections">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h6"/></svg>
+          <span class="nav-item-label">Collections</span>
+        </button>        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);" title="VIP Zone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
           <span class="nav-item-label">VIP Zone</span>
         </button>
@@ -1872,6 +1916,27 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       </div>
     </section>
 
+    <!-- ════ CART ════ -->
+    <section class="page" id="page-cart">
+      <div class="page-title">Keranjang</div>
+      <div class="profile-card">
+        <div id="cartList"></div>
+        <div class="cart-total"><span>Total</span><span id="cartTotal">Rp0</span></div>
+        <button class="btn-primary" style="margin-top:16px;" onclick="checkoutCart()">Bayar Sekarang</button>
+      </div>
+    </section>
+
+    <!-- ════ COLLECTIONS ════ -->
+    <section class="page" id="page-collections">
+      <div class="page-title">Collections</div>
+      <div class="grid" id="collectionsGrid"></div>
+      <div id="collectionsEmpty" class="empty-state" style="display:none;">
+        <div class="emoji">🎞️</div>
+        <h3>Belum ada koleksi</h3>
+        <p>Film yang sudah kamu beli akan muncul di sini.</p>
+      </div>
+    </section>
+
     <!-- ════ VIP ════ -->
     <section class="page vip-page" id="page-vip">
       <div class="vip-hero">
@@ -2008,9 +2073,9 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       </div>
     </div>
 
-    <a class="btn-vip vip-upgrade-btn" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">
+    <a class="btn-vip vip-upgrade-btn" id="vipUpgradeBtn" href="javascript:void(0)" onclick="openVipPlans()">
       <iconify-icon icon="fluent-emoji:mobile-phone"></iconify-icon>
-      <span>Hubungi Admin untuk Upgrade</span>
+      <span>Pilih Paket VIP</span>
     </a>
   </div>
 </div>
@@ -2036,9 +2101,18 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   </nav>
 </div>
 
+</div>
 <!-- ══════════════════════════════════════════════════════════════════
      PLAYER MODAL
      ══════════════════════════════════════════════════════════════════ -->
+<div class="pay-modal" id="payModal">
+  <div class="pay-box">
+    <button class="pay-close" onclick="closePayModal()">×</button>
+    <div class="pay-title" id="payTitle">Nonton full selamanya</div>
+    <div class="pay-sub" id="paySub">Pilih cara akses.</div>
+    <div class="pay-actions" id="payActions"></div>
+  </div>
+</div>
 <div class="player-modal" id="playerModal">
   <div class="player-topbar">
     <button class="player-back" onclick="closePlayer()" aria-label="Back">
@@ -2067,6 +2141,13 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
           style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:5;"
         ></iframe>
 
+        <div class="preview-gate" id="previewGate">
+          <div class="preview-gate-box">
+            <h3 id="previewGateTitle">Preview selesai</h3>
+            <p id="previewGateMsg">Silahkan daftar VIP atau beli akses full untuk lanjut menonton.</p>
+            <button class="btn-full-access" onclick="openAccessModal(currentFilm)">Akses Full</button>
+          </div>
+        </div>
         <!-- Multitrack.JS player container (Quality / Audio / Subtitle / Speed all in built-in Settings menu) -->
         <div id="multitrackPlayer" style="width:100%;height:100%;"></div>
 
@@ -2124,6 +2205,11 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
             </div>
           </div>
         </div>
+      </div>
+
+      <div id="fullAccessBar" class="full-access-bar" style="display:none;">
+        <div><strong>Akses Full</strong><br><span>Beli film ini agar terbuka penuh dan masuk Collections.</span></div>
+        <button class="btn-full-access" onclick="openAccessModal(currentFilm)">Akses Full</button>
       </div>
 
       <!-- ── Stream actions: download + external player + URL copy ── -->
@@ -2271,6 +2357,8 @@ let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
 let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
+let cart = JSON.parse(localStorage.getItem('zaein_cart')||'[]');
+let currentEntitlements = [];
 let currentFilm = null;
 let currentResumeFrom = 0;
 let currentPlayerTier = 'basic'; // basic | vip
@@ -2349,6 +2437,7 @@ async function onAuthSuccess(session){
     });
     const d = await r.json();
     currentProfile = (d && d.profile) || null;
+    currentEntitlements = (d && Array.isArray(d.entitlements)) ? d.entitlements : [];
     if(d && d.tier){ /* worker already computed tier; we recompute below for parity */ }
   }catch{ currentProfile = null; }
 
@@ -2378,6 +2467,7 @@ async function onAuthSuccess(session){
   else{ tierEl.textContent='Free'; tierEl.className='profile-tier'; }
 
   showApp();
+  updateCartCount();
   await loadCatalog();
   // After catalog is loaded, apply whatever route is in the URL
   // (handles /movies, /tv, /film/123, etc. on initial load/reload)
@@ -2519,10 +2609,14 @@ function renderProfilePage(){
 
   // Status
   const statusEl = document.getElementById('profileStatusVal');
+  const vipDetailRows = ['profileJoinedVal','profileExpiredVal','profileDaysBadge'].map(id=>document.getElementById(id)?.closest('.profile-row')).filter(Boolean);
   if(currentTier==='vip'){
     statusEl.innerHTML = '<span class="expiry-badge gold">👑 VIP Member</span>';
+    vipDetailRows.forEach(r=>r.style.display='');
   } else {
-    statusEl.innerHTML = '<span class="expiry-badge green">Free Member</span>';
+    statusEl.innerHTML = '<span class="expiry-badge green">Status akun free</span>';
+    vipDetailRows.forEach(r=>r.style.display='none');
+    return;
   }
 
   // Expiry
@@ -2634,7 +2728,7 @@ document.addEventListener('keydown',(e)=>{
    Pages:  /, /movies, /tv, /browse, /watchlist, /search, /vip, /profile
    Film:   /film/{id}
    ════════════════════════════════════════════════════════════════════ */
-const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','vip','profile'];
+const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','vip','profile'];
 let _currentPage = 'home';
 
 function pagePath(name){ return name==='home' ? '/' : '/'+name; }
@@ -2659,6 +2753,8 @@ function goPage(name, opts){
   if(name==='tv') renderTvPage();
   if(name==='browse') renderBrowsePage();
   if(name==='watchlist') renderWatchlistPage();
+  if(name==='cart') renderCartPage();
+  if(name==='collections') renderCollectionsPage();
   if(name==='search') renderSearchInitial();
   if(name==='vip') renderVipPage();
   if(name==='profile') renderProfilePage();
@@ -3129,6 +3225,12 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
   showVipLocked(film);
   return;
 }
+  if(isSeriesLockedForFree(film)){
+    currentFilm = film;
+    openAccessModal(film);
+    showToast('Episode 2 dan seterusnya terkunci. Beli season atau upgrade VIP.', 'error');
+    return;
+  }
 
   currentFilm = film;
   currentResumeFrom = opts.resumeFrom || 0;
@@ -3516,6 +3618,11 @@ async function loadVideoHost(film){
   const subBtn = document.getElementById('toolBtnSubs');
   if(subBtn) subBtn.style.display = 'none';
 
+  resetPreviewGate();
+  const hasFullAccess = userHasFilmAccess(film);
+  const fullBar = document.getElementById('fullAccessBar');
+  if(fullBar) fullBar.style.display = hasFullAccess ? 'none' : 'flex';
+
   // Show video host iframe
   const fr = document.getElementById('vhFrame');
   if(fr){
@@ -3550,6 +3657,8 @@ async function loadVideoHost(film){
   showToast('URL video film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
 }
   }
+
+  armPreviewGate(film);
 
   // VIP extras (download + external player + drive/gdrive link) — ONLY when
   // the user is on a VIP plan AND the film row has a drive backend. Basic
@@ -4532,6 +4641,9 @@ function _p2AssToVtt(ass){
 }
 
 function closePlayer(opts){
+  resetPreviewGate();
+  const fullBar = document.getElementById('fullAccessBar');
+  if(fullBar) fullBar.style.display = 'none';
   opts = opts || {};
   releaseVipDownloadSlot();
   document.getElementById('playerModal').classList.remove('open');
@@ -5060,6 +5172,41 @@ function showToast(msg, type){
 /* ════════════════════════════════════════════════════════════════════
    START
    ════════════════════════════════════════════════════════════════════ */
+
+/* Payments, cart, collections, and preview gate */
+let previewGateTimer = null;
+function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
+function filmEntitlementKey(f){ if(!f) return ''; if(f.tipe === 'series') return `series:${f.judul || f.tmdb_id || f.id}:season:${f.season || 1}`; return `movie:${f.id}`; }
+function userHasFilmAccess(f){ if(!f) return false; if(currentTier === 'vip') return true; const key = filmEntitlementKey(f); return currentEntitlements.some(e => e.entitlement_key === key); }
+function isSeriesLockedForFree(f){ return f && f.tipe === 'series' && Number(f.episode || 1) > 1 && !userHasFilmAccess(f); }
+function accessPrice(f){ return f && f.tipe === 'series' ? 10000 : 5000; }
+function accessLabel(f){ return f && f.tipe === 'series' ? `Season ${f.season || 1}` : 'Movie'; }
+function openAccessModal(film){
+  if(!film) return;
+  const modal = document.getElementById('payModal');
+  document.getElementById('payTitle').textContent = 'Nonton full selamanya';
+  document.getElementById('paySub').textContent = `${film.judul || 'Film'} • ${accessLabel(film)} • ${rupiah(accessPrice(film))}`;
+  document.getElementById('payActions').innerHTML = `
+    <button class="pay-choice premium" onclick="checkoutFilm('${film.id}')"><b>Bayar sekarang</b><span class="pay-price">${rupiah(accessPrice(film))}</span></button>
+    <button class="pay-choice" onclick="addToCart('${film.id}')"><b>Masukkan keranjang</b><span>Simpan dulu, bayar nanti.</span></button>
+    <button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button>
+    <button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`;
+  modal.classList.add('show');
+}
+function openVipPlans(){ const modal=document.getElementById('payModal'); document.getElementById('payTitle').textContent='Upgrade Premium'; document.getElementById('paySub').textContent='VIP otomatis aktif setelah pembayaran berhasil.'; document.getElementById('payActions').innerHTML=`<button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP Premium 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button><button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`; modal.classList.add('show'); }
+function closePayModal(){ document.getElementById('payModal')?.classList.remove('show'); }
+async function startCheckout(payload){ if(!session){ showToast('Login dulu','error'); return; } try{ const r=await fetch('/api/payments/checkout',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify(payload)}); const d=await r.json().catch(()=>({})); if(!r.ok||!d.ok) throw new Error(d.error||'Checkout gagal'); if(d.checkout_url) location.href=d.checkout_url; else showToast('Checkout dibuat, tapi URL pembayaran kosong.','error'); }catch(e){ showToast(e.message,'error'); } }
+function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
+function checkoutVip(type){ closePayModal(); startCheckout({ type }); }
+function addToCart(id){ const f=allFilms.find(x=>String(x.id)===String(id)); if(!f) return; const key=filmEntitlementKey(f); if(!cart.some(i=>i.key===key)) cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f)}); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); closePayModal(); showToast('Masuk keranjang','success'); }
+function updateCartCount(){ const el=document.getElementById('cartCount'); if(!el) return; el.textContent=cart.length; el.style.display=cart.length?'inline-flex':'none'; }
+function removeCartItem(key){ cart=cart.filter(i=>i.key!==key); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); renderCartPage(); }
+function renderCartPage(){ const list=document.getElementById('cartList'); if(!list) return; if(!cart.length){ list.innerHTML='<div class="empty-state">Keranjang masih kosong.</div>'; document.getElementById('cartTotal').textContent='Rp0'; return; } list.innerHTML=cart.map(i=>`<div class="cart-row"><div><div class="cart-row-title">${escapeHtml(i.title)}</div><div class="cart-row-meta">${i.type==='series'?'Season '+(i.season||1):'Movie'} • ${rupiah(i.price)}</div></div><button class="action-btn action-delete" onclick="removeCartItem('${escapeHtml(i.key)}')">Hapus</button></div>`).join(''); document.getElementById('cartTotal').textContent=rupiah(cart.reduce((s,i)=>s+Number(i.price||0),0)); }
+function checkoutCart(){ if(!cart.length){ showToast('Keranjang kosong','error'); return; } checkoutFilm(cart[0].id); }
+function renderCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
+function showPreviewGate(reason){ const gate=document.getElementById('previewGate'); if(!gate) return; document.getElementById('previewGateTitle').textContent=reason||'Preview selesai'; document.getElementById('previewGateMsg').textContent='Silahkan daftar VIP atau beli akses full untuk lanjut menonton.'; gate.classList.add('show'); try{ document.getElementById('vhFrame').src='about:blank'; }catch{} }
+function resetPreviewGate(){ clearTimeout(previewGateTimer); previewGateTimer=null; document.getElementById('previewGate')?.classList.remove('show'); }
+function armPreviewGate(film){ resetPreviewGate(); if(userHasFilmAccess(film)) return; const limit=film&&film.tipe==='series'?7*60*1000:5*60*1000; previewGateTimer=setTimeout(()=>showPreviewGate(film?.tipe==='series'?'Preview 7 menit selesai':'Preview 5 menit selesai'), limit); }
 bootstrap();
 </script>
 </body>
