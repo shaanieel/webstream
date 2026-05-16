@@ -2111,7 +2111,7 @@ function renderVipPage(){
       el.addEventListener('click', ()=>{
         const id = el.dataset.filmId;
         const film = allFilms.find(x=>String(x.id)===String(id));
-        if(film) openFilm(film);
+        if(film) openFilm(film, { vipMode: true });
       });
     });
   }
@@ -2642,11 +2642,13 @@ function toggleWatchlist(id){
    ════════════════════════════════════════════════════════════════════ */
 async function openFilm(film, opts){
   opts = opts || {};
+     const vipMode = !!opts.vipMode;
+currentPlayerTier = vipMode ? 'vip' : 'basic';
   // Tier check — show fancy locked modal instead of toast
-  if(film.tier==='vip' && currentTier!=='vip'){
-    showVipLocked(film);
-    return;
-  }
+  if((vipMode || film.tier === 'vip') && currentTier !== 'vip'){
+  showVipLocked(film);
+  return;
+}
 
   currentFilm = film;
   currentResumeFrom = opts.resumeFrom || 0;
@@ -2662,12 +2664,18 @@ async function openFilm(film, opts){
 
   // Update URL to /film/{id} (clean, shareable)
   if(!opts.fromPopState){
-    const filmPath = '/film/' + encodeURIComponent(film.id);
-    if(location.pathname !== filmPath){
-      history.pushState({ kind:'film', id: String(film.id) }, '', filmPath);
-    }
-  }
+  const filmPath = vipMode
+    ? '/film/vip/' + encodeURIComponent(film.id)
+    : '/film/' + encodeURIComponent(film.id);
 
+  if(location.pathname !== filmPath){
+    history.pushState(
+      { kind:'film', id: String(film.id), vipMode },
+      '',
+      filmPath
+    );
+  }
+}
   // Populate right panel with whatever we have from the local film record.
   // loadFilmExtras() will enrich with TMDB data (status, production, genres, cast, trailer).
   const poster = film.poster_url || '';
@@ -2829,7 +2837,7 @@ function onEpSeasonChange(seasonStr){
   const epsInSeason = epPickerState.seriesFilms.filter(e=>(e.season||1)===season).sort((a,b)=>(a.episode||0)-(b.episode||0));
   const firstEp = epsInSeason[0];
   if(firstEp && firstEp.id !== (currentFilm && currentFilm.id)){
-    openFilm(firstEp);
+    openFilm(firstEp, { vipMode: currentPlayerTier === 'vip' });
     return;
   }
   renderEpListForSeason(season, currentFilm && currentFilm.id);
@@ -2842,7 +2850,7 @@ function onEpNumGo(){
   const target = epPickerState.seriesFilms.find(e =>
     (e.season||1) === epPickerState.currentSeason && (e.episode||0) === epNum
   );
-  if(target) openFilm(target);
+  if(target) openFilm(target, { vipMode: currentPlayerTier === 'vip' });
 }
 
 function onEpNumInput(){
@@ -2899,7 +2907,7 @@ function renderEpListForSeason(season, activeId){
     card.addEventListener('click', () => {
       const id = card.dataset.id;
       const next = eps.find(e => String(e.id) === String(id));
-      if(next) openFilm(next);
+      if(next) openFilm(next, { vipMode: currentPlayerTier === 'vip' });
     });
   });
 }
@@ -3027,7 +3035,7 @@ async function loadVideoHost(film){
     // normalize. If we cannot extract a host video id, refuse to render
     // the iframe instead of feeding a relative path that would self-embed
     // webstream.
-    const src = _normalizeHostEmbedUrl(film.video_url);
+    const src = _normalizeHostEmbedUrl(film.video_url, currentPlayerTier === 'vip');
     if(src){
       fr.src = src;
       fr.style.display = 'block';
@@ -3098,14 +3106,23 @@ function _extractHostId(rawUrl){
 // and Basic tiers play through the same domain. If we can't extract a
 // host id, or the custom domain isn't configured, return '' so the
 // caller shows a friendly toast instead of producing a broken iframe.
-function _normalizeHostEmbedUrl(rawUrl){
+function _normalizeHostEmbedUrl(rawUrl, vipMode){
   if(!rawUrl) return '';
+
   const id = _extractHostId(rawUrl);
   if(!id) return '';
-  // Backend exposes the host domain under `video_host_domain`.
-  const rawDom = (CONFIG && CONFIG.video_host_domain) || '';
-  const customDomain = rawDom.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+
+  const rawDom = vipMode
+    ? ((CONFIG && CONFIG.player4me_vip_domain) || (CONFIG && CONFIG.video_host_domain) || '')
+    : ((CONFIG && CONFIG.player4me_basic_domain) || (CONFIG && CONFIG.video_host_domain) || '');
+
+  const customDomain = String(rawDom)
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '');
+
   if(!customDomain) return '';
+
   return 'https://' + customDomain + '/#' + id;
 }
 
