@@ -338,14 +338,15 @@ img{display:block;max-width:100%;}
   transition:margin-left .35s cubic-bezier(.4,0,.2,1);
 }
 body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
-.page{display:none;padding:32px 5%;max-width:1800px;margin:0 auto;}
+.page{display:none;padding:24px 32px 32px;max-width:1660px;margin:0 auto;}
 .page.active{display:block;}
 .page-title{font-size:1.7rem;font-weight:700;margin-bottom:24px;letter-spacing:-.3px;}
 
 /* ── Hero (Home) ── */
 .hero{
   position:relative;border-radius:16px;overflow:hidden;
-  margin-bottom:36px;height:340px;
+  margin-bottom:36px;
+  aspect-ratio:21/9;max-height:540px;min-height:320px;
   background:linear-gradient(135deg,#0d1c35,#1a3050);
   isolation:isolate;
 }
@@ -353,9 +354,9 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   content:"";position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.95;
   background:radial-gradient(circle at 20% 80%,rgba(14,165,233,.18),transparent 34%),radial-gradient(circle at 76% 18%,rgba(245,197,24,.12),transparent 30%);
 }
-.hero-bg{position:absolute;inset:0;background-size:cover;background-position:center top;opacity:0;transform:scale(1.045);filter:blur(10px) brightness(.55) saturate(1.18);}
+.hero-bg{position:absolute;inset:0;background-size:cover;background-position:center center;opacity:0;transform:scale(1.045);filter:blur(10px) brightness(.55) saturate(1.18);}
 .hero.is-animated .hero-bg{animation:heroBackdropIn 1.05s cubic-bezier(.2,.9,.2,1) .38s both;}
-.hero-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,10,15,.97),rgba(10,10,15,.62) 46%,rgba(10,10,15,.12)),linear-gradient(0deg,rgba(10,10,15,.92),transparent 55%);}
+.hero-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,10,15,.97),rgba(10,10,15,.62) 46%,rgba(10,10,15,.08) 78%,transparent),linear-gradient(0deg,rgba(10,10,15,.92),transparent 55%);}
 .hero-inner{position:relative;z-index:2;height:100%;padding:36px;display:flex;flex-direction:column;justify-content:flex-end;max-width:560px;}
 .hero-title{font-size:2.6rem;font-weight:800;letter-spacing:-1px;line-height:1;margin-bottom:14px;opacity:0;transform:translateY(22px) scale(.96);filter:blur(10px);text-shadow:0 14px 34px rgba(0,0,0,.52);will-change:transform,opacity,filter;}
 .hero.is-animated .hero-title{animation:heroLogoIn .72s cubic-bezier(.18,.95,.24,1) .06s both;}
@@ -370,7 +371,7 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
 .btn-add{background:rgba(255,255,255,.1);color:#fff;padding:11px 16px;border-radius:8px;font-weight:600;border:1px solid rgba(255,255,255,.18);}
 .btn-add:hover{background:rgba(255,255,255,.18);transform:translateY(-1px);}
 @keyframes heroLogoIn{0%{opacity:0;transform:translateY(28px) scale(.92);filter:blur(14px);}58%{opacity:1;transform:translateY(-4px) scale(1.015);filter:blur(0);}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0);}}
-@keyframes heroBackdropIn{0%{opacity:0;transform:scale(1.08);filter:blur(14px) brightness(.45) saturate(1.1);}100%{opacity:.78;transform:scale(1);filter:blur(0) brightness(.72) saturate(1.12);}}
+@keyframes heroBackdropIn{0%{opacity:0;transform:scale(1.08);filter:blur(14px) brightness(.45) saturate(1.1);}100%{opacity:1;transform:scale(1);filter:blur(0) brightness(.95) saturate(1.08);}}
 @keyframes heroSoftIn{from{opacity:0;transform:translateY(16px);filter:blur(6px);}to{opacity:1;transform:translateY(0);filter:blur(0);}}
 @keyframes heroActionsIn{0%{opacity:0;transform:translateY(20px) scale(.96);filter:blur(8px);}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0);}}
 
@@ -404,7 +405,13 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   padding:2px 0 10px;
   scroll-snap-type:x proximity;
   scrollbar-width:none;
+  cursor:grab;
+  user-select:none;
+  -webkit-user-select:none;
+  scroll-behavior:smooth;
 }
+.tmdb-rail.dragging{cursor:grabbing;scroll-behavior:auto;}
+.tmdb-rail.dragging .card{pointer-events:none;}
 .tmdb-rail::-webkit-scrollbar{display:none;}
 .tmdb-rail .card{scroll-snap-align:start;}
 .card{
@@ -1859,21 +1866,13 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row" id="continueWatchingRow" style="display:none;">
         <div class="row-head">
           <div class="row-title">Continue Watching</div>
-          <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('continueWatchingGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('continueWatchingGrid',1)" aria-label="Next">›</button>
-          </div>
         </div>
-        <div class="grid" id="continueWatchingGrid"></div>
+        <div class="grid tmdb-rail" id="continueWatchingGrid"></div>
       </div>
 
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Trending Movies</div>
-          <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('trendingMoviesGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('trendingMoviesGrid',1)" aria-label="Next">›</button>
-          </div>
         </div>
         <div class="grid tmdb-rail" id="trendingMoviesGrid"></div>
       </div>
@@ -1881,10 +1880,6 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Trending Shows</div>
-          <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('trendingShowsGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('trendingShowsGrid',1)" aria-label="Next">›</button>
-          </div>
         </div>
         <div class="grid tmdb-rail" id="trendingShowsGrid"></div>
       </div>
@@ -1892,10 +1887,6 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Top Rated Movies</div>
-          <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('topMoviesGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('topMoviesGrid',1)" aria-label="Next">›</button>
-          </div>
         </div>
         <div class="grid tmdb-rail" id="topMoviesGrid"></div>
       </div>
@@ -1903,10 +1894,6 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Top Rated Shows</div>
-          <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('topShowsGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('topShowsGrid',1)" aria-label="Next">›</button>
-          </div>
         </div>
         <div class="grid tmdb-rail" id="topShowsGrid"></div>
       </div>
@@ -5450,6 +5437,199 @@ function persistPreviewStop(film){
 window.addEventListener('beforeunload', () => {
   persistPreviewStop(currentFilm);
 });
+
+/* ════════════════════════════════════════════════════════════════════
+   ROW RAIL — drag-to-scroll (desktop) + native swipe (touch)
+   Replaces the old arrow buttons on the Trending/Top rows.
+   ════════════════════════════════════════════════════════════════════ */
+(function attachRowDragScroll(){
+  const SELECTOR = '.tmdb-rail';
+  const DRAG_THRESHOLD = 6; // px before we count it as a drag (vs a click)
+
+  function attach(rail){
+    if(rail.dataset.dragBound) return;
+    rail.dataset.dragBound = '1';
+    let isDown = false;
+    let moved = false;
+    let startX = 0;
+    let startScroll = 0;
+
+    rail.addEventListener('pointerdown', (e)=>{
+      // Only handle primary mouse button or pen; let touch fall back to native scroll
+      if(e.pointerType === 'touch') return;
+      if(e.button !== 0) return;
+      isDown = true;
+      moved = false;
+      startX = e.clientX;
+      startScroll = rail.scrollLeft;
+      try{ rail.setPointerCapture(e.pointerId); }catch(_){}
+    });
+    rail.addEventListener('pointermove', (e)=>{
+      if(!isDown) return;
+      const dx = e.clientX - startX;
+      if(!moved && Math.abs(dx) > DRAG_THRESHOLD){
+        moved = true;
+        rail.classList.add('dragging');
+      }
+      if(moved){
+        rail.scrollLeft = startScroll - dx;
+        e.preventDefault();
+      }
+    });
+    function endDrag(e){
+      if(!isDown) return;
+      isDown = false;
+      if(moved){
+        rail.classList.remove('dragging');
+        // Swallow the click that follows the drag so cards don't open by accident.
+        const swallow = (ev)=>{ ev.stopPropagation(); ev.preventDefault(); rail.removeEventListener('click', swallow, true); };
+        rail.addEventListener('click', swallow, true);
+        setTimeout(()=>rail.removeEventListener('click', swallow, true), 50);
+      }
+      moved = false;
+      try{ if(e && e.pointerId != null) rail.releasePointerCapture(e.pointerId); }catch(_){}
+    }
+    rail.addEventListener('pointerup', endDrag);
+    rail.addEventListener('pointercancel', endDrag);
+    rail.addEventListener('pointerleave', endDrag);
+    // Mouse wheel: convert vertical wheel into horizontal scroll for nicer desktop UX
+    rail.addEventListener('wheel', (e)=>{
+      if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+        rail.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }
+    }, { passive:false });
+  }
+
+  function bindAll(){ document.querySelectorAll(SELECTOR).forEach(attach); }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', bindAll);
+  } else {
+    bindAll();
+  }
+  // New rails appear after data loads — observe DOM for new ones.
+  const mo = new MutationObserver(bindAll);
+  mo.observe(document.documentElement, { childList:true, subtree:true });
+})();
+
+/* ════════════════════════════════════════════════════════════════════
+   ANTI-INSPECT — block context menu, common devtools shortcuts,
+   drag / select / copy / cut / paste outside form fields, etc.
+   Typing inside <input> / <textarea> / contenteditable is preserved.
+   ════════════════════════════════════════════════════════════════════ */
+(function antiInspect(){
+  const REDIRECT_URL = 'https://youtube.com';
+
+  function isEditable(target){
+    if(!target) return false;
+    const tag = (target.tagName||'').toUpperCase();
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if(target.isContentEditable) return true;
+    // Some custom elements (e.g. vidstack player inputs) — be permissive
+    if(target.closest && target.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]')) return true;
+    return false;
+  }
+
+  // 1) Block right-click context menu silently (no redirect).
+  document.addEventListener('contextmenu', (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  }, true);
+
+  // 2) Block keyboard shortcuts that are commonly used to inspect / steal /
+  //    print / save / view source. Redirect to YouTube on hit.
+  function redirectAway(){
+    try{ window.location.replace(REDIRECT_URL); }
+    catch(_){ window.location.href = REDIRECT_URL; }
+  }
+  document.addEventListener('keydown', (e)=>{
+    const k = (e.key||'').toLowerCase();
+    const ctrl = e.ctrlKey;
+    const meta = e.metaKey;
+    const shift = e.shiftKey;
+    const alt = e.altKey;
+    const editable = isEditable(e.target);
+
+    // F12 — always blocked (devtools)
+    if(k === 'f12' || e.keyCode === 123){
+      e.preventDefault(); e.stopPropagation();
+      redirectAway();
+      return;
+    }
+
+    // Ctrl/Cmd + Shift + (I/J/C/K) — devtools / inspect / console
+    if((ctrl || meta) && shift && (k === 'i' || k === 'j' || k === 'c' || k === 'k')){
+      e.preventDefault(); e.stopPropagation();
+      redirectAway();
+      return;
+    }
+
+    // Cmd + Option + I (macOS devtools)
+    if(meta && alt && k === 'i'){
+      e.preventDefault(); e.stopPropagation();
+      redirectAway();
+      return;
+    }
+
+    // Plain Ctrl/Cmd + key combos. Allow typing keys inside form fields.
+    if(ctrl || meta){
+      // Always-block (regardless of editable): view source, save, print
+      if(k === 'u' || k === 's' || k === 'p'){
+        e.preventDefault(); e.stopPropagation();
+        redirectAway();
+        return;
+      }
+      // Block reload (Ctrl/Cmd + R)
+      if(k === 'r'){
+        e.preventDefault(); e.stopPropagation();
+        redirectAway();
+        return;
+      }
+      // Find / select-all / copy / cut — block on body but allow inside form fields
+      if((k === 'f' || k === 'a' || k === 'c' || k === 'x') && !editable){
+        e.preventDefault(); e.stopPropagation();
+        redirectAway();
+        return;
+      }
+    }
+  }, true);
+
+  // 3) Block drag-start globally (images, links, etc.). Inputs are fine —
+  //    they don't fire dragstart for plain text selection most of the time,
+  //    but we still skip editable to be safe.
+  document.addEventListener('dragstart', (e)=>{
+    if(isEditable(e.target)) return;
+    e.preventDefault();
+  }, true);
+
+  // 4) Block text selection outside form fields.
+  document.addEventListener('selectstart', (e)=>{
+    if(isEditable(e.target)) return;
+    e.preventDefault();
+  }, true);
+
+  // 5) Block copy / cut / paste outside form fields. Inside inputs/textareas,
+  //    the user can still copy/paste normally (so login & search keep working).
+  ['copy','cut','paste'].forEach(type=>{
+    document.addEventListener(type, (e)=>{
+      if(isEditable(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  });
+
+  // 6) CSS hint — prevent visible selection outline app-wide except in forms.
+  try{
+    const style = document.createElement('style');
+    style.textContent = ''+
+      'html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}'+
+      'input,textarea,select,[contenteditable="true"],[contenteditable=""]{-webkit-user-select:text;user-select:text;}';
+    document.head.appendChild(style);
+  }catch(_){}
+})();
+
 bootstrap();
 </script>
 </body>
