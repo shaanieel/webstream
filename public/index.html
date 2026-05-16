@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet" />
 <!-- Multitrack.JS player (CSS injected by JS bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Iconify colorful icons -->
+<script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
 <!-- Vidstack player (Player 2). Default theme. -->
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
 <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
@@ -1002,7 +1004,350 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
   width:32px;height:var(--topbar-h);
 }
+/* ════════════════════════════════════════════════════════════════════
+   PREMIUM VIP LOCKED MODAL
+   ════════════════════════════════════════════════════════════════════ */
+.vip-locked-modal{
+  position:fixed;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:22px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(250,204,21,.18), transparent 34%),
+    rgba(0,0,0,.78);
+  backdrop-filter:blur(12px);
+  z-index:500;
+}
 
+.vip-locked-modal.show{
+  display:flex;
+}
+
+.vip-locked-box{
+  position:relative;
+  width:min(560px,100%);
+  max-height:92vh;
+  overflow:hidden;
+  background:
+    linear-gradient(145deg, rgba(24,24,32,.98), rgba(12,12,18,.98)),
+    radial-gradient(circle at 50% 0%, rgba(250,204,21,.12), transparent 35%);
+  border:1px solid rgba(250,204,21,.45);
+  border-radius:22px;
+  padding:42px 34px 34px;
+  box-shadow:
+    0 26px 80px rgba(0,0,0,.65),
+    0 0 45px rgba(250,204,21,.12),
+    inset 0 1px 0 rgba(255,255,255,.08);
+  animation:vipModalIn .42s cubic-bezier(.2,.9,.2,1) both;
+}
+
+.vip-locked-box::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius:24px;
+  padding:1px;
+  background:linear-gradient(120deg, transparent, rgba(250,204,21,.95), transparent);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite:exclude;
+  -webkit-mask-composite:xor;
+  pointer-events:none;
+  opacity:.75;
+}
+
+.vip-modal-glow{
+  position:absolute;
+  top:-120px;
+  left:50%;
+  width:280px;
+  height:280px;
+  transform:translateX(-50%);
+  background:radial-gradient(circle, rgba(250,204,21,.28), transparent 65%);
+  filter:blur(4px);
+  pointer-events:none;
+  animation:vipGlowPulse 2.8s ease-in-out infinite;
+}
+
+.vip-close-btn{
+  position:absolute;
+  top:16px;
+  right:16px;
+  width:40px;
+  height:40px;
+  border-radius:999px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
+  color:#a8a8b8;
+  font-size:24px;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:3;
+  transition:transform .18s ease, background .18s ease, color .18s ease;
+}
+
+.vip-close-btn:hover{
+  transform:rotate(90deg) scale(1.05);
+  background:rgba(239,68,68,.16);
+  color:#fff;
+}
+
+.vip-crown-wrap{
+  position:relative;
+  width:76px;
+  height:76px;
+  margin:0 auto 18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  background:radial-gradient(circle, rgba(250,204,21,.18), transparent 68%);
+}
+
+.vip-crown-wrap::after{
+  content:"";
+  position:absolute;
+  inset:8px;
+  border-radius:999px;
+  border:1px solid rgba(250,204,21,.25);
+  animation:vipRing 2.4s ease-in-out infinite;
+}
+
+.vip-main-crown{
+  font-size:54px;
+  filter:drop-shadow(0 10px 18px rgba(250,204,21,.28));
+  animation:vipFloat 2.6s ease-in-out infinite;
+}
+
+.vip-locked-box h2{
+  position:relative;
+  z-index:2;
+  text-align:center;
+  font-size:1.72rem;
+  letter-spacing:.8px;
+  margin:0 0 10px;
+  color:#facc15;
+  text-shadow:0 0 22px rgba(250,204,21,.22);
+}
+
+.vip-locked-box p{
+  position:relative;
+  z-index:2;
+  max-width:440px;
+  margin:0 auto 22px;
+  text-align:center;
+  color:#a9a9b8;
+  font-size:.98rem;
+  line-height:1.65;
+}
+
+.vip-benefits{
+  position:relative;
+  z-index:2;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin:22px 0 26px;
+}
+
+.vip-benefit{
+  display:grid;
+  grid-template-columns:34px 1fr;
+  align-items:flex-start;
+  gap:12px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
+  transition:transform .18s ease, border-color .18s ease, background .18s ease;
+  animation:vipItemIn .45s ease both;
+}
+
+.vip-benefit:nth-child(1){animation-delay:.05s;}
+.vip-benefit:nth-child(2){animation-delay:.10s;}
+.vip-benefit:nth-child(3){animation-delay:.15s;}
+.vip-benefit:nth-child(4){animation-delay:.20s;}
+.vip-benefit:nth-child(5){animation-delay:.25s;}
+.vip-benefit:nth-child(6){animation-delay:.30s;}
+
+.vip-benefit:hover{
+  transform:translateX(5px);
+  border-color:rgba(250,204,21,.32);
+  background:rgba(250,204,21,.055);
+}
+
+.vip-benefit.primary{
+  border-color:rgba(250,204,21,.28);
+  background:linear-gradient(90deg, rgba(250,204,21,.11), rgba(255,255,255,.025));
+}
+
+.vip-benefit iconify-icon{
+  font-size:25px;
+  margin-top:1px;
+  filter:drop-shadow(0 6px 10px rgba(0,0,0,.25));
+}
+
+.vip-benefit strong{
+  display:block;
+  color:#f5f5fa;
+  font-size:.94rem;
+  line-height:1.25;
+}
+
+.vip-benefit.primary strong{
+  color:#facc15;
+}
+
+.vip-benefit span{
+  display:block;
+  margin-top:3px;
+  color:#9ca3af;
+  font-size:.78rem;
+  line-height:1.35;
+}
+
+.vip-upgrade-btn{
+  position:relative;
+  z-index:2;
+  width:min(360px,100%);
+  margin:0 auto;
+  height:56px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  border-radius:14px;
+  background:linear-gradient(135deg,#fde047,#eab308,#f59e0b);
+  color:#17130a;
+  font-weight:900;
+  font-size:.96rem;
+  letter-spacing:.2px;
+  box-shadow:
+    0 14px 34px rgba(234,179,8,.28),
+    inset 0 1px 0 rgba(255,255,255,.55);
+  overflow:hidden;
+  transition:transform .18s ease, box-shadow .18s ease;
+}
+
+.vip-upgrade-btn::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:-80%;
+  width:45%;
+  height:100%;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.65), transparent);
+  transform:skewX(-18deg);
+  animation:vipShine 2.8s ease-in-out infinite;
+}
+
+.vip-upgrade-btn:hover{
+  transform:translateY(-2px) scale(1.015);
+  box-shadow:
+    0 18px 42px rgba(234,179,8,.36),
+    inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+.vip-upgrade-btn iconify-icon{
+  font-size:22px;
+}
+
+@keyframes vipModalIn{
+  from{
+    opacity:0;
+    transform:translateY(20px) scale(.96);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0) scale(1);
+  }
+}
+
+@keyframes vipItemIn{
+  from{
+    opacity:0;
+    transform:translateY(10px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0);
+  }
+}
+
+@keyframes vipFloat{
+  0%,100%{transform:translateY(0) rotate(-2deg);}
+  50%{transform:translateY(-8px) rotate(2deg);}
+}
+
+@keyframes vipGlowPulse{
+  0%,100%{opacity:.55;transform:translateX(-50%) scale(1);}
+  50%{opacity:1;transform:translateX(-50%) scale(1.08);}
+}
+
+@keyframes vipRing{
+  0%,100%{transform:scale(.92);opacity:.45;}
+  50%{transform:scale(1.12);opacity:1;}
+}
+
+@keyframes vipShine{
+  0%{left:-80%;}
+  42%,100%{left:130%;}
+}
+
+@media(max-width:640px){
+  .vip-locked-modal{
+    padding:14px;
+    align-items:center;
+  }
+
+  .vip-locked-box{
+    padding:36px 18px 24px;
+    border-radius:20px;
+    max-height:88vh;
+    overflow-y:auto;
+  }
+
+  .vip-locked-box h2{
+    font-size:1.38rem;
+  }
+
+  .vip-locked-box p{
+    font-size:.9rem;
+    margin-bottom:18px;
+  }
+
+  .vip-benefits{
+    gap:8px;
+    margin:18px 0 22px;
+  }
+
+  .vip-benefit{
+    grid-template-columns:30px 1fr;
+    gap:10px;
+    padding:9px 10px;
+  }
+
+  .vip-benefit iconify-icon{
+    font-size:22px;
+  }
+
+  .vip-benefit strong{
+    font-size:.88rem;
+  }
+
+  .vip-benefit span{
+    font-size:.74rem;
+  }
+
+  .vip-upgrade-btn{
+    height:52px;
+    font-size:.88rem;
+  }
+}
 /* ════════════════════════════════════════════════════════════════════
    MOBILE LAYOUT (< 768px)
    ════════════════════════════════════════════════════════════════════ */
@@ -1517,23 +1862,79 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     </section>
   </main>
 
-  <!-- VIP Locked Modal (untuk non-VIP yang coba akses film/halaman VIP) -->
-  <div class="vip-locked-modal" id="vipLockedModal">
-    <div class="vip-locked-box">
-      <button class="btn-close" onclick="closeVipLocked()">×</button>
-      <div class="lock-icon">👑</div>
-      <h2 id="vipLockedTitle">Konten VIP</h2>
-      <p id="vipLockedMsg">Halaman ini hanya untuk member VIP. Hubungi admin untuk upgrade.</p>
-      <ul style="text-align:left;padding:0;margin:18px 0;list-style:none;font-size:.92rem;color:#ddd;line-height:1.7;">
-        <li>👑 <strong style="color:#facc15">Akses ribuan film premium</strong></li>
-        <li>🎬 Update terus tiap hari</li>
-        <li>🇮🇩 Film dubbing Indonesia & lokal lengkap</li>
-        <li>📺 Kualitas 4K Ultra HD</li>
-        <li>⚡ Tanpa batas streaming</li>
-      </ul>
-      <a class="btn-vip" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">📲 Hubungi Admin untuk Upgrade</a>
+ <!-- VIP Locked Modal (untuk non-VIP yang coba akses film/halaman VIP) -->
+<div class="vip-locked-modal" id="vipLockedModal">
+  <div class="vip-locked-box">
+    <button class="btn-close vip-close-btn" onclick="closeVipLocked()">×</button>
+
+    <div class="vip-modal-glow"></div>
+
+    <div class="vip-crown-wrap">
+      <iconify-icon icon="fluent-emoji:crown" class="vip-main-crown"></iconify-icon>
     </div>
+
+    <h2 id="vipLockedTitle">VIP Zone Terkunci</h2>
+
+    <p id="vipLockedMsg">
+      Masuk sebagai member VIP untuk menikmati pengalaman streaming premium tanpa batas.
+    </p>
+
+    <div class="vip-benefits">
+      <div class="vip-benefit primary">
+        <iconify-icon icon="fluent-emoji:crown"></iconify-icon>
+        <div>
+          <strong>Akses ribuan film premium</strong>
+          <span>Koleksi eksklusif yang hanya tersedia untuk member VIP.</span>
+        </div>
+      </div>
+
+      <div class="vip-benefit">
+        <iconify-icon icon="fluent-emoji:no-entry"></iconify-icon>
+        <div>
+          <strong>Tanpa iklan</strong>
+          <span>Nonton lebih nyaman tanpa gangguan popup atau redirect.</span>
+        </div>
+      </div>
+
+      <div class="vip-benefit">
+        <iconify-icon icon="fluent-emoji:inbox-tray"></iconify-icon>
+        <div>
+          <strong>Bisa download</strong>
+          <span>Simpan film favorit dan tonton kapan saja.</span>
+        </div>
+      </div>
+
+      <div class="vip-benefit">
+        <iconify-icon icon="fluent-emoji:clapper-board"></iconify-icon>
+        <div>
+          <strong>Update film setiap hari</strong>
+          <span>Koleksi terbaru terus ditambahkan secara rutin.</span>
+        </div>
+      </div>
+
+      <div class="vip-benefit">
+        <iconify-icon icon="fluent-emoji:flag-indonesia"></iconify-icon>
+        <div>
+          <strong>Dubbing Indonesia & lokal lengkap</strong>
+          <span>Nikmati tontonan dengan audio dan subtitle yang lebih nyaman.</span>
+        </div>
+      </div>
+
+      <div class="vip-benefit">
+        <iconify-icon icon="fluent-emoji:high-voltage"></iconify-icon>
+        <div>
+          <strong>Streaming tanpa batas</strong>
+          <span>Bebas nonton sepuasnya selama akun VIP aktif.</span>
+        </div>
+      </div>
+    </div>
+
+    <a class="btn-vip vip-upgrade-btn" id="vipUpgradeBtn" href="https://wa.me/" target="_blank" rel="noopener">
+      <iconify-icon icon="fluent-emoji:mobile-phone"></iconify-icon>
+      <span>Hubungi Admin untuk Upgrade</span>
+    </a>
   </div>
+</div>
 
   <!-- ── Mobile bottom nav ── -->
   <nav class="mobile-bottomnav">
