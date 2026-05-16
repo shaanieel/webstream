@@ -1923,6 +1923,50 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
      on the page itself. */
   .row{min-width:0;max-width:100%;}
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   MORE-SHEET FIX (cross-viewport)
+
+   Bug 1 — Desktop: the .more-sheet element holds the mobile drawer's
+   "Media / Akun" labels + icons. ALL of its styles previously lived
+   inside @media(max-width:767px), so on >=768px it had zero CSS and
+   rendered as a normal block at the bottom of <body>, dumping the
+   labels into the top-right corner of every page (Home/Search/Browse/
+   Watchlist/Movies/TV/VIP/Profile).
+
+   Bug 2 — Mobile: the sheet was anchored at bottom:var(--bottom-nav-h)
+   (= 64px) with transform:translateY(100%). translateY only shifts by
+   the sheet's OWN height, so the top 64px of the sheet stayed visible
+   on top of the bottom nav (sheet z-index 89 > nav z-index 40), making
+   the "MEDIA" label peek through above the nav. Re-anchored at
+   bottom:0 with padding-bottom that clears the nav, so translateY(100%)
+   now fully hides the sheet off-screen.
+
+   Bug 3 — Mobile: .toast at bottom:24px slides up under the new fixed
+   bottom nav. Raised so it sits cleanly above the nav.
+   ════════════════════════════════════════════════════════════════════ */
+.more-sheet,
+.more-sheet-overlay { display: none; }
+
+@media (max-width:767px){
+  .more-sheet{
+    display:block;
+    bottom:0;
+    padding-bottom:calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom));
+  }
+  .more-sheet-overlay{display:none;}
+  .more-sheet-overlay.show{display:block;}
+
+  .toast{
+    bottom:calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom));
+  }
+
+  /* A touch more bottom padding on .main so the last row clears the
+     bottom nav even on devices with a tall home-indicator. */
+  .main{
+    padding-bottom:calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 32px);
+  }
+}
 </style>
 </head>
 <body>
