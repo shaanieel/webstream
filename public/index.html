@@ -2237,16 +2237,20 @@ function applyRoute(opts){
   opts = opts || {};
   const r = parseRoute();
   if(r.kind === 'film'){
-    const f = findFilmByRouteId(r.id);
-    if(f){
-      // Go to home behind the modal so back button behavior is sensible
-      goPage('home', { fromPopState:true });
-      openFilm(f, { fromPopState:true });
-    } else {
-      // Film not found (catalog not loaded yet, or id invalid) → fallback to home
-      goPage('home', { fromPopState:true });
-    }
+  const f = findFilmByRouteId(r.id);
+  if(f){
+    // Kalau direct ke /film/vip/:id, buka VIP page di belakang modal.
+    // Kalau /film/:id, tetap home.
+    goPage(r.vipMode ? 'vip' : 'home', { fromPopState:true });
+
+    openFilm(f, {
+      fromPopState: true,
+      vipMode: !!r.vipMode,
+    });
   } else {
+    goPage('home', { fromPopState:true });
+  }
+} else {
     // Close player if open (e.g., back button from /film/X → /something)
     const pm = document.getElementById('playerModal');
     if(pm && pm.classList.contains('open')){ closePlayer({ fromPopState:true }); }
