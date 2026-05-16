@@ -611,6 +611,143 @@ async function tmdbMulti(request, env) {
   }
 }
 
+function tmdbImage(path, size = 'w500') {
+  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+}
+
+function pickTmdbLogo(images) {
+  const logos = images && Array.isArray(images.logos) ? images.logos : [];
+  if (!logos.length) return null;
+  const preferred = logos.find(x => x.iso_639_1 === 'en') || logos.find(x => x.iso_639_1 === null) || logos[0];
+  return preferred && preferred.file_path ? tmdbImage(preferred.file_path, 'w500') : null;
+}
+
+function mapTmdbHomeItem(item, mediaType, category, hiddenSet, localByTmdb, logoUrl = null) {
+  if (!item || !item.id) return null;
+  const key = `${mediaType}:${item.id}`;
+  if (hiddenSet.has(key)) return null;
+  const local = localByTmdb.get(key);
+  const title = item.title || item.name || item.original_title || item.original_name || 'Untitled';
+  return {
+    id: `tmdb-${mediaType}-${item.id}`,
+    tmdb_id: item.id,
+    local_id: local ? local.id : null,
+    source: 'tmdb',
+    category,
+    media_type: mediaType,
+    tipe: mediaType === 'tv' ? 'series' : 'movie',
+    judul: local?.judul || title,
+    tahun: local?.tahun || String(item.release_date || item.first_air_date || '').slice(0, 4),
+    poster_url: local?.poster_url || tmdbImage(item.poster_path, 'w500'),
+    backdrop_url: local?.backdrop_url || tmdbImage(item.backdrop_path, 'w1280'),
+    logo_url: local?.logo_url || logoUrl,
+    overview: local?.overview || item.overview || '',
+    rating: item.vote_average ? Number(item.vote_average).toFixed(1) : null,
+    vote_count: item.vote_count || 0,
+    is_available: !!local,
+  };
+}
+
+async function getTmdbHiddenSet(env) {
+  const r = await supabaseRest(env, '/tmdb_home_hidden?select=media_type,tmdb_id');
+  const rows = r.ok && Array.isArray(r.data) ? r.data : [];
+  return new Set(rows.map(x => `${x.media_type}:${x.tmdb_id}`));
+}
+
+async function getLocalFilmsByTmdb(env) {
+  const r = await supabaseRest(env, '/films?select=id,judul,tipe,tahun,tmdb_id,poster_url,backdrop_url,overview,rating,tier&not.tmdb_id=is.null');
+  const rows = r.ok && Array.isArray(r.data) ? r.data : [];
+  const map = new Map();
+  for (const f of rows) {
+    const mediaType = f.tipe === 'series' ? 'tv' : 'movie';
+    const key = `${mediaType}:${f.tmdb_id}`;
+    if (!map.has(key)) map.set(key, f);
+  }
+  return map;
+}
+
+async function tmdbList(env, path) {
+  const r = await tmdbFetch(env, path);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.status_message || `TMDB ${r.status}`);
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+async function tmdbHomeHandler(request, env) {
+  try {
+    const [hiddenSet, localByTmdb] = await Promise.all([getTmdbHiddenSet(env), getLocalFilmsByTmdb(env)]);
+    const [trendingMoviesRaw, trendingShowsRaw, topMoviesRaw, topShowsRaw] = await Promise.all([
+      tmdbList(env, '/trending/movie/week?page=1&include_adult=false'),
+      tmdbList(env, '/trending/tv/week?page=1&include_adult=false'),
+      tmdbList(env, '/movie/top_rated?page=1&include_adult=false'),
+      tmdbList(env, '/tv/top_rated?page=1&include_adult=false'),
+    ]);
+
+    const rows = {
+      trending_movies: trendingMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'trending_movies', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
+      trending_shows: trendingShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'trending_shows', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
+      top_movies: topMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'top_movies', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
+      top_shows: topShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'top_shows', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
+    };
+
+    const heroBase = [...trendingMoviesRaw, ...trendingShowsRaw].filter(x => x && x.backdrop_path).slice(0, 10);
+    const hero = [];
+    for (const item of heroBase) {
+      const mediaType = item.title ? 'movie' : 'tv';
+      const detail = await tmdbFetch(env, `/${mediaType}/${item.id}?append_to_response=images`).then(r => r.json()).catch(() => null);
+      const merged = detail && !detail.success ? { ...item, ...detail } : item;
+      const mapped = mapTmdbHomeItem(merged, mediaType, 'hero', hiddenSet, localByTmdb, pickTmdbLogo(detail?.images));
+      if (mapped && mapped.backdrop_url) hero.push(mapped);
+      if (hero.length >= 10) break;
+    }
+
+    return json({ ok: true, hero, rows });
+  } catch (e) {
+    return err('TMDB home error: ' + e.message, 502);
+  }
+}
+
+async function adminTmdbHiddenList(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, '/tmdb_home_hidden?select=*&order=created_at.desc');
+  if (!r.ok) return err('Gagal load hidden TMDB', 500);
+  return json({ ok: true, items: Array.isArray(r.data) ? r.data : [] });
+}
+
+async function adminTmdbHiddenUpsert(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const body = await request.json().catch(() => ({}));
+  const mediaType = body.media_type;
+  const tmdbId = Number(body.tmdb_id);
+  if (!['movie', 'tv'].includes(mediaType) || !tmdbId) return err('media_type dan tmdb_id wajib');
+  const r = await supabaseRest(env, '/tmdb_home_hidden?on_conflict=media_type,tmdb_id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: JSON.stringify({
+      media_type: mediaType,
+      tmdb_id: tmdbId,
+      title: body.title || null,
+      reason: body.reason || null,
+    }),
+  });
+  if (!r.ok) return err('Gagal hide item TMDB', 500);
+  return json({ ok: true, item: Array.isArray(r.data) ? r.data[0] : r.data });
+}
+
+async function adminTmdbHiddenDelete(request, env, mediaType, tmdbId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  if (!['movie', 'tv'].includes(mediaType) || !/^\d+$/.test(String(tmdbId))) return err('Parameter tidak valid');
+  const r = await supabaseRest(env, `/tmdb_home_hidden?media_type=eq.${encodeURIComponent(mediaType)}&tmdb_id=eq.${encodeURIComponent(tmdbId)}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal',
+  });
+  if (!r.ok) return err('Gagal unhide item TMDB', 500);
+  return json({ ok: true });
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Drive helper — call GDI worker to resolve path → signed stream URL
 // ───────────────────────────────────────────────────────────────────
@@ -1995,6 +2132,9 @@ export default {
       if (!u) return err('Login dulu', 401);
       return tmdbMulti(request, env);
     }
+    if (pathname === '/api/tmdb/home' && request.method === 'GET') {
+      return tmdbHomeHandler(request, env);
+    }
     {
       const m = pathname.match(/^\/api\/tmdb\/(movie|tv)\/(\d+)$/);
       if (m && request.method === 'GET') {
@@ -2021,6 +2161,16 @@ export default {
     }
     if (pathname === '/api/admin/payment-settings' && request.method === 'PATCH') {
       return adminSettingsUpdate(request, env);
+    }
+    if (pathname === '/api/admin/tmdb-hidden' && request.method === 'GET') {
+      return adminTmdbHiddenList(request, env);
+    }
+    if (pathname === '/api/admin/tmdb-hidden' && request.method === 'POST') {
+      return adminTmdbHiddenUpsert(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/tmdb-hidden\/(movie|tv)\/(\d+)$/);
+      if (m && request.method === 'DELETE') return adminTmdbHiddenDelete(request, env, m[1], m[2]);
     }
     {
       const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements$/);
