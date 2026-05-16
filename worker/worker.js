@@ -1442,17 +1442,25 @@ export default {
     // === Public expose config (NON-secret only) ===
     // Frontend butuh tahu Supabase URL + anon key. Service key TIDAK pernah
     // di-expose. Single supabase project — no more cross-project mirror.
-    if (pathname === '/api/config' && request.method === 'GET') {
-      return json({
-        ok: true,
-        supabase_url: env.SUPABASE_URL,
-        supabase_anon_key: env.SUPABASE_ANON_KEY || '',
-        gdi_worker_url: env.GDI_WORKER_URL,
-        tmdb_image_base: 'https://image.tmdb.org/t/p/w500',
-        // Public CONFIG — keep this minimal; no backend identifiers leak.
-        video_host_domain: env.PLAYER4ME_PUBLIC_DOMAIN || '',
-      });
-    }
+   if (pathname === '/api/config' && request.method === 'GET') {
+  const basicDomain = env.PLAYER4ME_BASIC_DOMAIN || env.PLAYER4ME_PUBLIC_DOMAIN || '';
+  const vipDomain = env.PLAYER4ME_VIP_DOMAIN || basicDomain;
+
+  return json({
+    ok: true,
+    supabase_url: env.SUPABASE_URL,
+    supabase_anon_key: env.SUPABASE_ANON_KEY || '',
+    gdi_worker_url: env.GDI_WORKER_URL,
+    tmdb_image_base: 'https://image.tmdb.org/t/p/w500',
+
+    // Legacy, supaya kode lama tetap aman
+    video_host_domain: basicDomain,
+
+    // Baru: domain player per tier
+    player4me_basic_domain: basicDomain,
+    player4me_vip_domain: vipDomain,
+  });
+}
 
     // === Subsource ===
     if (pathname === '/api/subsource/search' && request.method === 'GET') {
