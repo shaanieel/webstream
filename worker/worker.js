@@ -1738,6 +1738,40 @@ async function adminUserEntitlements(request, env, userId) {
   return json({ ok: true, entitlements: await userEntitlements(env, userId) });
 }
 
+
+function previewKeyForFilm(film) {
+  if (!film) return null;
+  if (film.tipe === 'series') return `series:${film.judul || film.tmdb_id || film.id}:season:${film.season || 1}:episode:${film.episode || 1}`;
+  return `movie:${film.id}`;
+}
+
+async function getOrCreatePreviewSession(env, userId, film, limitSeconds) {
+  const key = previewKeyForFilm(film);
+  const existing = await supabaseRest(
+    env,
+    `/preview_sessions?user_id=eq.${encodeURIComponent(userId)}&preview_key=eq.${encodeURIComponent(key)}&select=*&limit=1`
+  );
+  if (existing.ok && Array.isArray(existing.data) && existing.data.length) {
+    return existing.data[0];
+  }
+  const now = new Date();
+  const expires = new Date(now.getTime() + limitSeconds * 1000).toISOString();
+  const created = await supabaseRest(env, '/preview_sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: userId,
+      film_id: film.id,
+      preview_key: key,
+      title: film.judul || null,
+      limit_seconds: limitSeconds,
+      started_at: now.toISOString(),
+      expires_at: expires,
+    }),
+  });
+  if (created.ok && Array.isArray(created.data) && created.data.length) return created.data[0];
+  if (created.ok && created.data) return created.data;
+  throw new Error('Gagal membuat sesi preview');
+}
 async function playbackHandler(request, env, filmId) {
   const user = await getUserFromAuth(request, env);
   if (!user) return err('Login dulu', 401);
@@ -1764,11 +1798,35 @@ async function playbackHandler(request, env, filmId) {
   const videoUrl = hasFullAccess ? fullUrl : (previewUrl || fullUrl);
   if (!videoUrl) return err('Film ini belum punya URL video.', 404);
 
+  let previewSession = null;
+  let remainingSeconds = null;
+  if (!hasFullAccess) {
+    try {
+      previewSession = await getOrCreatePreviewSession(env, profile?.user_id || user.id, film, previewSeconds);
+    } catch (e) {
+      return err(e.message || 'Preview belum siap', 500);
+    }
+    remainingSeconds = Math.max(0, Math.ceil((new Date(previewSession.expires_at).getTime() - Date.now()) / 1000));
+    if (remainingSeconds <= 0) {
+      return json({
+        ok: true,
+        locked: true,
+        reason: 'preview_expired',
+        message: 'Waktu preview sudah habis. Silahkan daftar VIP atau beli akses full.',
+        preview_seconds: previewSeconds,
+        preview_expires_at: previewSession.expires_at,
+      }, 403);
+    }
+  }
+
   return json({
     ok: true,
     locked: false,
     access: hasFullAccess ? 'full' : 'preview',
     preview_seconds: hasFullAccess ? null : previewSeconds,
+    preview_remaining_seconds: remainingSeconds,
+    preview_started_at: previewSession ? previewSession.started_at : null,
+    preview_expires_at: previewSession ? previewSession.expires_at : null,
     has_real_preview: !hasFullAccess && !!previewUrl,
     video_url: videoUrl,
   });
