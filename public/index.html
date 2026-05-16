@@ -476,6 +476,7 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   outline:none;cursor:pointer;
 }
 
+
 /* ════════════════════════════════════════════════════════════════════
    PLAYER (modal)
    ════════════════════════════════════════════════════════════════════ */
@@ -2353,6 +2354,7 @@ let CONFIG = null;
 // auth state lives in one storage key now.)
 let sb = null;
 let currentUser = null;
+let session = null;
 let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
@@ -2402,7 +2404,7 @@ async function bootstrap(){
     return;
   }
 
-  let session = null;
+  session = null;
   try { session = (await sb.auth.getSession()).data.session; } catch {}
   if(session){
     await onAuthSuccess(session);
@@ -2425,8 +2427,9 @@ function showApp(){
   document.getElementById('app').style.display='flex';
 }
 
-async function onAuthSuccess(session){
-  currentUser = session.user;
+async function onAuthSuccess(authSession){
+  session = authSession;
+  currentUser = authSession.user;
   // Profile lives in the LOCAL supabase (films, vip flag, expired_at). When
   // the user logged in via external, the auth user_id may differ from local;
   // worker's /api/me handles cross-project lookup by email, so we always go
@@ -3213,9 +3216,20 @@ function toggleWatchlist(id){
   localStorage.setItem('zaein_watchlist', JSON.stringify(watchlist));
 }
 
+
 /* ════════════════════════════════════════════════════════════════════
    PLAYER
    ════════════════════════════════════════════════════════════════════ */
+async function fetchPlayback(film) {
+  if (!session) throw new Error('Login dulu');
+  const r = await fetch('/api/playback/' + encodeURIComponent(film.id), {
+    headers: { Authorization: 'Bearer ' + session.access_token },
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 403 && d && d.locked) return d;
+  if (!r.ok || !d.ok) throw new Error(d.error || d.message || 'Gagal membuka video');
+  return d;
+}
 async function openFilm(film, opts){
   opts = opts || {};
      const vipMode = !!opts.vipMode;
@@ -3233,6 +3247,20 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
   }
 
   currentFilm = film;
+  let playback;
+  try{
+    playback = await fetchPlayback(film);
+  }catch(e){
+    showToast(e.message, 'error');
+    return;
+  }
+  if(playback.locked){
+    if(playback.reason === 'episode_locked') openAccessModal(film);
+    else showVipLocked(film);
+    showToast(playback.message || 'Konten terkunci', 'error');
+    return;
+  }
+  currentFilm._playback = playback;
   currentResumeFrom = opts.resumeFrom || 0;
   // Kalau gak ada explicit resume, ambil dari Continue Watching kalau ada
   if(!opts.resumeFrom){
@@ -3300,7 +3328,7 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
 
   // Auto search subsource — only for legacy (non-iframe) films. The iframe
   // ships its own subtitle picker so we don't need ours.
-  if(!film.video_url){
+  if(!(film._playback && film._playback.video_url)){
     setTimeout(()=>subsourceSearch(), 300);
   }
 
@@ -3568,7 +3596,7 @@ async function loadVideo(film){
   // Single-player mode: every film plays via the video host iframe.
   // Films missing video_url are misconfigured — surface a clear toast
   // instead of silently rendering a blank iframe.
-  if(film && film.video_url){
+  if(film && film._playback && film._playback.video_url){
     return loadVideoHost(film);
   }
   showToast('Film ini belum punya video. Hubungi admin.', 'error');
@@ -3619,7 +3647,7 @@ async function loadVideoHost(film){
   if(subBtn) subBtn.style.display = 'none';
 
   resetPreviewGate();
-  const hasFullAccess = userHasFilmAccess(film);
+  const hasFullAccess = film._playback && film._playback.access === 'full';
   const fullBar = document.getElementById('fullAccessBar');
   if(fullBar) fullBar.style.display = hasFullAccess ? 'none' : 'flex';
 
@@ -3631,7 +3659,8 @@ async function loadVideoHost(film){
     // normalize. If we cannot extract a host video id, refuse to render
     // the iframe instead of feeding a relative path that would self-embed
     // webstream.
-    const src = _normalizeHostEmbedUrl(film.video_url, currentPlayerTier === 'vip');
+    const rawVideoUrl = (film._playback && film._playback.video_url) || film.video_url;
+    const src = _normalizeHostEmbedUrl(rawVideoUrl, currentPlayerTier === 'vip');
     if(src){
   fr.style.display = 'block';
 
@@ -5206,7 +5235,7 @@ function checkoutCart(){ if(!cart.length){ showToast('Keranjang kosong','error')
 function renderCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
 function showPreviewGate(reason){ const gate=document.getElementById('previewGate'); if(!gate) return; document.getElementById('previewGateTitle').textContent=reason||'Preview selesai'; document.getElementById('previewGateMsg').textContent='Silahkan daftar VIP atau beli akses full untuk lanjut menonton.'; gate.classList.add('show'); try{ document.getElementById('vhFrame').src='about:blank'; }catch{} }
 function resetPreviewGate(){ clearTimeout(previewGateTimer); previewGateTimer=null; document.getElementById('previewGate')?.classList.remove('show'); }
-function armPreviewGate(film){ resetPreviewGate(); if(userHasFilmAccess(film)) return; const limit=film&&film.tipe==='series'?7*60*1000:5*60*1000; previewGateTimer=setTimeout(()=>showPreviewGate(film?.tipe==='series'?'Preview 7 menit selesai':'Preview 5 menit selesai'), limit); }
+function armPreviewGate(film){ resetPreviewGate(); const pb = film && film._playback; if(!pb || pb.access !== 'preview') return; const limit=(pb.preview_seconds || (film&&film.tipe==='series'?420:300))*1000; previewGateTimer=setTimeout(()=>showPreviewGate(film?.tipe==='series'?'Preview 7 menit selesai':'Preview 5 menit selesai'), limit); }
 bootstrap();
 </script>
 </body>

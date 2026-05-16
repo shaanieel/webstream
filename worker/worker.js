@@ -1156,7 +1156,19 @@ async function catalogList(request, env) {
 
   const r = await supabaseRest(env, finalPath);
   if (!r.ok) return err('Gagal load katalog', 500);
-  return json({ ok: true, user_tier: userTier, films: r.data || [] });
+  const isAdmin = isAdminEmail(env, user?.email || '');
+  const films = Array.isArray(r.data) ? r.data : [];
+  const safeFilms = isAdmin ? films : films.map(f => {
+    const copy = { ...f };
+    delete copy.video_url;
+    delete copy.preview_video_url;
+    delete copy.drive_link;
+    delete copy.drive_path;
+    delete copy.videos;
+    delete copy.audio_tracks;
+    return copy;
+  });
+  return json({ ok: true, user_tier: userTier, films: safeFilms });
 }
 
 // POST /api/admin/films — admin only
@@ -1725,6 +1737,42 @@ async function adminUserEntitlements(request, env, userId) {
   if (!admin) return err('Forbidden', 403);
   return json({ ok: true, entitlements: await userEntitlements(env, userId) });
 }
+
+async function playbackHandler(request, env, filmId) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const film = await getFilmById(env, filmId);
+  if (!film) return err('Film tidak ditemukan', 404);
+  const profile = await getUserProfile(env, user.id, user.email);
+  const isVip = isVipProfileActive(profile);
+  const entitled = await hasFilmEntitlement(env, profile?.user_id || user.id, film);
+  const hasFullAccess = isVip || entitled;
+  const isVipOnly = film.tier === 'vip';
+  const episodeNo = Number(film.episode || 1);
+  const isLockedEpisode = film.tipe === 'series' && episodeNo > 1 && !hasFullAccess;
+
+  if (isVipOnly && !isVip) {
+    return json({ ok: true, locked: true, reason: 'vip_required', message: 'Film ini hanya untuk member VIP aktif.' }, 403);
+  }
+  if (isLockedEpisode) {
+    return json({ ok: true, locked: true, reason: 'episode_locked', message: 'Free hanya bisa membuka episode 1. Beli season atau upgrade VIP.' }, 403);
+  }
+
+  const previewSeconds = film.tipe === 'series' ? 7 * 60 : 5 * 60;
+  const previewUrl = (typeof film.preview_video_url === 'string' && film.preview_video_url.trim()) ? film.preview_video_url.trim() : null;
+  const fullUrl = (typeof film.video_url === 'string' && film.video_url.trim()) ? film.video_url.trim() : null;
+  const videoUrl = hasFullAccess ? fullUrl : (previewUrl || fullUrl);
+  if (!videoUrl) return err('Film ini belum punya URL video.', 404);
+
+  return json({
+    ok: true,
+    locked: false,
+    access: hasFullAccess ? 'full' : 'preview',
+    preview_seconds: hasFullAccess ? null : previewSeconds,
+    has_real_preview: !hasFullAccess && !!previewUrl,
+    video_url: videoUrl,
+  });
+}
 // ───────────────────────────────────────────────────────────────────
 // Router
 // ───────────────────────────────────────────────────────────────────
@@ -1786,6 +1834,10 @@ export default {
       return catalogList(request, env);
     }
 
+    {
+      const m = pathname.match(/^\/api\/playback\/([^/]+)$/);
+      if (m && request.method === 'GET') return playbackHandler(request, env, m[1]);
+    }
     // === Identity ===
     if (pathname === '/api/me' && request.method === 'GET') {
       return meHandler(request, env);
