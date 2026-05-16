@@ -2353,6 +2353,7 @@ let CONFIG = null;
 // auth state lives in one storage key now.)
 let sb = null;
 let currentUser = null;
+let session = null;
 let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
@@ -2402,7 +2403,7 @@ async function bootstrap(){
     return;
   }
 
-  let session = null;
+  session = null;
   try { session = (await sb.auth.getSession()).data.session; } catch {}
   if(session){
     await onAuthSuccess(session);
@@ -2425,8 +2426,9 @@ function showApp(){
   document.getElementById('app').style.display='flex';
 }
 
-async function onAuthSuccess(session){
-  currentUser = session.user;
+async function onAuthSuccess(authSession){
+  session = authSession;
+  currentUser = authSession.user;
   // Profile lives in the LOCAL supabase (films, vip flag, expired_at). When
   // the user logged in via external, the auth user_id may differ from local;
   // worker's /api/me handles cross-project lookup by email, so we always go
