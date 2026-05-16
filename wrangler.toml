@@ -38,6 +38,10 @@ ADMIN_EMAILS = "sholehhuddin21@gmail.com"
 # (player4me.com/embed/<id>) tidak bisa kita pakai karena id space-nya
 # berbeda — yang ada di akun Player4Me kita HANYA reachable lewat custom
 # domain kita sendiri.
+PLAYER4ME_BASIC_DOMAIN = "zaeinstore.qzz.io"
+PLAYER4ME_VIP_DOMAIN = "zaeinvip.qzz.io"
+
+# sementara tetap simpan ini supaya kode lama/admin tidak pecah
 PLAYER4ME_PUBLIC_DOMAIN = "zaeinstore.qzz.io"
 
 # === Player4Me ===
