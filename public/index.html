@@ -1348,6 +1348,63 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     font-size:.88rem;
   }
 }
+/* Desktop/Laptop fix for VIP modal */
+@media(min-width:768px){
+  .vip-locked-box{
+    width:min(760px, calc(100vw - 48px));
+    max-height:88vh;
+    padding:42px 38px 34px;
+    overflow-y:auto;
+  }
+
+  .vip-locked-box h2{
+    font-size:1.85rem;
+  }
+
+  .vip-locked-box p{
+    max-width:520px;
+    font-size:1rem;
+  }
+
+  .vip-benefits{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+    margin:24px 0 26px;
+  }
+
+  .vip-benefit{
+    min-height:92px;
+    grid-template-columns:42px 1fr;
+    align-items:center;
+    text-align:left;
+    padding:14px 16px;
+  }
+
+  .vip-benefit.primary{
+    grid-column:1 / -1;
+    min-height:86px;
+  }
+
+  .vip-benefit iconify-icon{
+    font-size:30px;
+    justify-self:center;
+  }
+
+  .vip-benefit strong{
+    text-align:left;
+    font-size:.96rem;
+  }
+
+  .vip-benefit span{
+    text-align:left;
+    font-size:.8rem;
+  }
+
+  .vip-upgrade-btn{
+    width:390px;
+  }
+}
 /* ════════════════════════════════════════════════════════════════════
    MOBILE LAYOUT (< 768px)
    ════════════════════════════════════════════════════════════════════ */
