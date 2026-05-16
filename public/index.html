@@ -2890,7 +2890,7 @@ function renderEpListForSeason(season, activeId){
     const epTitle = filename || `Episode ${num || '?'}`;
     // TMDB still_path tetap dipakai untuk thumbnail kanan (kalau tersedia) — bukan untuk title.
     const still = t && t.still_path ? STILL_BASE + t.still_path : '';
-    const active = ep.id === activeId;
+    const active = String(ep.id) === String(activeId);
     const thumbStyle = still ? `style="background-image:url('${still}')"` : '';
     const placeholder = still ? '' : `<div class="ph">Ep ${num || '?'}</div>`;
     return `
@@ -2904,12 +2904,21 @@ function renderEpListForSeason(season, activeId){
     `;
   }).join('');
   list.querySelectorAll('.ep-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const id = card.dataset.id;
-      const next = eps.find(e => String(e.id) === String(id));
-      if(next) openFilm(next, { vipMode: currentPlayerTier === 'vip' });
+  card.addEventListener('click', () => {
+    const id = card.dataset.id;
+    const next = eps.find(e => String(e.id) === String(id));
+
+    if(!next) return;
+
+    // Jangan reload kalau klik episode yang sama.
+    if(currentFilm && String(currentFilm.id) === String(next.id)) return;
+
+    openFilm(next, {
+      vipMode: currentPlayerTier === 'vip',
+      resumeFrom: 0
     });
   });
+});
 }
 
 async function fetchTmdbSeasonAndRerender(season, activeId){
@@ -3037,13 +3046,29 @@ async function loadVideoHost(film){
     // webstream.
     const src = _normalizeHostEmbedUrl(film.video_url, currentPlayerTier === 'vip');
     if(src){
+  fr.style.display = 'block';
+
+  // Player4Me memakai URL hash: https://domain/#videoid.
+  // Kalau cuma ganti hash di iframe yang sama, browser kadang tidak reload player.
+  // Jadi kita paksa reload iframe dengan about:blank dulu, lalu set URL baru.
+  const lastSrc = fr.dataset.currentSrc || '';
+
+  if(lastSrc !== src){
+    fr.dataset.currentSrc = src;
+    fr.src = 'about:blank';
+
+    setTimeout(() => {
       fr.src = src;
-      fr.style.display = 'block';
-    } else {
-      fr.removeAttribute('src');
-      fr.style.display = 'none';
-      showToast('URL video film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
-    }
+    }, 80);
+  } else {
+    fr.src = src;
+  }
+} else {
+  fr.removeAttribute('src');
+  fr.dataset.currentSrc = '';
+  fr.style.display = 'none';
+  showToast('URL video film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
+}
   }
 
   // VIP extras (download + external player + drive/gdrive link) — ONLY when
