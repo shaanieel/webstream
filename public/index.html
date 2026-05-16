@@ -1580,6 +1580,13 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .full-access-bar strong{font-size:.92rem;}
 .full-access-bar span{color:var(--muted);font-size:.78rem;}
 .btn-full-access{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f5c518,#f59e0b);color:#17120a;font-weight:900;border-radius:10px;padding:10px 14px;box-shadow:0 10px 28px rgba(245,158,11,.25);}
+.preview-countdown{position:absolute;top:14px;left:50%;transform:translateX(-50%) translateY(-8px);z-index:8;display:flex;align-items:center;gap:10px;padding:8px 13px;border-radius:999px;background:rgba(10,10,15,.78);border:1px solid rgba(245,197,24,.45);box-shadow:0 12px 34px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease,border-color .18s ease;}
+.preview-countdown.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.preview-countdown.danger{border-color:rgba(239,68,68,.72);animation:previewPulse .9s ease-in-out infinite;}
+.preview-countdown small{font-size:.68rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+.preview-countdown span{font-size:.95rem;font-weight:900;color:#facc15;font-variant-numeric:tabular-nums;}
+.preview-countdown.danger span{color:#fb7185;}
+@keyframes previewPulse{50%{box-shadow:0 0 0 4px rgba(239,68,68,.16),0 12px 34px rgba(0,0,0,.4);}}
 .preview-gate{position:absolute;inset:0;z-index:9;display:none;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,rgba(245,197,24,.18),rgba(0,0,0,.92) 55%);padding:24px;text-align:center;}
 .preview-gate.show{display:flex;}
 .preview-gate-box{max-width:480px;background:rgba(21,21,31,.92);border:1px solid rgba(245,197,24,.38);border-radius:16px;padding:26px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
@@ -2141,6 +2148,11 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
           allowfullscreen
           style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:5;"
         ></iframe>
+
+        <div class="preview-countdown" id="previewCountdown">
+          <small>Preview</small>
+          <span id="previewCountdownTime">05:00</span>
+        </div>
 
         <div class="preview-gate" id="previewGate">
           <div class="preview-gate-box">
@@ -3239,12 +3251,6 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
   showVipLocked(film);
   return;
 }
-  if(isSeriesLockedForFree(film)){
-    currentFilm = film;
-    openAccessModal(film);
-    showToast('Episode 2 dan seterusnya terkunci. Beli season atau upgrade VIP.', 'error');
-    return;
-  }
 
   currentFilm = film;
   let playback;
@@ -3255,7 +3261,7 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
     return;
   }
   if(playback.locked){
-    if(playback.reason === 'episode_locked') openAccessModal(film);
+    if(playback.reason === 'episode_locked' || playback.reason === 'preview_expired') openAccessModal(film);
     else showVipLocked(film);
     showToast(playback.message || 'Konten terkunci', 'error');
     return;
@@ -5204,6 +5210,7 @@ function showToast(msg, type){
 
 /* Payments, cart, collections, and preview gate */
 let previewGateTimer = null;
+let previewCountdownTimer = null;
 function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
 function filmEntitlementKey(f){ if(!f) return ''; if(f.tipe === 'series') return `series:${f.judul || f.tmdb_id || f.id}:season:${f.season || 1}`; return `movie:${f.id}`; }
 function userHasFilmAccess(f){ if(!f) return false; if(currentTier === 'vip') return true; const key = filmEntitlementKey(f); return currentEntitlements.some(e => e.entitlement_key === key); }
@@ -5233,9 +5240,64 @@ function removeCartItem(key){ cart=cart.filter(i=>i.key!==key); localStorage.set
 function renderCartPage(){ const list=document.getElementById('cartList'); if(!list) return; if(!cart.length){ list.innerHTML='<div class="empty-state">Keranjang masih kosong.</div>'; document.getElementById('cartTotal').textContent='Rp0'; return; } list.innerHTML=cart.map(i=>`<div class="cart-row"><div><div class="cart-row-title">${escapeHtml(i.title)}</div><div class="cart-row-meta">${i.type==='series'?'Season '+(i.season||1):'Movie'} • ${rupiah(i.price)}</div></div><button class="action-btn action-delete" onclick="removeCartItem('${escapeHtml(i.key)}')">Hapus</button></div>`).join(''); document.getElementById('cartTotal').textContent=rupiah(cart.reduce((s,i)=>s+Number(i.price||0),0)); }
 function checkoutCart(){ if(!cart.length){ showToast('Keranjang kosong','error'); return; } checkoutFilm(cart[0].id); }
 function renderCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
-function showPreviewGate(reason){ const gate=document.getElementById('previewGate'); if(!gate) return; document.getElementById('previewGateTitle').textContent=reason||'Preview selesai'; document.getElementById('previewGateMsg').textContent='Silahkan daftar VIP atau beli akses full untuk lanjut menonton.'; gate.classList.add('show'); try{ document.getElementById('vhFrame').src='about:blank'; }catch{} }
-function resetPreviewGate(){ clearTimeout(previewGateTimer); previewGateTimer=null; document.getElementById('previewGate')?.classList.remove('show'); }
-function armPreviewGate(film){ resetPreviewGate(); const pb = film && film._playback; if(!pb || pb.access !== 'preview') return; const limit=(pb.preview_seconds || (film&&film.tipe==='series'?420:300))*1000; previewGateTimer=setTimeout(()=>showPreviewGate(film?.tipe==='series'?'Preview 7 menit selesai':'Preview 5 menit selesai'), limit); }
+function fmtPreviewTime(totalSeconds){
+  const s = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return String(m).padStart(2,'0') + ':' + String(r).padStart(2,'0');
+}
+function stopPreviewCountdown(){
+  clearInterval(previewCountdownTimer);
+  previewCountdownTimer = null;
+  const el = document.getElementById('previewCountdown');
+  if(el) el.classList.remove('show','danger');
+}
+function startPreviewCountdown(film){
+  stopPreviewCountdown();
+  const pb = film && film._playback;
+  if(!pb || pb.access !== 'preview' || !pb.preview_expires_at) return;
+  const box = document.getElementById('previewCountdown');
+  const time = document.getElementById('previewCountdownTime');
+  if(!box || !time) return;
+  const label = box.querySelector('small');
+  if(label) label.textContent = film && film.tipe === 'series' ? 'Preview 7 menit' : 'Preview 5 menit';
+  const tick = () => {
+    const left = Math.ceil((new Date(pb.preview_expires_at).getTime() - Date.now()) / 1000);
+    time.textContent = fmtPreviewTime(left);
+    box.classList.add('show');
+    box.classList.toggle('danger', left <= 30);
+    if(left <= 0){
+      showPreviewGate(film && film.tipe === 'series' ? 'Preview 7 menit selesai' : 'Preview 5 menit selesai');
+    }
+  };
+  tick();
+  previewCountdownTimer = setInterval(tick, 1000);
+}
+function showPreviewGate(reason){
+  stopPreviewCountdown();
+  const gate=document.getElementById('previewGate');
+  if(!gate) return;
+  document.getElementById('previewGateTitle').textContent=reason||'Preview selesai';
+  document.getElementById('previewGateMsg').textContent='Silahkan daftar VIP atau beli akses full untuk lanjut menonton.';
+  gate.classList.add('show');
+  try{ document.getElementById('vhFrame').src='about:blank'; }catch{}
+}
+function resetPreviewGate(){
+  clearTimeout(previewGateTimer);
+  previewGateTimer=null;
+  stopPreviewCountdown();
+  document.getElementById('previewGate')?.classList.remove('show');
+}
+function armPreviewGate(film){
+  resetPreviewGate();
+  const pb = film && film._playback;
+  if(!pb || pb.access !== 'preview') return;
+  startPreviewCountdown(film);
+  const fallbackSeconds = pb.preview_remaining_seconds || pb.preview_seconds || (film && film.tipe === 'series' ? 420 : 300);
+  const expiresAt = pb.preview_expires_at ? new Date(pb.preview_expires_at).getTime() : Date.now() + (fallbackSeconds * 1000);
+  const limit = Math.max(0, expiresAt - Date.now());
+  previewGateTimer=setTimeout(()=>showPreviewGate(film && film.tipe === 'series' ? 'Preview 7 menit selesai' : 'Preview 5 menit selesai'), limit);
+}
 bootstrap();
 </script>
 </body>
