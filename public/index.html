@@ -2209,13 +2209,25 @@ function findFilmByRouteId(id){
 function parseRoute(){
   const p = (location.pathname || '/').replace(/\/+$/,'') || '/';
   if(p === '' || p === '/') return { kind:'page', name:'home' };
+
   const parts = p.split('/').filter(Boolean);
-  if(parts[0] === 'film' && parts[1]){
-    return { kind:'film', id: parts[1] };
+
+  // VIP route:
+  // /film/vip/159
+  if(parts[0] === 'film' && parts[1] === 'vip' && parts[2]){
+    return { kind:'film', id: parts[2], vipMode: true };
   }
+
+  // Basic route:
+  // /film/159
+  if(parts[0] === 'film' && parts[1]){
+    return { kind:'film', id: parts[1], vipMode: false };
+  }
+
   if(VALID_PAGES.includes(parts[0])){
     return { kind:'page', name: parts[0] };
   }
+
   return { kind:'page', name: 'home' };
 }
 
