@@ -393,6 +393,20 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   gap:18px;
 }
 .row .grid{grid-template-columns:repeat(7,1fr);}
+.tmdb-rail{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:180px;
+  grid-template-columns:none !important;
+  gap:10px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:2px 0 10px;
+  scroll-snap-type:x proximity;
+  scrollbar-width:none;
+}
+.tmdb-rail::-webkit-scrollbar{display:none;}
+.tmdb-rail .card{scroll-snap-align:start;}
 .card{
   cursor:pointer;
   display:block;
@@ -450,6 +464,9 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   display:flex;align-items:center;gap:3px;
   border:1px solid rgba(245,197,24,.3);
 }
+.rating-badge svg{width:13px;height:13px;color:#22c55e;fill:#22c55e;stroke-width:2.6;}
+.rating-badge.low svg{color:#f5c518;fill:#f5c518;}
+.tmdb-locked-note{font-size:.68rem;color:var(--muted-2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .tier-badge{
   position:absolute;top:8px;right:8px;
   background:linear-gradient(135deg,#f5c518,#daa520);
@@ -1850,31 +1867,48 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
         <div class="grid" id="continueWatchingGrid"></div>
       </div>
 
-      <div class="row">
+      <div class="row tmdb-row">
         <div class="row-head">
-          <div class="row-title">Trending Now</div>
+          <div class="row-title">Trending Movies</div>
           <div class="row-actions">
-            <button class="row-arrow" onclick="rowScroll('trendingGrid',-1)" aria-label="Prev">‹</button>
-            <button class="row-arrow" onclick="rowScroll('trendingGrid',1)" aria-label="Next">›</button>
+            <button class="row-arrow" onclick="rowScroll('trendingMoviesGrid',-1)" aria-label="Prev">‹</button>
+            <button class="row-arrow" onclick="rowScroll('trendingMoviesGrid',1)" aria-label="Next">›</button>
           </div>
         </div>
-        <div class="grid" id="trendingGrid"></div>
+        <div class="grid tmdb-rail" id="trendingMoviesGrid"></div>
       </div>
 
-      <div class="row">
+      <div class="row tmdb-row">
         <div class="row-head">
-          <div class="row-title">Movies</div>
-          <button class="row-arrow" onclick="goPage('movies')" aria-label="See all" style="width:auto;padding:0 12px;">Lihat semua →</button>
+          <div class="row-title">Trending Shows</div>
+          <div class="row-actions">
+            <button class="row-arrow" onclick="rowScroll('trendingShowsGrid',-1)" aria-label="Prev">‹</button>
+            <button class="row-arrow" onclick="rowScroll('trendingShowsGrid',1)" aria-label="Next">›</button>
+          </div>
         </div>
-        <div class="grid" id="moviesGrid"></div>
+        <div class="grid tmdb-rail" id="trendingShowsGrid"></div>
       </div>
 
-      <div class="row">
+      <div class="row tmdb-row">
         <div class="row-head">
-          <div class="row-title">TV Shows</div>
-          <button class="row-arrow" onclick="goPage('tv')" aria-label="See all" style="width:auto;padding:0 12px;">Lihat semua →</button>
+          <div class="row-title">Top Rated Movies</div>
+          <div class="row-actions">
+            <button class="row-arrow" onclick="rowScroll('topMoviesGrid',-1)" aria-label="Prev">‹</button>
+            <button class="row-arrow" onclick="rowScroll('topMoviesGrid',1)" aria-label="Next">›</button>
+          </div>
         </div>
-        <div class="grid" id="tvGrid"></div>
+        <div class="grid tmdb-rail" id="topMoviesGrid"></div>
+      </div>
+
+      <div class="row tmdb-row">
+        <div class="row-head">
+          <div class="row-title">Top Rated Shows</div>
+          <div class="row-actions">
+            <button class="row-arrow" onclick="rowScroll('topShowsGrid',-1)" aria-label="Prev">‹</button>
+            <button class="row-arrow" onclick="rowScroll('topShowsGrid',1)" aria-label="Next">›</button>
+          </div>
+        </div>
+        <div class="grid tmdb-rail" id="topShowsGrid"></div>
       </div>
     </section>
 
@@ -2394,6 +2428,9 @@ let currentPlayerTier = 'basic'; // basic | vip
 let currentTmdbExtras = null;
 let currentTrailerKey = null;
 let _currentSubBlobUrl = null;
+let tmdbHome = { hero: [], rows: {} };
+let heroSlideIndex = 0;
+let heroSlideTimer = null;
 // Legacy globals — kept as `null` shims so dead legacy player functions
 // (teardownEngine1/2 etc.) don't ReferenceError if called by accident.
 // All playback now goes through loadVideoHost().
@@ -2951,10 +2988,11 @@ function toggleSidebarCollapse(){
    ════════════════════════════════════════════════════════════════════ */
 async function loadCatalog(){
   // Skeleton
-  ['trendingGrid','moviesGrid','tvGrid'].forEach(id=>{
+  ['trendingMoviesGrid','trendingShowsGrid','topMoviesGrid','topShowsGrid'].forEach(id=>{
     const g=document.getElementById(id);
+    if(!g) return;
     g.innerHTML='';
-    for(let i=0;i<7;i++){
+    for(let i=0;i<8;i++){
       const c=document.createElement('div');
       c.innerHTML='<div class="card-poster skeleton"></div><div class="card-meta"><span></span><span></span></div><div class="card-title">&nbsp;</div>';
       g.appendChild(c);
@@ -2977,8 +3015,21 @@ async function loadCatalog(){
 
   // Enrich poster from TMDB if missing
   await enrichTmdbPosters();
+  await loadTmdbHome();
 
   renderHome();
+}
+
+async function loadTmdbHome(){
+  try{
+    const r = await fetch('/api/tmdb/home');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) throw new Error(d.error || 'Gagal memuat TMDB home');
+    tmdbHome = { hero: d.hero || [], rows: d.rows || {} };
+  }catch(e){
+    console.warn('[tmdb-home]', e);
+    tmdbHome = { hero: [], rows: {} };
+  }
 }
 
 async function enrichTmdbPosters(){
@@ -3062,32 +3113,42 @@ function _dedupeSeries(items){
 
 function renderHome(){
   const mainFilms = _dedupeSeries(allFilms.filter(_mainGridFilter));
-  const movies = mainFilms.filter(f=>f.tipe!=='series');
-  const tvs = mainFilms.filter(f=>f.tipe==='series');
 
-  // Hero: pakai film pertama dengan backdrop (termasuk VIP — oke sebagai teaser)
-  const heroFilm = allFilms.find(f=>f.backdrop_url) || allFilms[0];
+  const heroItems = (tmdbHome.hero && tmdbHome.hero.length) ? tmdbHome.hero : mainFilms.filter(f=>f.backdrop_url).slice(0,10);
+  const heroFilm = heroItems[heroSlideIndex % Math.max(1, heroItems.length)] || allFilms.find(f=>f.backdrop_url) || allFilms[0];
   if(heroFilm){
-    const hero = document.getElementById('hero');
-    const heroBg = document.getElementById('heroBg');
-    const heroTitle = document.getElementById('heroTitle');
-    hero.classList.remove('is-animated');
-    heroBg.style.backgroundImage = heroFilm.backdrop_url ? `url('${heroFilm.backdrop_url}')` : (heroFilm.poster_url ? `url('${heroFilm.poster_url}')` : '');
-    if(heroFilm.logo_url){
-      heroTitle.innerHTML = `<img class="hero-logo-img" src="${escapeHtml(heroFilm.logo_url)}" alt="${escapeHtml(heroFilm.judul||'ZAEINSTREAM')}">`;
-    }else{
-      heroTitle.innerHTML = `<span class="hero-title-text">${escapeHtml(heroFilm.judul || 'ZAEINSTREAM')}</span>`;
-    }
-    document.getElementById('heroDesc').textContent = (heroFilm.overview||'').slice(0,160) || 'Platform streaming eksklusif.';
-    hero._film = heroFilm;
-    void hero.offsetWidth;
-    requestAnimationFrame(()=>hero.classList.add('is-animated'));
+    renderHeroSlide(heroFilm);
+  }
+  if(heroSlideTimer) clearInterval(heroSlideTimer);
+  if(heroItems.length > 1){
+    heroSlideTimer = setInterval(()=>{
+      heroSlideIndex = (heroSlideIndex + 1) % heroItems.length;
+      renderHeroSlide(heroItems[heroSlideIndex]);
+    }, 6500);
   }
 
   renderContinueWatching();
-  renderGrid('trendingGrid', mainFilms.slice(0,14));
-  renderGrid('moviesGrid', movies.slice(0,7));
-  renderGrid('tvGrid', tvs.slice(0,7));
+  renderTmdbGrid('trendingMoviesGrid', tmdbHome.rows.trending_movies || []);
+  renderTmdbGrid('trendingShowsGrid', tmdbHome.rows.trending_shows || []);
+  renderTmdbGrid('topMoviesGrid', tmdbHome.rows.top_movies || []);
+  renderTmdbGrid('topShowsGrid', tmdbHome.rows.top_shows || []);
+}
+
+function renderHeroSlide(heroFilm){
+  const hero = document.getElementById('hero');
+  const heroBg = document.getElementById('heroBg');
+  const heroTitle = document.getElementById('heroTitle');
+  hero.classList.remove('is-animated');
+  heroBg.style.backgroundImage = heroFilm.backdrop_url ? `url('${heroFilm.backdrop_url}')` : (heroFilm.poster_url ? `url('${heroFilm.poster_url}')` : '');
+  if(heroFilm.logo_url){
+    heroTitle.innerHTML = `<img class="hero-logo-img" src="${escapeHtml(heroFilm.logo_url)}" alt="${escapeHtml(heroFilm.judul||'ZAEINSTREAM')}">`;
+  }else{
+    heroTitle.innerHTML = `<span class="hero-title-text">${escapeHtml(heroFilm.judul || 'ZAEINSTREAM')}</span>`;
+  }
+  document.getElementById('heroDesc').textContent = (heroFilm.overview||'').slice(0,170) || 'Platform streaming eksklusif.';
+  hero._film = heroFilm;
+  void hero.offsetWidth;
+  requestAnimationFrame(()=>hero.classList.add('is-animated'));
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -3159,14 +3220,40 @@ function renderGrid(id, items){
   });
 }
 
+function renderTmdbGrid(id, items){
+  const g=document.getElementById(id);
+  if(!g) return;
+  if(!items.length){
+    g.innerHTML='<div class="empty-state" style="min-width:260px;"><div class="emoji">🎬</div><h3>TMDB kosong</h3><p>Coba refresh lagi nanti.</p></div>';
+    return;
+  }
+  g.innerHTML = items.slice(0,20).map(f=>cardHTML(f, false, { tmdb:true })).join('');
+  g.querySelectorAll('[data-film-id]').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const localId = el.dataset.localId;
+      if(localId){
+        const film = allFilms.find(x=>String(x.id)===String(localId));
+        if(film) return openFilm(film);
+      }
+      showToast('Film ini belum tersedia di katalog. Admin bisa hide dari web admin kalau belum mau ditampilkan.', 'error');
+    });
+  });
+}
+
+function lucideStarIcon(low){
+  return `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.12 2.12 0 0 0 1.595 1.16l5.166.751a.53.53 0 0 1 .294.904l-3.738 3.644a2.12 2.12 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.77.56l-4.62-2.428a2.12 2.12 0 0 0-1.973 0L6.39 21.01a.53.53 0 0 1-.77-.56l.882-5.14a2.12 2.12 0 0 0-.611-1.878L2.154 9.79a.53.53 0 0 1 .294-.904l5.166-.751a2.12 2.12 0 0 0 1.595-1.16z"/></svg>`;
+}
+
 function cardHTML(f, vipStyle, opts){
   opts = opts || {};
   const poster = f.poster_url || '';
   const year = f.tahun || '—';
   const type = (f.tipe==='series'?'TV':'MOVIE');
-  const rating = f.rating ? `<div class="rating-badge"><span>★</span>${f.rating}</div>` : '';
+  const lowRating = Number(f.rating || 0) < 7;
+  const rating = f.rating ? `<div class="rating-badge${lowRating?' low':''}">${lucideStarIcon(lowRating)}${f.rating}</div>` : '';
   const tier = (f.tier==='vip') ? '<div class="tier-badge">👑 VIP</div>' : '';
   const cls = 'card' + (vipStyle ? ' vip-card' : '');
+  const idAttr = opts.tmdb ? `data-film-id="${escapeHtml(f.id)}" data-local-id="${f.local_id ? escapeHtml(f.local_id) : ''}"` : `data-film-id="${f.id}"`;
   const posterHTML = poster
     ? `<img src="${poster}" loading="lazy" alt="${escapeHtml(f.judul||'')}"/>`
     : '';
@@ -3174,8 +3261,9 @@ function cardHTML(f, vipStyle, opts){
   const cwDelete = opts.cw ? `<button class="card-cw-delete show" data-cw-delete="${f.id}" aria-label="Hapus dari Continue Watching" onclick="event.stopPropagation();removeContinueWatching('${f.id}');">×</button>` : '';
   const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
   const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
+  const tmdbNote = opts.tmdb && !f.is_available ? '<div class="tmdb-locked-note">Belum ada di katalog</div>' : '';
   return `
-    <div class="${cls}" data-film-id="${f.id}" tabindex="0">
+    <div class="${cls}" ${idAttr} tabindex="0">
       <div class="card-poster">
         ${rating}${tier}${cwDelete}
         <div class="type-badge">${type}</div>
@@ -3185,6 +3273,7 @@ function cardHTML(f, vipStyle, opts){
       </div>
       <div class="card-meta"><span>${type}</span><span>${year}</span></div>
       <div class="card-title">${escapeHtml(f.judul||'')}</div>
+      ${tmdbNote}
     </div>
   `;
 }
@@ -3249,11 +3338,16 @@ function onSearchInput(){
    ════════════════════════════════════════════════════════════════════ */
 function heroPlay(){
   const f=document.getElementById('hero')._film;
-  if(f) openFilm(f);
+  if(!f) return;
+  const film = f.local_id ? allFilms.find(x=>String(x.id)===String(f.local_id)) : f;
+  if(film && !film.source) openFilm(film);
+  else showToast('Film ini belum tersedia di katalog.', 'error');
 }
 function heroAddWatchlist(){
   const f=document.getElementById('hero')._film;
-  if(f) toggleWatchlist(f.id);
+  const film = f && f.local_id ? allFilms.find(x=>String(x.id)===String(f.local_id)) : f;
+  if(film && !film.source) toggleWatchlist(film.id);
+  else showToast('Film ini belum tersedia di katalog.', 'error');
 }
 
 /* ════════════════════════════════════════════════════════════════════
