@@ -1754,8 +1754,6 @@ async function getOrCreatePreviewSession(env, userId, film, limitSeconds) {
   if (existing.ok && Array.isArray(existing.data) && existing.data.length) {
     return existing.data[0];
   }
-  const now = new Date();
-  const expires = new Date(now.getTime() + limitSeconds * 1000).toISOString();
   const created = await supabaseRest(env, '/preview_sessions', {
     method: 'POST',
     body: JSON.stringify({
@@ -1764,13 +1762,83 @@ async function getOrCreatePreviewSession(env, userId, film, limitSeconds) {
       preview_key: key,
       title: film.judul || null,
       limit_seconds: limitSeconds,
-      started_at: now.toISOString(),
-      expires_at: expires,
+      remaining_seconds: limitSeconds,
+      is_running: false,
     }),
   });
   if (created.ok && Array.isArray(created.data) && created.data.length) return created.data[0];
   if (created.ok && created.data) return created.data;
   throw new Error('Gagal membuat sesi preview');
+}
+
+async function startPreviewSession(env, session) {
+  const now = new Date();
+  let remaining = Number(session.remaining_seconds ?? session.limit_seconds ?? 0);
+  if (session.is_running && session.expires_at) {
+    remaining = Math.max(0, Math.ceil((new Date(session.expires_at).getTime() - Date.now()) / 1000));
+  }
+  if (remaining <= 0) {
+    await supabaseRest(env, `/preview_sessions?id=eq.${encodeURIComponent(session.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        remaining_seconds: 0,
+        is_running: false,
+        expires_at: null,
+        updated_at: now.toISOString(),
+      }),
+    });
+    return { ...session, remaining_seconds: 0, is_running: false, expires_at: null };
+  }
+  const expiresAt = new Date(now.getTime() + remaining * 1000).toISOString();
+  const updated = await supabaseRest(env, `/preview_sessions?id=eq.${encodeURIComponent(session.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      remaining_seconds: remaining,
+      is_running: true,
+      started_at: now.toISOString(),
+      expires_at: expiresAt,
+      updated_at: now.toISOString(),
+    }),
+  });
+  const row = updated.ok && Array.isArray(updated.data) && updated.data.length ? updated.data[0] : session;
+  return { ...row, remaining_seconds: remaining, is_running: true, started_at: now.toISOString(), expires_at: expiresAt };
+}
+
+async function stopPreviewHandler(request, env, filmId) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const film = await getFilmById(env, filmId);
+  if (!film) return err('Film tidak ditemukan', 404);
+  const profile = await getUserProfile(env, user.id, user.email);
+  const isVip = isVipProfileActive(profile);
+  const entitled = await hasFilmEntitlement(env, profile?.user_id || user.id, film);
+  if (isVip || entitled) return json({ ok: true, skipped: true });
+
+  const key = previewKeyForFilm(film);
+  const userId = profile?.user_id || user.id;
+  const existing = await supabaseRest(
+    env,
+    `/preview_sessions?user_id=eq.${encodeURIComponent(userId)}&preview_key=eq.${encodeURIComponent(key)}&select=*&limit=1`
+  );
+  const session = existing.ok && Array.isArray(existing.data) && existing.data.length ? existing.data[0] : null;
+  if (!session) return json({ ok: true, skipped: true });
+
+  let remaining = Number(session.remaining_seconds ?? session.limit_seconds ?? 0);
+  if (session.is_running && session.expires_at) {
+    remaining = Math.max(0, Math.ceil((new Date(session.expires_at).getTime() - Date.now()) / 1000));
+  }
+  const now = new Date().toISOString();
+  const updated = await supabaseRest(env, `/preview_sessions?id=eq.${encodeURIComponent(session.id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      remaining_seconds: remaining,
+      is_running: false,
+      expires_at: null,
+      updated_at: now,
+    }),
+  });
+  if (!updated.ok) return err('Gagal menyimpan sisa preview', 500);
+  return json({ ok: true, preview_remaining_seconds: remaining });
 }
 async function playbackHandler(request, env, filmId) {
   const user = await getUserFromAuth(request, env);
@@ -1803,10 +1871,11 @@ async function playbackHandler(request, env, filmId) {
   if (!hasFullAccess) {
     try {
       previewSession = await getOrCreatePreviewSession(env, profile?.user_id || user.id, film, previewSeconds);
+      previewSession = await startPreviewSession(env, previewSession);
     } catch (e) {
       return err(e.message || 'Preview belum siap', 500);
     }
-    remainingSeconds = Math.max(0, Math.ceil((new Date(previewSession.expires_at).getTime() - Date.now()) / 1000));
+    remainingSeconds = Math.max(0, Number(previewSession.remaining_seconds || 0));
     if (remainingSeconds <= 0) {
       return json({
         ok: true,
@@ -1895,6 +1964,10 @@ export default {
     {
       const m = pathname.match(/^\/api\/playback\/([^/]+)$/);
       if (m && request.method === 'GET') return playbackHandler(request, env, m[1]);
+    }
+    {
+      const m = pathname.match(/^\/api\/playback\/([^/]+)\/stop$/);
+      if (m && request.method === 'POST') return stopPreviewHandler(request, env, m[1]);
     }
     // === Identity ===
     if (pathname === '/api/me' && request.method === 'GET') {
