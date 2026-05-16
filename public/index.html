@@ -1028,6 +1028,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .vip-locked-box{
   position:relative;
   width:min(560px,100%);
+  max-width:none;
   max-height:92vh;
   overflow:hidden;
   background:
@@ -1351,60 +1352,81 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 /* Desktop/Laptop fix for VIP modal */
 @media(min-width:768px){
   .vip-locked-box{
-    width:min(760px, calc(100vw - 48px));
-    max-height:88vh;
-    padding:42px 38px 34px;
+    width:min(960px, calc(100vw - 48px));
+    max-height:92vh;
+    padding:30px 34px 26px;
     overflow-y:auto;
   }
 
+  .vip-crown-wrap{
+    width:64px;
+    height:64px;
+    margin:0 auto 10px;
+  }
+
+  .vip-main-crown{
+    font-size:44px;
+  }
+
   .vip-locked-box h2{
-    font-size:1.85rem;
+    font-size:1.6rem;
+    margin:0 0 6px;
   }
 
   .vip-locked-box p{
-    max-width:520px;
-    font-size:1rem;
+    max-width:600px;
+    font-size:.94rem;
+    line-height:1.5;
+    margin:0 auto 14px;
   }
 
   .vip-benefits{
     display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:12px;
-    margin:24px 0 26px;
+    grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+    gap:10px;
+    margin:14px 0 18px;
   }
 
   .vip-benefit{
-    min-height:92px;
-    grid-template-columns:42px 1fr;
+    min-height:0;
+    grid-template-columns:30px 1fr;
     align-items:center;
     text-align:left;
-    padding:14px 16px;
+    padding:10px 12px;
   }
 
   .vip-benefit.primary{
     grid-column:1 / -1;
-    min-height:86px;
+    min-height:0;
+    padding:10px 14px;
   }
 
   .vip-benefit iconify-icon{
-    font-size:30px;
+    font-size:24px;
     justify-self:center;
   }
 
   .vip-benefit strong{
     text-align:left;
-    font-size:.96rem;
+    font-size:.88rem;
+    line-height:1.2;
   }
 
   .vip-benefit span{
     text-align:left;
-    font-size:.8rem;
+    font-size:.72rem;
+    line-height:1.35;
+    margin-top:2px;
   }
 
   .vip-upgrade-btn{
-    width:390px;
+    width:min(380px, 100%);
+    height:50px;
+    margin:4px auto 0;
+    font-size:.92rem;
   }
 }
+
 /* ════════════════════════════════════════════════════════════════════
    MOBILE LAYOUT (< 768px)
    ════════════════════════════════════════════════════════════════════ */
