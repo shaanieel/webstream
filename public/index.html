@@ -347,17 +347,32 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   position:relative;border-radius:16px;overflow:hidden;
   margin-bottom:36px;height:340px;
   background:linear-gradient(135deg,#0d1c35,#1a3050);
+  isolation:isolate;
 }
-.hero-bg{position:absolute;inset:0;background-size:cover;background-position:center top;opacity:.7;}
-.hero-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,10,15,.95),rgba(10,10,15,.5) 50%,transparent);}
-.hero-inner{position:relative;height:100%;padding:36px;display:flex;flex-direction:column;justify-content:flex-end;max-width:560px;}
-.hero-title{font-size:2.6rem;font-weight:800;letter-spacing:-1px;line-height:1;margin-bottom:14px;}
-.hero-desc{color:var(--muted);font-size:.95rem;margin-bottom:18px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.hero-actions{display:flex;gap:10px;}
+.hero::before{
+  content:"";position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.95;
+  background:radial-gradient(circle at 20% 80%,rgba(14,165,233,.18),transparent 34%),radial-gradient(circle at 76% 18%,rgba(245,197,24,.12),transparent 30%);
+}
+.hero-bg{position:absolute;inset:0;background-size:cover;background-position:center top;opacity:0;transform:scale(1.045);filter:blur(10px) brightness(.55) saturate(1.18);}
+.hero.is-animated .hero-bg{animation:heroBackdropIn 1.05s cubic-bezier(.2,.9,.2,1) .38s both;}
+.hero-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,10,15,.97),rgba(10,10,15,.62) 46%,rgba(10,10,15,.12)),linear-gradient(0deg,rgba(10,10,15,.92),transparent 55%);}
+.hero-inner{position:relative;z-index:2;height:100%;padding:36px;display:flex;flex-direction:column;justify-content:flex-end;max-width:560px;}
+.hero-title{font-size:2.6rem;font-weight:800;letter-spacing:-1px;line-height:1;margin-bottom:14px;opacity:0;transform:translateY(22px) scale(.96);filter:blur(10px);text-shadow:0 14px 34px rgba(0,0,0,.52);will-change:transform,opacity,filter;}
+.hero.is-animated .hero-title{animation:heroLogoIn .72s cubic-bezier(.18,.95,.24,1) .06s both;}
+.hero-logo-img{max-width:min(430px,78vw);max-height:112px;width:auto;object-fit:contain;filter:drop-shadow(0 18px 28px rgba(0,0,0,.72));}
+.hero-title-text{display:inline-block;background:linear-gradient(135deg,#fff 0%,#dbeafe 52%,#f5c518 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.hero-desc{color:var(--muted);font-size:.95rem;margin-bottom:18px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;opacity:0;transform:translateY(16px);}
+.hero.is-animated .hero-desc{animation:heroSoftIn .52s ease .72s both;}
+.hero-actions{display:flex;gap:10px;opacity:0;transform:translateY(18px);}
+.hero.is-animated .hero-actions{animation:heroActionsIn .62s cubic-bezier(.2,.95,.2,1) .94s both;}
 .btn-play{background:#fff;color:#0a0a0f;padding:11px 24px;border-radius:8px;font-weight:700;display:inline-flex;align-items:center;gap:8px;font-size:.92rem;}
-.btn-play:hover{background:#e8e8e8;}
+.btn-play:hover{background:#e8e8e8;transform:translateY(-1px);}
 .btn-add{background:rgba(255,255,255,.1);color:#fff;padding:11px 16px;border-radius:8px;font-weight:600;border:1px solid rgba(255,255,255,.18);}
-.btn-add:hover{background:rgba(255,255,255,.18);}
+.btn-add:hover{background:rgba(255,255,255,.18);transform:translateY(-1px);}
+@keyframes heroLogoIn{0%{opacity:0;transform:translateY(28px) scale(.92);filter:blur(14px);}58%{opacity:1;transform:translateY(-4px) scale(1.015);filter:blur(0);}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0);}}
+@keyframes heroBackdropIn{0%{opacity:0;transform:scale(1.08);filter:blur(14px) brightness(.45) saturate(1.1);}100%{opacity:.78;transform:scale(1);filter:blur(0) brightness(.72) saturate(1.12);}}
+@keyframes heroSoftIn{from{opacity:0;transform:translateY(16px);filter:blur(6px);}to{opacity:1;transform:translateY(0);filter:blur(0);}}
+@keyframes heroActionsIn{0%{opacity:0;transform:translateY(20px) scale(.96);filter:blur(8px);}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0);}}
 
 /* ── Section row ── */
 .row{margin-bottom:36px;}
@@ -2969,22 +2984,29 @@ async function loadCatalog(){
 async function enrichTmdbPosters(){
   const TMDB_KEY='5089f91e3e263d00a7bdcd3fcb0810d3';
   const IMG = CONFIG.tmdb_image_base || 'https://image.tmdb.org/t/p/w500';
-  const tasks = allFilms.filter(f=>!f.poster_url && (f.tmdb_id || f.judul)).map(async (f)=>{
+  const tasks = allFilms.filter(f=>(!f.poster_url || !f.backdrop_url || !f.logo_url) && (f.tmdb_id || f.judul)).map(async (f)=>{
     try{
       let url;
       if(f.tmdb_id){
         const mt = f.tipe==='series' ? 'tv':'movie';
-        url=`https://api.themoviedb.org/3/${mt}/${f.tmdb_id}?api_key=${TMDB_KEY}&language=en-US`;
+        url=`https://api.themoviedb.org/3/${mt}/${f.tmdb_id}?api_key=${TMDB_KEY}&language=en-US&append_to_response=images`;
       }else{
         const mt = f.tipe==='series' ? 'tv':'movie';
         url=`https://api.themoviedb.org/3/search/${mt}?api_key=${TMDB_KEY}&query=${encodeURIComponent(f.judul)}${f.tahun?`&year=${f.tahun}`:''}&language=en-US`;
       }
       const r=await fetch(url);
       const d=await r.json();
-      const m = f.tmdb_id ? d : (d.results && d.results[0]);
+      let m = f.tmdb_id ? d : (d.results && d.results[0]);
+      if(!f.tmdb_id && m && m.id){
+        const mt = f.tipe==='series' ? 'tv':'movie';
+        const rd = await fetch(`https://api.themoviedb.org/3/${mt}/${m.id}?api_key=${TMDB_KEY}&language=en-US&append_to_response=images`).then(x=>x.json()).catch(()=>null);
+        if(rd && (rd.poster_path || rd.backdrop_path || rd.images)) m = { ...m, ...rd };
+      }
       if(m){
         if(m.poster_path) f.poster_url = IMG + m.poster_path;
         if(m.backdrop_path) f.backdrop_url = IMG.replace('w500','w1280') + m.backdrop_path;
+        const logoPath = pickTmdbLogoPath(m.images);
+        if(logoPath) f.logo_url = IMG + logoPath;
         f.overview = f.overview || m.overview || '';
         f.rating = m.vote_average ? m.vote_average.toFixed(1) : null;
         f.tahun = f.tahun || (m.release_date||m.first_air_date||'').slice(0,4);
@@ -2992,6 +3014,13 @@ async function enrichTmdbPosters(){
     }catch{}
   });
   await Promise.all(tasks);
+}
+
+function pickTmdbLogoPath(images){
+  const logos = images && Array.isArray(images.logos) ? images.logos : [];
+  if(!logos.length) return '';
+  const preferred = logos.find(x => x.iso_639_1 === 'en') || logos.find(x => x.iso_639_1 === null) || logos[0];
+  return preferred && preferred.file_path ? preferred.file_path : '';
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -3039,10 +3068,20 @@ function renderHome(){
   // Hero: pakai film pertama dengan backdrop (termasuk VIP — oke sebagai teaser)
   const heroFilm = allFilms.find(f=>f.backdrop_url) || allFilms[0];
   if(heroFilm){
-    document.getElementById('heroBg').style.backgroundImage = heroFilm.backdrop_url ? `url('${heroFilm.backdrop_url}')` : (heroFilm.poster_url ? `url('${heroFilm.poster_url}')` : '');
-    document.getElementById('heroTitle').textContent = heroFilm.judul || 'ZAEINSTREAM';
+    const hero = document.getElementById('hero');
+    const heroBg = document.getElementById('heroBg');
+    const heroTitle = document.getElementById('heroTitle');
+    hero.classList.remove('is-animated');
+    heroBg.style.backgroundImage = heroFilm.backdrop_url ? `url('${heroFilm.backdrop_url}')` : (heroFilm.poster_url ? `url('${heroFilm.poster_url}')` : '');
+    if(heroFilm.logo_url){
+      heroTitle.innerHTML = `<img class="hero-logo-img" src="${escapeHtml(heroFilm.logo_url)}" alt="${escapeHtml(heroFilm.judul||'ZAEINSTREAM')}">`;
+    }else{
+      heroTitle.innerHTML = `<span class="hero-title-text">${escapeHtml(heroFilm.judul || 'ZAEINSTREAM')}</span>`;
+    }
     document.getElementById('heroDesc').textContent = (heroFilm.overview||'').slice(0,160) || 'Platform streaming eksklusif.';
-    document.getElementById('hero')._film = heroFilm;
+    hero._film = heroFilm;
+    void hero.offsetWidth;
+    requestAnimationFrame(()=>hero.classList.add('is-animated'));
   }
 
   renderContinueWatching();
@@ -4676,6 +4715,7 @@ function _p2AssToVtt(ass){
 }
 
 function closePlayer(opts){
+  persistPreviewStop(currentFilm);
   resetPreviewGate();
   const fullBar = document.getElementById('fullAccessBar');
   if(fullBar) fullBar.style.display = 'none';
@@ -5298,6 +5338,24 @@ function armPreviewGate(film){
   const limit = Math.max(0, expiresAt - Date.now());
   previewGateTimer=setTimeout(()=>showPreviewGate(film && film.tipe === 'series' ? 'Preview 7 menit selesai' : 'Preview 5 menit selesai'), limit);
 }
+function persistPreviewStop(film){
+  const pb = film && film._playback;
+  if(!session || !film || !pb || pb.access !== 'preview') return;
+  const headers = { Authorization: 'Bearer ' + session.access_token };
+  fetch('/api/playback/' + encodeURIComponent(film.id) + '/stop', {
+    method:'POST',
+    headers,
+    keepalive:true,
+  }).then(r=>r.json().catch(()=>null)).then(d=>{
+    if(d && d.ok && Number.isFinite(Number(d.preview_remaining_seconds))){
+      film._playback.preview_remaining_seconds = Number(d.preview_remaining_seconds);
+      delete film._playback.preview_expires_at;
+    }
+  }).catch(()=>{});
+}
+window.addEventListener('beforeunload', () => {
+  persistPreviewStop(currentFilm);
+});
 bootstrap();
 </script>
 </body>
