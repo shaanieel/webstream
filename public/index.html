@@ -386,6 +386,7 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   transition:background .15s;
 }
 .row-arrow:hover{background:var(--surface-2);color:var(--text);}
+.row-arrows{display:none;gap:6px;align-items:center;}
 
 /* ── Grid of cards ── */
 .grid{
@@ -1485,8 +1486,11 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   }
   .sidebar-overlay.show{display:block;}
 
-  .main{margin-left:0;padding-bottom:calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));}
-  .page{padding:16px 16px 24px;}
+  /* min-width:0 chain lets .main shrink below its grid-rail's intrinsic
+     content width (otherwise the row-head + arrows render off-screen
+     because the rail's implicit columns force the flex item to expand). */
+  .main{margin-left:0;min-width:0;max-width:100vw;padding-bottom:calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));}
+  .page{padding:16px 16px 24px;min-width:0;max-width:100%;}
   .page-title{font-size:1.4rem;margin-bottom:18px;}
 
   /* Mobile topbar (hide on player) */
@@ -1517,6 +1521,8 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   #page-browse .grid{grid-template-columns:repeat(2,1fr);gap:14px;}
   .row{margin-bottom:24px;}
   .row-arrow{width:30px;height:30px;}
+  .row-arrows{display:flex;}
+  .tmdb-rail{grid-auto-columns:max(28vw, 100px);}
 
   /* VIP hero compressed for mobile so it doesn't dominate the page. */
   .vip-hero{padding:28px 18px;margin-bottom:22px;border-radius:14px;}
@@ -1563,6 +1569,36 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   .player-side{order:2;}
   .player-info h2{font-size:1.2rem;}
   .subs-panel{position:fixed;left:8px;right:8px;top:auto;bottom:8px;width:auto;max-height:60vh;}
+
+  /* More bottom sheet */
+  .more-sheet-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:88;}
+  .more-sheet-overlay.show{display:block;}
+  .more-sheet{
+    position:fixed;left:0;right:0;z-index:89;
+    bottom:var(--bottom-nav-h);
+    background:var(--bg-2);border-top:1px solid var(--border);
+    border-radius:18px 18px 0 0;
+    padding:10px 20px 16px;
+    transform:translateY(100%);
+    transition:transform .32s cubic-bezier(.4,0,.2,1);
+  }
+  .more-sheet.show{transform:translateY(0);}
+  .more-sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-2);margin:0 auto 14px;}
+  .more-sheet-label{
+    font-size:.65rem;font-weight:700;letter-spacing:1.2px;
+    color:var(--muted-2);text-transform:uppercase;
+    padding:12px 0 8px;border-top:1px solid var(--border);
+  }
+  .more-sheet-label:first-of-type{border-top:none;padding-top:4px;}
+  .more-sheet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;}
+  .more-sheet-grid button{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:8px;padding:14px 8px;border-radius:10px;
+    background:none;color:var(--text);font-size:.78rem;font-weight:500;
+    border:none;cursor:pointer;
+  }
+  .more-sheet-grid button:active{background:var(--surface);}
+  .more-sheet-grid button svg{width:24px;height:24px;}
 }
 
 /* Tablet: 5 cols */
@@ -1866,6 +1902,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row" id="continueWatchingRow" style="display:none;">
         <div class="row-head">
           <div class="row-title">Continue Watching</div>
+          <div class="row-arrows">
+            <button class="row-arrow" type="button" onclick="scrollRail('continueWatchingGrid',-1)" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="row-arrow" type="button" onclick="scrollRail('continueWatchingGrid',1)" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
         </div>
         <div class="grid tmdb-rail" id="continueWatchingGrid"></div>
       </div>
@@ -1873,6 +1913,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Trending Movies</div>
+          <div class="row-arrows">
+            <button class="row-arrow" type="button" onclick="scrollRail('trendingMoviesGrid',-1)" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="row-arrow" type="button" onclick="scrollRail('trendingMoviesGrid',1)" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
         </div>
         <div class="grid tmdb-rail" id="trendingMoviesGrid"></div>
       </div>
@@ -1880,6 +1924,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Trending Shows</div>
+          <div class="row-arrows">
+            <button class="row-arrow" type="button" onclick="scrollRail('trendingShowsGrid',-1)" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="row-arrow" type="button" onclick="scrollRail('trendingShowsGrid',1)" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
         </div>
         <div class="grid tmdb-rail" id="trendingShowsGrid"></div>
       </div>
@@ -1887,6 +1935,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Top Rated Movies</div>
+          <div class="row-arrows">
+            <button class="row-arrow" type="button" onclick="scrollRail('topMoviesGrid',-1)" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="row-arrow" type="button" onclick="scrollRail('topMoviesGrid',1)" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
         </div>
         <div class="grid tmdb-rail" id="topMoviesGrid"></div>
       </div>
@@ -1894,6 +1946,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <div class="row tmdb-row">
         <div class="row-head">
           <div class="row-title">Top Rated Shows</div>
+          <div class="row-arrows">
+            <button class="row-arrow" type="button" onclick="scrollRail('topShowsGrid',-1)" aria-label="Scroll left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg></button>
+            <button class="row-arrow" type="button" onclick="scrollRail('topShowsGrid',1)" aria-label="Scroll right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg></button>
+          </div>
         </div>
         <div class="grid tmdb-rail" id="topShowsGrid"></div>
       </div>
@@ -2124,6 +2180,54 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   </div>
 </div>
 
+  <!-- ── Mobile More bottom sheet ── -->
+  <div class="more-sheet-overlay" id="moreSheetOverlay" onclick="closeMoreSheet()"></div>
+  <div class="more-sheet" id="moreSheet">
+    <div class="more-sheet-handle"></div>
+    <div class="more-sheet-label">Media</div>
+    <div class="more-sheet-grid">
+      <button type="button" onclick="closeMoreSheet();goPage('movies')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+        <span>Movies</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('tv')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span>TV Shows</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('collections')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h6"/></svg>
+        <span>Collections</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('watchlist')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span>Watchlist</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('cart')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h8.95a2 2 0 0 0 1.95-1.57l1.35-6.43H5.12"/></svg>
+        <span>Keranjang</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('vip')" style="color:var(--gold);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
+        <span>VIP Zone</span>
+      </button>
+    </div>
+    <div class="more-sheet-label">Akun</div>
+    <div class="more-sheet-grid">
+      <button type="button" onclick="closeMoreSheet();goPage('profile')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Profile</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();toggleTheme();">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        <span>Theme</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();confirmLogout()" style="color:var(--red);">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span>Logout</span>
+      </button>
+    </div>
+  </div>
+
   <!-- ── Mobile bottom nav ── -->
   <nav class="mobile-bottomnav">
     <button class="bottom-item active" data-page="home" onclick="goPage('home')">
@@ -2138,7 +2242,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Browse
     </button>
-    <button class="bottom-item" onclick="openSidebar()">
+    <button class="bottom-item" id="bottomMoreBtn" onclick="toggleMoreSheet()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
       More
     </button>
@@ -2921,6 +3025,35 @@ function closeSidebar(){
 // animation drives the drawer (instead of click->state->click->state).
 function toggleSidebar(open){
   if(open) openSidebar(); else closeSidebar();
+}
+
+// ── Mobile "More" bottom sheet (replaces sidebar drawer on mobile) ──
+function openMoreSheet(){
+  const sheet = document.getElementById('moreSheet');
+  const overlay = document.getElementById('moreSheetOverlay');
+  if(sheet) sheet.classList.add('show');
+  if(overlay) overlay.classList.add('show');
+}
+function closeMoreSheet(){
+  const sheet = document.getElementById('moreSheet');
+  const overlay = document.getElementById('moreSheetOverlay');
+  if(sheet) sheet.classList.remove('show');
+  if(overlay) overlay.classList.remove('show');
+}
+function toggleMoreSheet(){
+  const sheet = document.getElementById('moreSheet');
+  if(sheet && sheet.classList.contains('show')) closeMoreSheet();
+  else openMoreSheet();
+}
+
+// ── Mobile row arrows: scroll a tmdb-rail horizontally by ~2 cards ──
+function scrollRail(id, dir){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const card = el.querySelector('.card');
+  const cardW = card ? card.offsetWidth : 120;
+  const gap = 10;
+  el.scrollBy({ left: dir * (cardW + gap) * 2, behavior: 'smooth' });
 }
 
 // ── Theme toggle (sun/moon) ──────────────────────────────────────────
