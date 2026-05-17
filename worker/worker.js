@@ -622,12 +622,35 @@ function pickTmdbLogo(images) {
   return preferred && preferred.file_path ? tmdbImage(preferred.file_path, 'w500') : null;
 }
 
-function mapTmdbHomeItem(item, mediaType, category, hiddenSet, localByTmdb, logoUrl = null) {
+// Normalize a title for fuzzy matching: lowercase, strip diacritics, drop
+// punctuation, collapse whitespace. "The Punisher: One Last Kill" and
+// "the punisher one last kill" become the same string.
+function normalizeTitleKey(s) {
+  if (!s) return '';
+  return String(s)
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function mapTmdbHomeItem(item, mediaType, category, hiddenSet, localIndex, logoUrl = null) {
   if (!item || !item.id) return null;
   const key = `${mediaType}:${item.id}`;
   if (hiddenSet.has(key)) return null;
-  const local = localByTmdb.get(key);
   const title = item.title || item.name || item.original_title || item.original_name || 'Untitled';
+  // Match by TMDB id first (most reliable); fall back to normalized title so
+  // films added without a tmdb_id still resolve when their judul matches.
+  let local = localIndex.byTmdb.get(key);
+  if (!local) {
+    const tk = `${mediaType}:${normalizeTitleKey(title)}`;
+    local = localIndex.byTitle.get(tk);
+    const altTitle = item.original_title || item.original_name;
+    if (!local && altTitle) {
+      const ak = `${mediaType}:${normalizeTitleKey(altTitle)}`;
+      local = localIndex.byTitle.get(ak);
+    }
+  }
   return {
     id: `tmdb-${mediaType}-${item.id}`,
     tmdb_id: item.id,
@@ -654,16 +677,40 @@ async function getTmdbHiddenSet(env) {
   return new Set(rows.map(x => `${x.media_type}:${x.tmdb_id}`));
 }
 
-async function getLocalFilmsByTmdb(env) {
-  const r = await supabaseRest(env, '/films?select=id,judul,tipe,tahun,tmdb_id,poster_url,backdrop_url,overview,rating,tier&not.tmdb_id=is.null');
+// Build two indexes over the local catalog so TMDB items can match either by
+// numeric tmdb_id (preferred) or by normalized title (fallback for catalog
+// entries that were added without a tmdb_id, or where the tmdb_id is stored
+// as a string vs. number — template-literal coercion makes both keys equal
+// for digit strings, but title fallback also covers genuine ID mismatches).
+//
+// The previous PostgREST filter "not.tmdb_id=is.null" is invalid syntax
+// (the correct form is "tmdb_id=not.is.null"), which caused the request to
+// return zero rows on some PostgREST versions — meaning NO TMDB items ever
+// matched. We drop the filter and let JS skip rows without a tmdb_id.
+async function getLocalFilmIndex(env) {
+  // Fetch all rows; previously this used select=id,judul,tipe,tahun,tmdb_id,
+  // poster_url,backdrop_url,overview,rating,tier — at least one of those
+  // columns is not present in the live films table, so PostgREST 400s the
+  // whole request and we end up with an empty index. select=* is what
+  // /api/catalog uses and it's known to work; we only read a handful of
+  // fields anyway.
+  const r = await supabaseRest(env, '/films?select=*');
   const rows = r.ok && Array.isArray(r.data) ? r.data : [];
-  const map = new Map();
+  const byTmdb = new Map();
+  const byTitle = new Map();
   for (const f of rows) {
     const mediaType = f.tipe === 'series' ? 'tv' : 'movie';
-    const key = `${mediaType}:${f.tmdb_id}`;
-    if (!map.has(key)) map.set(key, f);
+    if (f.tmdb_id !== null && f.tmdb_id !== undefined && f.tmdb_id !== '') {
+      const k = `${mediaType}:${f.tmdb_id}`;
+      if (!byTmdb.has(k)) byTmdb.set(k, f);
+    }
+    const norm = normalizeTitleKey(f.judul);
+    if (norm) {
+      const tk = `${mediaType}:${norm}`;
+      if (!byTitle.has(tk)) byTitle.set(tk, f);
+    }
   }
-  return map;
+  return { byTmdb, byTitle };
 }
 
 async function tmdbList(env, path) {
@@ -675,7 +722,7 @@ async function tmdbList(env, path) {
 
 async function tmdbHomeHandler(request, env) {
   try {
-    const [hiddenSet, localByTmdb] = await Promise.all([getTmdbHiddenSet(env), getLocalFilmsByTmdb(env)]);
+    const [hiddenSet, localIndex] = await Promise.all([getTmdbHiddenSet(env), getLocalFilmIndex(env)]);
     const [trendingMoviesRaw, trendingShowsRaw, topMoviesRaw, topShowsRaw] = await Promise.all([
       tmdbList(env, '/trending/movie/week?page=1&include_adult=false'),
       tmdbList(env, '/trending/tv/week?page=1&include_adult=false'),
@@ -684,10 +731,10 @@ async function tmdbHomeHandler(request, env) {
     ]);
 
     const rows = {
-      trending_movies: trendingMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'trending_movies', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
-      trending_shows: trendingShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'trending_shows', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
-      top_movies: topMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'top_movies', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
-      top_shows: topShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'top_shows', hiddenSet, localByTmdb)).filter(Boolean).slice(0, 20),
+      trending_movies: trendingMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'trending_movies', hiddenSet, localIndex)).filter(Boolean).slice(0, 20),
+      trending_shows: trendingShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'trending_shows', hiddenSet, localIndex)).filter(Boolean).slice(0, 20),
+      top_movies: topMoviesRaw.map(x => mapTmdbHomeItem(x, 'movie', 'top_movies', hiddenSet, localIndex)).filter(Boolean).slice(0, 20),
+      top_shows: topShowsRaw.map(x => mapTmdbHomeItem(x, 'tv', 'top_shows', hiddenSet, localIndex)).filter(Boolean).slice(0, 20),
     };
 
     const heroBase = [...trendingMoviesRaw, ...trendingShowsRaw].filter(x => x && x.backdrop_path).slice(0, 10);
@@ -696,7 +743,7 @@ async function tmdbHomeHandler(request, env) {
       const mediaType = item.title ? 'movie' : 'tv';
       const detail = await tmdbFetch(env, `/${mediaType}/${item.id}?append_to_response=images`).then(r => r.json()).catch(() => null);
       const merged = detail && !detail.success ? { ...item, ...detail } : item;
-      const mapped = mapTmdbHomeItem(merged, mediaType, 'hero', hiddenSet, localByTmdb, pickTmdbLogo(detail?.images));
+      const mapped = mapTmdbHomeItem(merged, mediaType, 'hero', hiddenSet, localIndex, pickTmdbLogo(detail?.images));
       if (mapped && mapped.backdrop_url) hero.push(mapped);
       if (hero.length >= 10) break;
     }

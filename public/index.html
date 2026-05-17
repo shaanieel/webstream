@@ -1949,10 +1949,25 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .more-sheet-overlay { display: none; }
 
 @media (max-width:767px){
+  /* Closed state: keep the sheet in the layout (so the slide-up transition
+     works) but make it visually & interactively inert. visibility + pointer
+     events are belt-and-suspenders in case the transform property is reset
+     by anything else \u2014 the closed sheet then can NEVER bleed through above
+     the bottom nav, even if the user's browser cached an older stylesheet. */
   .more-sheet{
     display:block;
     bottom:0;
     padding-bottom:calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom));
+    transform:translateY(100%);
+    visibility:hidden;
+    pointer-events:none;
+    transition:transform .32s cubic-bezier(.4,0,.2,1), visibility 0s linear .32s;
+  }
+  .more-sheet.show{
+    transform:translateY(0);
+    visibility:visible;
+    pointer-events:auto;
+    transition:transform .32s cubic-bezier(.4,0,.2,1), visibility 0s linear 0s;
   }
   .more-sheet-overlay{display:none;}
   .more-sheet-overlay.show{display:block;}
