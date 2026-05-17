@@ -1743,6 +1743,25 @@ async function applyPaidOrder(env, order) {
   if (meta.vip_days) return grantVip(env, order.user_id, Number(meta.vip_days));
 }
 
+// HMAC-SHA256 via Web Crypto (tersedia di Cloudflare Workers runtime).
+// Mengikuti spesifikasi Violet Media Pay:
+//   signature = HMAC_SHA256( secret_key, ref_kode + api_key + amount ) → hex
+async function sha256HmacHex(secret, message) {
+  if (!secret || !String(secret).trim()) {
+    throw new Error('VIOLET_SECRET_KEY kosong atau belum di-set di Cloudflare secrets');
+  }
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(String(secret)),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const buf = await crypto.subtle.sign('HMAC', key, enc.encode(String(message)));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function createVioletTransaction(env, order, userEmail) {
   const apiKey = env.VIOLET_API_KEY || '';
   const secret = env.VIOLET_SECRET_KEY || '';

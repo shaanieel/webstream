@@ -5777,7 +5777,19 @@ function openAccessModal(film){
     <button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`;
   modal.classList.add('show');
 }
-function openVipPlans(){ const modal=document.getElementById('payModal'); document.getElementById('payTitle').textContent='Upgrade Premium'; document.getElementById('paySub').textContent='VIP otomatis aktif setelah pembayaran berhasil.'; document.getElementById('payActions').innerHTML=`<button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP Premium 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button><button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`; modal.classList.add('show'); }
+function openVipPlans(){
+  // Tutup modal "VIP Zone Terkunci" dulu tanpa side-effect redirect ke /home —
+  // closeVipLocked() membawa user kembali ke /home kalau user di /vip & bukan VIP,
+  // yang akan menutup juga payModal yang baru saja kita buka.
+  document.getElementById('vipLockedModal')?.classList.remove('show');
+  const modal = document.getElementById('payModal');
+  document.getElementById('payTitle').textContent = 'Upgrade Premium';
+  document.getElementById('paySub').textContent = 'VIP otomatis aktif setelah pembayaran berhasil.';
+  document.getElementById('payActions').innerHTML =
+    `<button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP Premium 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button>`
+  + `<button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`;
+  modal.classList.add('show');
+}
 function closePayModal(){ document.getElementById('payModal')?.classList.remove('show'); }
 async function startCheckout(payload){ if(!session){ showToast('Login dulu','error'); return; } try{ const r=await fetch('/api/payments/checkout',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify(payload)}); const d=await r.json().catch(()=>({})); if(!r.ok||!d.ok) throw new Error(d.error||'Checkout gagal'); if(d.checkout_url) location.href=d.checkout_url; else showToast('Checkout dibuat, tapi URL pembayaran kosong.','error'); }catch(e){ showToast(e.message,'error'); } }
 function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
