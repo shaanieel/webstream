@@ -690,6 +690,15 @@ async function getTmdbHiddenSet(env) {
 async function getLocalFilmIndex(env) {
   const r = await supabaseRest(env, '/films?select=*');
   const rows = r.ok && Array.isArray(r.data) ? r.data : [];
+  const _supabaseDebug = {
+    ok: r.ok,
+    status: r.status,
+    type: typeof r.data,
+    isArray: Array.isArray(r.data),
+    preview: typeof r.data === 'string'
+      ? r.data.slice(0, 300)
+      : (Array.isArray(r.data) ? `array len=${r.data.length}` : JSON.stringify(r.data).slice(0, 300)),
+  };
   const byTmdb = new Map();
   const byTitle = new Map();
   for (const f of rows) {
@@ -704,7 +713,7 @@ async function getLocalFilmIndex(env) {
       if (!byTitle.has(tk)) byTitle.set(tk, f);
     }
   }
-  return { byTmdb, byTitle };
+  return { byTmdb, byTitle, _supabaseDebug };
 }
 
 async function tmdbList(env, path) {
@@ -752,6 +761,7 @@ async function tmdbHomeHandler(request, env) {
         sampleByTitleKeys: Array.from(localIndex.byTitle.keys()).slice(0, 5),
         lookupTest_projectHailMary_byTmdb: !!localIndex.byTmdb.get('movie:687163'),
         lookupTest_projectHailMary_byTitle: !!localIndex.byTitle.get('movie:project hail mary'),
+        supabase: localIndex._supabaseDebug,
       };
     }
     return json(payload);
