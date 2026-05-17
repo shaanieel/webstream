@@ -3648,7 +3648,9 @@ function renderTmdbGrid(id, items){
         const film = allFilms.find(x=>String(x.id)===String(localId));
         if(film) return openFilm(film);
       }
-      showToast('Film ini belum tersedia di katalog. Admin bisa hide dari web admin kalau belum mau ditampilkan.', 'error');
+      // Card has no local catalog match — silently do nothing.
+      // The inline "Belum ada di katalog" badge under the card already
+      // tells the user the film isn't available; no toast required.
     });
   });
 }
@@ -3754,13 +3756,13 @@ function heroPlay(){
   if(!f) return;
   const film = f.local_id ? allFilms.find(x=>String(x.id)===String(f.local_id)) : f;
   if(film && !film.source) openFilm(film);
-  else showToast('Film ini belum tersedia di katalog.', 'error');
+  // else: hero film isn't in the local catalog — silently do nothing.
 }
 function heroAddWatchlist(){
   const f=document.getElementById('hero')._film;
   const film = f && f.local_id ? allFilms.find(x=>String(x.id)===String(f.local_id)) : f;
   if(film && !film.source) toggleWatchlist(film.id);
-  else showToast('Film ini belum tersedia di katalog.', 'error');
+  // else: same as heroPlay — silently do nothing.
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -5429,9 +5431,8 @@ async function loadFilmExtras(film){
           if(localId){
             const f = allFilms.find(x=>String(x.id)===String(localId));
             if(f) openFilm(f);
-          } else {
-            showToast('Film ini belum ada di katalog. Hubungi admin untuk request.', 'error');
           }
+          // else: recommendation isn't in catalog — silently do nothing.
         });
       });
     }
@@ -5888,7 +5889,11 @@ window.addEventListener('beforeunload', () => {
       moved = false;
       startX = e.clientX;
       startScroll = rail.scrollLeft;
-      try{ rail.setPointerCapture(e.pointerId); }catch(_){}
+      // NOTE: do NOT call setPointerCapture here. Capturing the pointer on a
+      // pointerdown that is actually just a click re-targets the subsequent
+      // click event to the rail, so the card's click handler never fires
+      // (Home cards became unclickable on desktop). Capture only AFTER we
+      // confirm the gesture is a horizontal drag.
     });
     rail.addEventListener('pointermove', (e)=>{
       if(!isDown) return;
@@ -5896,6 +5901,7 @@ window.addEventListener('beforeunload', () => {
       if(!moved && Math.abs(dx) > DRAG_THRESHOLD){
         moved = true;
         rail.classList.add('dragging');
+        try{ rail.setPointerCapture(e.pointerId); }catch(_){}
       }
       if(moved){
         rail.scrollLeft = startScroll - dx;
