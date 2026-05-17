@@ -688,7 +688,7 @@ async function getTmdbHiddenSet(env) {
 // return zero rows on some PostgREST versions — meaning NO TMDB items ever
 // matched. We drop the filter and let JS skip rows without a tmdb_id.
 async function getLocalFilmIndex(env) {
-  const r = await supabaseRest(env, '/films?select=id,judul,tipe,tahun,tmdb_id,poster_url,backdrop_url,overview,rating,tier');
+  const r = await supabaseRest(env, '/films?select=*');
   const rows = r.ok && Array.isArray(r.data) ? r.data : [];
   const byTmdb = new Map();
   const byTitle = new Map();
