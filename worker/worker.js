@@ -716,6 +716,7 @@ async function tmdbList(env, path) {
 
 async function tmdbHomeHandler(request, env) {
   try {
+    const debug = new URL(request.url).searchParams.get('debug') === '1';
     const [hiddenSet, localIndex] = await Promise.all([getTmdbHiddenSet(env), getLocalFilmIndex(env)]);
     const [trendingMoviesRaw, trendingShowsRaw, topMoviesRaw, topShowsRaw] = await Promise.all([
       tmdbList(env, '/trending/movie/week?page=1&include_adult=false'),
@@ -742,7 +743,18 @@ async function tmdbHomeHandler(request, env) {
       if (hero.length >= 10) break;
     }
 
-    return json({ ok: true, hero, rows });
+    const payload = { ok: true, hero, rows };
+    if (debug) {
+      payload.__debug = {
+        byTmdbSize: localIndex.byTmdb.size,
+        byTitleSize: localIndex.byTitle.size,
+        sampleByTmdbKeys: Array.from(localIndex.byTmdb.keys()).slice(0, 5),
+        sampleByTitleKeys: Array.from(localIndex.byTitle.keys()).slice(0, 5),
+        lookupTest_projectHailMary_byTmdb: !!localIndex.byTmdb.get('movie:687163'),
+        lookupTest_projectHailMary_byTitle: !!localIndex.byTitle.get('movie:project hail mary'),
+      };
+    }
+    return json(payload);
   } catch (e) {
     return err('TMDB home error: ' + e.message, 502);
   }
