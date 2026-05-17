@@ -688,17 +688,14 @@ async function getTmdbHiddenSet(env) {
 // return zero rows on some PostgREST versions — meaning NO TMDB items ever
 // matched. We drop the filter and let JS skip rows without a tmdb_id.
 async function getLocalFilmIndex(env) {
+  // Fetch all rows; previously this used select=id,judul,tipe,tahun,tmdb_id,
+  // poster_url,backdrop_url,overview,rating,tier — at least one of those
+  // columns is not present in the live films table, so PostgREST 400s the
+  // whole request and we end up with an empty index. select=* is what
+  // /api/catalog uses and it's known to work; we only read a handful of
+  // fields anyway.
   const r = await supabaseRest(env, '/films?select=*');
   const rows = r.ok && Array.isArray(r.data) ? r.data : [];
-  const _supabaseDebug = {
-    ok: r.ok,
-    status: r.status,
-    type: typeof r.data,
-    isArray: Array.isArray(r.data),
-    preview: typeof r.data === 'string'
-      ? r.data.slice(0, 300)
-      : (Array.isArray(r.data) ? `array len=${r.data.length}` : JSON.stringify(r.data).slice(0, 300)),
-  };
   const byTmdb = new Map();
   const byTitle = new Map();
   for (const f of rows) {
@@ -713,7 +710,7 @@ async function getLocalFilmIndex(env) {
       if (!byTitle.has(tk)) byTitle.set(tk, f);
     }
   }
-  return { byTmdb, byTitle, _supabaseDebug };
+  return { byTmdb, byTitle };
 }
 
 async function tmdbList(env, path) {
@@ -725,7 +722,6 @@ async function tmdbList(env, path) {
 
 async function tmdbHomeHandler(request, env) {
   try {
-    const debug = new URL(request.url).searchParams.get('debug') === '1';
     const [hiddenSet, localIndex] = await Promise.all([getTmdbHiddenSet(env), getLocalFilmIndex(env)]);
     const [trendingMoviesRaw, trendingShowsRaw, topMoviesRaw, topShowsRaw] = await Promise.all([
       tmdbList(env, '/trending/movie/week?page=1&include_adult=false'),
@@ -752,19 +748,7 @@ async function tmdbHomeHandler(request, env) {
       if (hero.length >= 10) break;
     }
 
-    const payload = { ok: true, hero, rows };
-    if (debug) {
-      payload.__debug = {
-        byTmdbSize: localIndex.byTmdb.size,
-        byTitleSize: localIndex.byTitle.size,
-        sampleByTmdbKeys: Array.from(localIndex.byTmdb.keys()).slice(0, 5),
-        sampleByTitleKeys: Array.from(localIndex.byTitle.keys()).slice(0, 5),
-        lookupTest_projectHailMary_byTmdb: !!localIndex.byTmdb.get('movie:687163'),
-        lookupTest_projectHailMary_byTitle: !!localIndex.byTitle.get('movie:project hail mary'),
-        supabase: localIndex._supabaseDebug,
-      };
-    }
-    return json(payload);
+    return json({ ok: true, hero, rows });
   } catch (e) {
     return err('TMDB home error: ' + e.message, 502);
   }
