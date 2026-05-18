@@ -117,12 +117,25 @@ async function getUserFromAuth(request, env) {
 // Lookup users_profile in the LOCAL supabase by user_id, with email as a
 // fallback for legacy rows that may not have user_id populated.
 async function getUserProfile(env, userId, email) {
+  async function _normalizeVipState(row) {
+    if (!row) return row;
+    const exp = row.expired_at ? new Date(row.expired_at) : null;
+    const expired = !!(row.is_vip && exp && exp < new Date());
+    if (!expired) return row;
+    try {
+      await supabaseRest(env, `/users_profile?user_id=eq.${encodeURIComponent(row.user_id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_vip: false, expired_at: null }),
+      });
+    } catch {}
+    return { ...row, is_vip: false, expired_at: null };
+  }
   if (userId) {
     const r = await supabaseRest(
       env,
       `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
-    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+    if (r.ok && Array.isArray(r.data) && r.data.length) return _normalizeVipState(r.data[0]);
   }
   if (email) {
     const e = encodeURIComponent(email.toLowerCase());
@@ -130,7 +143,7 @@ async function getUserProfile(env, userId, email) {
       env,
       `/users_profile?email=eq.${e}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
-    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+    if (r.ok && Array.isArray(r.data) && r.data.length) return _normalizeVipState(r.data[0]);
   }
   return null;
 }
@@ -1532,7 +1545,14 @@ async function adminUserList(request, env) {
   );
   if (!r.ok) return err('Gagal load users', 500);
   const users = Array.isArray(r.data) ? r.data : [];
+  const now = new Date();
   for (const u of users) {
+    const exp = u.expired_at ? new Date(u.expired_at) : null;
+    const vipActive = !!(u.is_vip && exp && exp > now);
+    if (!vipActive) {
+      u.is_vip = false;
+      u.expired_at = null;
+    }
     const ents = await userEntitlements(env, u.user_id);
     u.entitlement_count = ents.length;
   }
@@ -1548,7 +1568,7 @@ async function adminUserCreate(request, env) {
   const email = (body && body.email || '').trim().toLowerCase();
   const password = (body && body.password || '').trim();
   const isVip = !!(body && body.is_vip);
-  const expiredAt = body && body.expired_at ? body.expired_at : null;
+  const expiredAt = isVip && body && body.expired_at ? body.expired_at : null;
   if (!email) return err('Email wajib diisi', 400);
   if (!password) return err('Password wajib diisi', 400);
   if (password.length < 6) return err('Password minimal 6 karakter', 400);
@@ -1592,8 +1612,11 @@ async function adminUserUpdate(request, env, userId) {
 
   // 1. Update users_profile (vip / expired_at / email / password_plain)
   const profilePatch = {};
+  if (body.is_vip !== undefined) {
+    profilePatch.is_vip = !!body.is_vip;
+    if (!profilePatch.is_vip) profilePatch.expired_at = null;
+  }
   if (body.expired_at !== undefined) profilePatch.expired_at = body.expired_at;
-  if (body.is_vip !== undefined) profilePatch.is_vip = !!body.is_vip;
   if (body.email !== undefined) profilePatch.email = (body.email || '').trim().toLowerCase();
   if (body.password) profilePatch.password_plain = body.password;
   if (Object.keys(profilePatch).length) {
@@ -1620,6 +1643,45 @@ async function adminUserUpdate(request, env, userId) {
   }
 
   return json({ ok: true });
+}
+
+async function adminUsersResetFree(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, '/users_profile', {
+    method: 'PATCH',
+    body: JSON.stringify({ is_vip: false, expired_at: null }),
+  });
+  if (!r.ok) return err('Gagal reset users ke free', 500);
+  return json({ ok: true });
+}
+
+async function adminGrantUserEntitlement(request, env, userId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
+  const filmId = Number(body.film_id || 0);
+  if (!filmId) return err('film_id wajib', 400);
+  const film = await getFilmById(env, filmId);
+  if (!film) return err('Film tidak ditemukan', 404);
+  const key = entitlementKeyForFilm(film);
+  const kind = normalizeFilmKind(film);
+  const up = await supabaseRest(env, '/film_entitlements', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: JSON.stringify({
+      user_id: userId,
+      film_id: film.id,
+      kind,
+      entitlement_key: key,
+      title: film.judul || 'Film',
+      season: film.season || null,
+      expires_at: null,
+    }),
+  });
+  if (!up.ok) return err('Gagal tambah akses film', 500);
+  return json({ ok: true, entitlement: Array.isArray(up.data) ? up.data[0] : up.data });
 }
 
 async function adminUserDelete(request, env, userId) {
@@ -1718,7 +1780,29 @@ async function grantVip(env, userId, days) {
 
 async function grantFilmAccess(env, order) {
   const meta = parseOrderMetadata(order.metadata);
-  if (!order.user_id || !meta.film_id || !meta.entitlement_key) return;
+  if (!order.user_id) return;
+  const items = Array.isArray(meta.cart_items) ? meta.cart_items : [];
+  if (items.length) {
+    for (const item of items) {
+      if (!item || !item.entitlement_key) continue;
+      await supabaseRest(env, '/film_entitlements', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=representation',
+        body: JSON.stringify({
+          user_id: order.user_id,
+          film_id: item.film_id || null,
+          kind: item.kind || 'movie',
+          entitlement_key: item.entitlement_key,
+          title: item.title || order.product_name || 'Film',
+          season: item.season || null,
+          payment_ref: order.ref,
+          expires_at: null,
+        }),
+      });
+    }
+    return;
+  }
+  if (!meta.film_id || !meta.entitlement_key) return;
   await supabaseRest(env, '/film_entitlements', {
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=representation',
@@ -1762,6 +1846,43 @@ async function sha256HmacHex(secret, message) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function validateVioletCallbackSignature(env, body) {
+  const secret = env.VIOLET_SECRET_KEY || '';
+  const apiKey = env.VIOLET_API_KEY || '';
+  if (!secret || !apiKey) {
+    return { ok: false, error: 'VIOLET_API_KEY / VIOLET_SECRET_KEY belum di-set' };
+  }
+  const ref = String(body.ref_kode || body.ref || body.reference || '').trim();
+  const signature = String(body.signature || body['x-callback-signature'] || '').trim().toLowerCase();
+  if (!ref || !signature) {
+    return { ok: false, error: 'Callback VMP tidak punya ref/signature' };
+  }
+
+  const amountCandidates = [
+    body.total_amount,
+    body.nominal,
+    body.amount,
+    body.amount_received,
+    body.amount_merchant,
+  ]
+    .map(v => String(v || '').replace(/[^\d]/g, '').trim())
+    .filter(Boolean);
+
+  const messages = [
+    ref,
+    `${ref}${apiKey}`,
+    ...amountCandidates.map(a => `${ref}${apiKey}${a}`),
+  ];
+  const expectedSet = new Set();
+  for (const msg of messages) {
+    expectedSet.add((await sha256HmacHex(secret, msg)).toLowerCase());
+  }
+  if (!expectedSet.has(signature)) {
+    return { ok: false, error: 'Signature callback VMP tidak valid' };
+  }
+  return { ok: true };
+}
+
 // ───────────────────────────────────────────────────────────────────
 // VMP channel catalog
 // ───────────────────────────────────────────────────────────────────
@@ -1772,7 +1893,7 @@ async function sha256HmacHex(secret, message) {
 // asli, jadi VMP charge pembeli total (gross) tapi penjual tetap terima
 // harga asli setelah fee dipotong.
 const VMP_CHANNELS_ORDERED = [
-  { code: 'QRIS2',     label: 'QRIS',         metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 100 },
+  { code: 'QRIS2',     label: 'QRIS2',        metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 0 },
   { code: 'MANDIRIVA', label: 'Mandiri VA',   metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 3000 },
   { code: 'DANA',      label: 'DANA',         metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 1.67, fee_min: 100 },
   { code: 'SHOPEEPAY', label: 'ShopeePay',    metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 4,    fee_min: 100 },
@@ -1822,8 +1943,8 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
   const amountMerchant = Number(order.amount) || 0;
   const feeCharged = Number.isFinite(Number(fee)) ? Math.max(0, Math.floor(Number(fee))) : computeVmpFee(amountMerchant, channel);
   const grossNominal = Number.isFinite(Number(nominal)) ? Math.max(0, Math.floor(Number(nominal))) : amountMerchant + feeCharged;
-  // Signature VMP: HMAC_SHA256(secret, ref_kode + api_key + amount) — amount = nominal yg dibayar buyer (gross).
-  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${grossNominal}`);
+  const nominalToGateway = amountMerchant;
+  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${nominalToGateway}`);
   const origin = (env.PUBLIC_BASE_URL || new URL(env.WORKER_SELF_URL || 'https://webstream.zaeinstreamx.workers.dev').origin).replace(/\/$/, '');
   const callbackUrl = `${origin}/api/payments/violet/callback`;
   const customerName = (userEmail || '').split('@')[0] || 'Pelanggan';
@@ -1839,8 +1960,8 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
     channel_payment: channel.code,
     code_payment: channel.code,
     ref_kode: String(order.ref),
-    nominal: String(grossNominal),
-    amount: String(grossNominal),
+    nominal: String(nominalToGateway),
+    amount: String(nominalToGateway),
     amount_merchant: String(amountMerchant),
     fee: String(feeCharged),
     cus_nama: customerName,
@@ -1866,7 +1987,7 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`Violet HTTP ${res.status}: ${text.slice(0, 180)}`);
-  return { data, channel: channel.code, nominal: grossNominal, fee: feeCharged, amount_merchant: amountMerchant };
+  return { data, channel: channel.code, nominal: nominalToGateway, fee: feeCharged, amount_merchant: amountMerchant, estimated_gross: grossNominal };
 }
 
 // Pick the first VMP transaction entry from a /create or /transactions response.
@@ -2025,6 +2146,32 @@ async function paymentCheckout(request, env) {
       title: film.judul || 'Film',
       season: film.season || null,
     };
+  } else if (productType === 'cart') {
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const uniq = [...new Set(rawItems.map(x => String(x || '').trim()).filter(Boolean))];
+    if (!uniq.length) return err('Keranjang kosong');
+    const cartItems = [];
+    let total = 0;
+    for (const fid of uniq) {
+      const film = await getFilmById(env, fid);
+      if (!film) continue;
+      const kind = normalizeFilmKind(film);
+      const price = kind === 'series_season' ? settings.series_season_price : settings.movie_price;
+      total += price;
+      cartItems.push({
+        film_id: film.id,
+        kind,
+        entitlement_key: entitlementKeyForFilm(film),
+        title: film.judul || 'Film',
+        season: film.season || null,
+        price,
+      });
+    }
+    if (!cartItems.length) return err('Tidak ada item valid di keranjang');
+    amount = total;
+    productType = 'film';
+    productName = `Keranjang ${cartItems.length} item`;
+    metadata = { cart_items: cartItems };
   } else {
     return err('Tipe checkout tidak valid');
   }
@@ -2179,13 +2326,46 @@ async function paymentStatus(request, env) {
   return json({ ok: true, order });
 }
 
+// GET /api/payments/my-orders — riwayat pembelian user login.
+async function paymentMyOrders(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const r = await supabaseRest(
+    env,
+    `/payment_orders?user_id=eq.${encodeURIComponent(user.id)}&select=ref,product_type,product_name,amount,status,created_at,paid_at,metadata&order=created_at.desc&limit=200`
+  );
+  if (!r.ok) return err('Gagal memuat riwayat pembelian', 500);
+  const orders = (Array.isArray(r.data) ? r.data : []).map(o => {
+    const meta = parseOrderMetadata(o.metadata);
+    const items = Array.isArray(meta.cart_items) && meta.cart_items.length
+      ? meta.cart_items.map(i => ({
+          title: i.title || 'Film',
+          kind: i.kind || 'movie',
+          season: i.season || null,
+          price: Number(i.price || 0),
+        }))
+      : [{
+          title: meta.title || o.product_name || 'Produk',
+          kind: meta.kind || o.product_type || 'other',
+          season: meta.season || null,
+          price: Number(o.amount || 0),
+        }];
+    return {
+      ...o,
+      channel: meta.violet_channel || null,
+      items,
+    };
+  });
+  return json({ ok: true, orders });
+}
+
 // Forward callback ke worker lain (toko 1 / auto-drive-share). Dipakai supaya
 // callback URL VMP yang sudah disetel ke project lain BISA jadi 1 URL bersama:
 //   - prefix ZS-* → handle di sini (webstream — grant VIP / akses film)
 //   - prefix lain → forward as-is ke https://api.semuapro.store/api/callback
 // Kembalikan apa pun yang dijawab upstream (default 200 OK kalau gagal).
 async function forwardCallbackToToko1(request, rawBody, contentType, env) {
-  const upstream = (env.TOKO1_CALLBACK_URL || 'https://api.semuapro.store/api/callback').replace(/\/$/, '');
+  const upstream = (env.TOKO1_CALLBACK_URL || 'https://api.semuapro.store/api/callback').trim();
   try {
     const headers = { Accept: 'application/json' };
     if (contentType) headers['Content-Type'] = contentType;
@@ -2237,6 +2417,8 @@ async function violetCallback(request, env) {
     body.ref_kode || body.ref || body.reference
     || u.searchParams.get('ref_kode') || u.searchParams.get('ref') || ''
   ).trim();
+  const headerSig = String(request.headers.get('x-callback-signature') || '').trim();
+  if (headerSig && !body['x-callback-signature']) body['x-callback-signature'] = headerSig;
 
   // Dispatcher: prefix non-ZS dianggap punya toko lain, forward as-is.
   // Catatan: prefix bisa dikonfigurasi via env.WEBSTREAM_REF_PREFIX (default 'ZS-').
@@ -2254,10 +2436,18 @@ async function violetCallback(request, env) {
 
   const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&select=*`);
   if (!r.ok || !Array.isArray(r.data) || !r.data.length) {
-    // Ref-nya prefix ZS- tapi nggak ada di DB kita — balikin 404 supaya VMP retry.
-    return err('Order tidak ditemukan', 404);
+    // Ref terlihat milik webstream tapi tidak ditemukan. Supaya callback toko1
+    // tetap aman (mis. ada ref legacy/bentrok), forward juga ke toko1.
+    return forwardCallbackToToko1(request, rawText, ctype || 'application/x-www-form-urlencoded', env);
   }
   const order = r.data[0];
+  const enforceSig = ['1', 'true', 'yes', 'on'].includes(
+    String(env.WEBSTREAM_VERIFY_VMP_CALLBACK_SIG || '0').toLowerCase()
+  );
+  if (enforceSig) {
+    const sigCheck = await validateVioletCallbackSignature(env, body);
+    if (!sigCheck.ok) return err(sigCheck.error, 401);
+  }
   const newStatus = normalizeVioletStatus(body.status || body.payment_status);
   const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
     method: 'PATCH',
@@ -2565,6 +2755,9 @@ export default {
     if (pathname === '/api/payments/status' && request.method === 'GET') {
       return paymentStatus(request, env);
     }
+    if (pathname === '/api/payments/my-orders' && request.method === 'GET') {
+      return paymentMyOrders(request, env);
+    }
     // Callback URL VMP — terima POST & GET supaya VMP yang variant query-string juga aman.
     // Dispatcher di violetCallback() akan forward ke toko 1 kalau ref bukan ZS-*.
     if (pathname === '/api/payments/violet/callback' && (request.method === 'POST' || request.method === 'GET')) {
@@ -2575,12 +2768,37 @@ export default {
       return violetCallback(request, env);
     }
 
-    // === Payment page ===
-    // /payment/checkout?ref=... → serve public/payment.html
-    // /payment/success?ref=... → SPA index.html sudah handle polling
+    // === Payment page (handled inside SPA index.html) ===
+    // Backward-compat: beberapa link lama masih pakai /payment?ref=...
+    // Redirect ke route baru /payment/checkout?ref=... (route ini ditangani
+    // oleh client-side router di index.html, bukan file payment terpisah).
+    if (pathname === '/payment' && request.method === 'GET') {
+      const ref = (
+        url.searchParams.get('ref')
+        || url.searchParams.get('ref_kode')
+        || url.searchParams.get('reference')
+        || url.searchParams.get('order_ref')
+        || ''
+      ).trim();
+      if (ref) {
+        return Response.redirect(`${url.origin}/payment/checkout?ref=${encodeURIComponent(ref)}`, 302);
+      }
+      return Response.redirect(`${url.origin}/`, 302);
+    }
+    // /payment/checkout?ref=... & /payment/success?ref=...
+    // keduanya di-handle SPA index.html.
     if (pathname === '/payment/checkout' && request.method === 'GET') {
       if (env.ASSETS) {
-        const assetReq = new Request(new URL('/payment.html', url.origin).toString(), request);
+        const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
+        return env.ASSETS.fetch(assetReq);
+      }
+    }
+    // Hard-guard: root homepage MUST serve index.html.
+    // This avoids accidental fallback to payment.html when asset/CDN routing
+    // gets stale after deploy.
+    if (pathname === '/' && request.method === 'GET') {
+      if (env.ASSETS) {
+        const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
         return env.ASSETS.fetch(assetReq);
       }
     }
@@ -2701,10 +2919,17 @@ export default {
     if (pathname === '/api/admin/users' && request.method === 'POST') {
       return adminUserCreate(request, env);
     }
+    if (pathname === '/api/admin/users/reset-free' && request.method === 'POST') {
+      return adminUsersResetFree(request, env);
+    }
     {
       const m = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
       if (m && request.method === 'PATCH') return adminUserUpdate(request, env, m[1]);
       if (m && request.method === 'DELETE') return adminUserDelete(request, env, m[1]);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements$/);
+      if (m && request.method === 'POST') return adminGrantUserEntitlement(request, env, m[1]);
     }
 
     // === Static assets (index.html, dll) ===
