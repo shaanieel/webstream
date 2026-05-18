@@ -1762,32 +1762,87 @@ async function sha256HmacHex(secret, message) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function createVioletTransaction(env, order, userEmail) {
+// ───────────────────────────────────────────────────────────────────
+// VMP channel catalog
+// ───────────────────────────────────────────────────────────────────
+// Daftar channel pembayaran VMP yang ditampilkan di halaman /payment/checkout,
+// urut sesuai permintaan user. Fee dihitung berdasarkan rate publik VMP
+// (lihat https://violetmediapay.com/ docs). Fee ditanggung pembeli — di
+// /create kita kirim `nominal` = harga + fee dan `amount_merchant` = harga
+// asli, jadi VMP charge pembeli total (gross) tapi penjual tetap terima
+// harga asli setelah fee dipotong.
+const VMP_CHANNELS_ORDERED = [
+  { code: 'QRIS2',     label: 'QRIS',         metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 100 },
+  { code: 'MANDIRIVA', label: 'Mandiri VA',   metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 3000 },
+  { code: 'DANA',      label: 'DANA',         metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 1.67, fee_min: 100 },
+  { code: 'SHOPEEPAY', label: 'ShopeePay',    metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 4,    fee_min: 100 },
+  { code: 'OVO',       label: 'OVO',          metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 3.03, fee_min: 100 },
+  { code: 'ALFAMART',  label: 'Alfamart',     metode: 'Convenience Store',   tipe: 'retail',   fee_kind: 'flat',    fee_value: 3500 },
+  { code: 'INDOMARET', label: 'Indomaret',    metode: 'Convenience Store',   tipe: 'retail',   fee_kind: 'flat',    fee_value: 3500 },
+  { code: 'BSI',       label: 'BSI VA',       metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 3500 },
+  { code: 'DANAMON',   label: 'Danamon VA',   metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 2500 },
+];
+
+function computeVmpFee(amount, channel) {
+  if (!channel) return 0;
+  const base = Number(amount) || 0;
+  if (channel.fee_kind === 'flat') return Math.max(0, Math.ceil(channel.fee_value));
+  const pct = Math.ceil((base * Number(channel.fee_value || 0)) / 100);
+  const min = Number(channel.fee_min || 0);
+  return Math.max(pct, min);
+}
+
+function findVmpChannel(code) {
+  const key = String(code || '').toUpperCase().trim();
+  return VMP_CHANNELS_ORDERED.find(c => c.code === key) || null;
+}
+
+function listVmpChannelsForAmount(amount) {
+  return VMP_CHANNELS_ORDERED.map(ch => {
+    const fee = computeVmpFee(amount, ch);
+    return {
+      code: ch.code,
+      label: ch.label,
+      metode: ch.metode,
+      tipe: ch.tipe,
+      fee,
+      total: Number(amount) + fee,
+    };
+  });
+}
+
+async function createVioletTransaction(env, order, userEmail, { channel: channelCode, nominal, fee } = {}) {
   const apiKey = env.VIOLET_API_KEY || '';
   const secret = env.VIOLET_SECRET_KEY || '';
   if (!apiKey || !secret) throw new Error('VIOLET_API_KEY / VIOLET_SECRET_KEY belum di-set di Cloudflare secrets');
   const base = cleanPaymentBase(env);
-  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${order.amount}`);
-  const origin = (env.PUBLIC_BASE_URL || 'https://webstream.zaeinstreamx.workers.dev').replace(/\/$/, '');
+  // Pilih channel: kalau caller ga ngasih, fallback ke env override atau QRIS2.
+  const code = String(channelCode || env.VIOLET_DEFAULT_CHANNEL || 'QRIS2').toUpperCase();
+  const channel = findVmpChannel(code) || findVmpChannel('QRIS2');
+  const amountMerchant = Number(order.amount) || 0;
+  const feeCharged = Number.isFinite(Number(fee)) ? Math.max(0, Math.floor(Number(fee))) : computeVmpFee(amountMerchant, channel);
+  const grossNominal = Number.isFinite(Number(nominal)) ? Math.max(0, Math.floor(Number(nominal))) : amountMerchant + feeCharged;
+  // Signature VMP: HMAC_SHA256(secret, ref_kode + api_key + amount) — amount = nominal yg dibayar buyer (gross).
+  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${grossNominal}`);
+  const origin = (env.PUBLIC_BASE_URL || new URL(env.WORKER_SELF_URL || 'https://webstream.zaeinstreamx.workers.dev').origin).replace(/\/$/, '');
   const callbackUrl = `${origin}/api/payments/violet/callback`;
-  const channel = env.VIOLET_DEFAULT_CHANNEL || 'QRIS';
   const customerName = (userEmail || '').split('@')[0] || 'Pelanggan';
-  // VMP `/create` lebih konsisten kalau dikirim sebagai form-urlencoded
-  // (sesuai contoh dokumentasi mereka & implementasi proyek lain).
-  // Kirim juga beberapa alias callback (url_callback / callback_url /
-  // callback / callbackUrl) supaya VMP route per-transaksi ke endpoint kita
-  // alih-alih ke callback global yang sudah dipakai proyek lain.
+  // VMP `/create` paling konsisten kalau dikirim sebagai form-urlencoded
+  // (sesuai contoh dokumentasi). Kirim juga beberapa alias callback supaya
+  // VMP bisa route per-transaksi ke endpoint kita kalau memang support
+  // override per-create. Callback global mungkin sudah dipakai project lain.
   const formBody = new URLSearchParams({
     api_key: apiKey,
     apikey: apiKey,
     secret_key: secret,
     signature: String(signature),
-    channel_payment: channel,
-    code_payment: channel,
+    channel_payment: channel.code,
+    code_payment: channel.code,
     ref_kode: String(order.ref),
-    nominal: String(order.amount),
-    amount: String(order.amount),
-    amount_merchant: String(order.amount),
+    nominal: String(grossNominal),
+    amount: String(grossNominal),
+    amount_merchant: String(amountMerchant),
+    fee: String(feeCharged),
     cus_nama: customerName,
     nama: customerName,
     cus_email: String(userEmail || ''),
@@ -1811,7 +1866,7 @@ async function createVioletTransaction(env, order, userEmail) {
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`Violet HTTP ${res.status}: ${text.slice(0, 180)}`);
-  return data;
+  return { data, channel: channel.code, nominal: grossNominal, fee: feeCharged, amount_merchant: amountMerchant };
 }
 
 // Pick the first VMP transaction entry from a /create or /transactions response.
@@ -1862,8 +1917,41 @@ function normalizeVioletStatus(raw) {
   return 'pending';
 }
 
-// Poll VMP for transaction status (used by /api/payments/status as a fallback
-// when the merchant-wide callback URL is owned by another project).
+// Extract list of transaction entries from VMP /transactions response.
+// VMP `/transactions` actually returns SEMUA transaksi merchant, jadi kita
+// harus search by ref/ref_id, bukan asal ambil data[0] yang bisa transaksi
+// orang lain.
+function extractVioletTxList(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  const candidates = [payload.data, payload.result, payload.results, payload.transactions, payload.payments];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c;
+    if (c && typeof c === 'object') {
+      if (Array.isArray(c.data)) return c.data;
+      if (Array.isArray(c.transactions)) return c.transactions;
+      if (vioField(c, 'ref_id') || vioField(c, 'id_reference') || vioField(c, 'ref_kode') || vioField(c, 'ref')) return [c];
+    }
+  }
+  if (vioField(payload, 'ref_id') || vioField(payload, 'id_reference') || vioField(payload, 'ref_kode') || vioField(payload, 'ref')) return [payload];
+  return [];
+}
+
+function findVioletTxByRef(payload, refKode, refId) {
+  const list = extractVioletTxList(payload);
+  const wantRef = String(refKode || '').trim();
+  const wantId = String(refId || '').trim();
+  return list.find(item => {
+    const itemRef = String(vioField(item, 'ref_kode') || vioField(item, 'ref') || '').trim();
+    const itemId = String(vioField(item, 'ref_id') || vioField(item, 'id_reference') || '').trim();
+    return (wantRef && itemRef === wantRef) || (wantId && itemId === wantId);
+  }) || (list.length === 1 ? list[0] : null);
+}
+
+// Poll VMP for transaction status. Try JSON body first, fall back to
+// form-urlencoded — VMP kadang menolak salah satu format dengan
+// {status:false,data:[{status:"Invalid"}]} jadi kita perlu retry dengan
+// body format yang lain.
 async function fetchVioletTransactionStatus(env, refKode, refId) {
   const apiKey = env.VIOLET_API_KEY || '';
   const secret = env.VIOLET_SECRET_KEY || '';
@@ -1872,17 +1960,38 @@ async function fetchVioletTransactionStatus(env, refKode, refId) {
   const payload = { api_key: apiKey, secret_key: secret };
   if (refKode) payload.ref = String(refKode);
   if (refId) payload.ref_id = String(refId);
-  const res = await fetch(`${base}/transactions`, {
+
+  async function tryFetch(opts) {
+    const res = await fetch(`${base}/transactions`, opts);
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return { ok: res.ok, status: res.status, data, text };
+  }
+
+  // 1) JSON body
+  let parsed = await tryFetch({
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(payload),
   });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { raw: text }; }
-  return { ok: res.ok, status: res.status, data };
+  const topInvalid = String(parsed.data?.data?.status || parsed.data?.status || '').toLowerCase();
+  const list = extractVioletTxList(parsed.data);
+  // Kalau VMP balas {status:false} / "Invalid" / list kosong, retry pakai form-urlencoded.
+  if (!parsed.data?.status || !list.length || topInvalid.includes('invalid')) {
+    parsed = await tryFetch({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', Accept: 'application/json' },
+      body: new URLSearchParams(payload),
+    });
+  }
+  return parsed;
 }
 
+// POST /api/payments/checkout — buat order PENDING (belum nge-call VMP).
+// Flow baru: frontend redirect ke /payment/checkout?ref=<ref> setelah ini,
+// di halaman tsb user pilih channel + lihat fee, baru click "Bayar" yg
+// nge-trigger /api/payments/start → bikin VMP transaction & redirect ke VMP.
 async function paymentCheckout(request, env) {
   const user = await getUserFromAuth(request, env);
   if (!user) return err('Login dulu', 401);
@@ -1936,28 +2045,84 @@ async function paymentCheckout(request, env) {
   });
   if (!insert.ok) return err('Gagal membuat order: ' + JSON.stringify(insert.data).slice(0, 200), 500);
   const order = Array.isArray(insert.data) ? insert.data[0] : insert.data;
+  // checkout_url di-redirect ke halaman pilih-channel internal.
+  // Frontend boleh juga langsung pakai field `ref` dan navigate sendiri.
+  const checkoutUrl = `/payment/checkout?ref=${encodeURIComponent(ref)}`;
+  return json({ ok: true, order, checkout_url: checkoutUrl, ref });
+}
+
+// GET /api/payments/order?ref=... — fetch order detail untuk halaman /payment/checkout.
+// Aman dipanggil user yang login (di-scope ke user_id).
+async function paymentOrderGet(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const u = new URL(request.url);
+  const ref = u.searchParams.get('ref') || '';
+  if (!ref) return err('ref wajib');
+  const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&user_id=eq.${encodeURIComponent(user.id)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
+  const order = r.data[0];
+  const channels = listVmpChannelsForAmount(order.amount || 0);
+  return json({ ok: true, order, channels });
+}
+
+// GET /api/payments/channels?amount=... — list channel + fee untuk amount tertentu.
+function paymentChannelsList(request) {
+  const u = new URL(request.url);
+  const amount = Number(u.searchParams.get('amount') || 0);
+  return json({ ok: true, channels: listVmpChannelsForAmount(amount) });
+}
+
+// POST /api/payments/start — buat VMP transaction untuk order existing dengan channel pilihan.
+// Body: { ref, channel }
+async function paymentStart(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON'); }
+  const ref = String(body.ref || '').trim();
+  const channelCode = String(body.channel || '').toUpperCase().trim();
+  if (!ref) return err('ref wajib');
+  if (!findVmpChannel(channelCode)) return err('Channel pembayaran tidak valid');
+  const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&user_id=eq.${encodeURIComponent(user.id)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
+  const order = r.data[0];
+  if (order.status === 'success') return err('Order sudah dibayar', 409);
+  // Idempotency: kalau sudah pernah create VMP transaction untuk channel yang
+  // sama dan masih pending, langsung pakai checkout_url existing — VMP punya
+  // expired_time 24 jam jadi cukup safe.
+  const existingMeta = parseOrderMetadata(order.metadata);
+  if (order.checkout_url && existingMeta.violet_channel === channelCode && order.status === 'pending') {
+    return json({ ok: true, checkout_url: order.checkout_url, channel: channelCode, reused: true });
+  }
   try {
-    const violet = await createVioletTransaction(env, order, user.email || '');
-    const entry = pickVioletEntry(violet);
-    const checkoutUrl = vioField(entry, 'checkout_url') || violet.checkout_url || violet.result?.checkout_url || violet.url || null;
-    const refId = extractVioletRefId(violet);
-    const patchBody = { gateway_response: violet, checkout_url: checkoutUrl };
-    if (refId) {
-      // Simpan id_reference VMP ke metadata supaya bisa dipakai polling
-      // /transactions nanti — kita TIDAK menambahkan kolom baru ke skema DB.
-      patchBody.metadata = { ...(order.metadata || metadata || {}), violet_ref_id: String(refId) };
+    const violet = await createVioletTransaction(env, order, user.email || '', { channel: channelCode });
+    const data = violet.data;
+    const entry = pickVioletEntry(data);
+    const checkoutUrl = vioField(entry, 'checkout_url') || data.checkout_url || data.result?.checkout_url || data.url || null;
+    const refId = extractVioletRefId(data);
+    if (!checkoutUrl) {
+      return err('VMP tidak mengembalikan checkout_url: ' + JSON.stringify(data).slice(0, 200), 502);
     }
-    const patch = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
+    const patchBody = {
+      checkout_url: checkoutUrl,
+      gateway_response: data,
+      metadata: {
+        ...existingMeta,
+        violet_ref_id: refId ? String(refId) : existingMeta.violet_ref_id || null,
+        violet_channel: channelCode,
+        violet_nominal: violet.nominal,
+        violet_fee: violet.fee,
+        violet_amount_merchant: violet.amount_merchant,
+      },
+    };
+    await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
       method: 'PATCH',
       body: JSON.stringify(patchBody),
     });
-    return json({ ok: true, order: patch.ok && Array.isArray(patch.data) ? patch.data[0] : order, checkout_url: checkoutUrl, gateway: violet });
+    return json({ ok: true, checkout_url: checkoutUrl, channel: channelCode, nominal: violet.nominal, fee: violet.fee, gateway: data });
   } catch (e) {
-    await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'failed', gateway_response: { error: e.message } }),
-    });
-    return err('Gagal membuat checkout: ' + e.message, 502);
+    return err('Gagal membuat checkout VMP: ' + e.message, 502);
   }
 }
 
@@ -1981,7 +2146,12 @@ async function paymentStatus(request, env) {
       const meta = parseOrderMetadata(order.metadata);
       const refId = meta.violet_ref_id || extractVioletRefId(order.gateway_response) || null;
       const sync = await fetchVioletTransactionStatus(env, order.ref, refId);
-      const rawStatus = extractVioletStatus(sync.data);
+      // /transactions return list semua transaksi merchant. Cari yang
+      // matching ref_kode atau ref_id kita — kalau asal ambil data[0] bisa
+      // jadi transaksi orang lain (= polling selalu "pending" walau VMP
+      // bilang sukses).
+      const tx = findVioletTxByRef(sync.data, order.ref, refId);
+      const rawStatus = tx ? (vioField(tx, 'status') || vioField(tx, 'payment_status')) : extractVioletStatus(sync.data);
       const normalized = normalizeVioletStatus(rawStatus);
       if (normalized !== 'pending' && normalized !== order.status) {
         const patchBody = {
@@ -2009,32 +2179,84 @@ async function paymentStatus(request, env) {
   return json({ ok: true, order });
 }
 
-async function violetCallback(request, env) {
-  // VMP mengirim callback bisa dengan JSON, form-urlencoded, atau bahkan query
-  // string (tergantung channel). Toleran semua bentuk.
-  let body = {};
+// Forward callback ke worker lain (toko 1 / auto-drive-share). Dipakai supaya
+// callback URL VMP yang sudah disetel ke project lain BISA jadi 1 URL bersama:
+//   - prefix ZS-* → handle di sini (webstream — grant VIP / akses film)
+//   - prefix lain → forward as-is ke https://api.semuapro.store/api/callback
+// Kembalikan apa pun yang dijawab upstream (default 200 OK kalau gagal).
+async function forwardCallbackToToko1(request, rawBody, contentType, env) {
+  const upstream = (env.TOKO1_CALLBACK_URL || 'https://api.semuapro.store/api/callback').replace(/\/$/, '');
   try {
-    const ctype = String(request.headers.get('content-type') || '').toLowerCase();
-    if (ctype.includes('application/json')) {
-      body = await request.json();
-    } else if (ctype.includes('application/x-www-form-urlencoded') || ctype.includes('multipart/form-data')) {
-      const form = await request.formData();
-      body = Object.fromEntries(form.entries());
-    } else {
-      const text = await request.text();
-      try { body = JSON.parse(text); }
-      catch {
-        try { body = Object.fromEntries(new URLSearchParams(text)); }
-        catch { body = { raw: text }; }
-      }
+    const headers = { Accept: 'application/json' };
+    if (contentType) headers['Content-Type'] = contentType;
+    // forward X-Callback-Signature kalau ada (VMP pakai header itu utk auth)
+    const sig = request.headers.get('x-callback-signature');
+    if (sig) headers['X-Callback-Signature'] = sig;
+    const res = await fetch(upstream, {
+      method: 'POST',
+      headers,
+      body: rawBody,
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return new Response(JSON.stringify({ ok: true, forwarded_to: upstream, upstream_status: res.status, upstream_body: data }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+    });
+  } catch (e) {
+    // Walaupun upstream error, balas 200 ke VMP — supaya VMP gak retry forever.
+    return new Response(JSON.stringify({ ok: true, forwarded_to: upstream, error: e.message }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+    });
+  }
+}
+
+async function violetCallback(request, env) {
+  // Baca raw body DULU supaya kita bisa forward ke upstream apa-adanya kalau
+  // ref-nya bukan punya kita.
+  const ctype = String(request.headers.get('content-type') || '').toLowerCase();
+  const rawText = await request.text();
+
+  // Parse buat ekstrak ref_kode — tidak peduli format apa.
+  let body = {};
+  if (ctype.includes('application/json')) {
+    try { body = JSON.parse(rawText); } catch { body = {}; }
+  } else if (ctype.includes('application/x-www-form-urlencoded') || ctype.includes('multipart/form-data')) {
+    try { body = Object.fromEntries(new URLSearchParams(rawText)); } catch { body = {}; }
+  } else {
+    try { body = JSON.parse(rawText); }
+    catch {
+      try { body = Object.fromEntries(new URLSearchParams(rawText)); } catch { body = { raw: rawText }; }
     }
-  } catch (_) { body = {}; }
+  }
 
   const u = new URL(request.url);
-  const ref = body.ref_kode || body.ref || body.reference || u.searchParams.get('ref_kode') || u.searchParams.get('ref') || '';
-  if (!ref) return err('ref kosong', 400);
+  const ref = String(
+    body.ref_kode || body.ref || body.reference
+    || u.searchParams.get('ref_kode') || u.searchParams.get('ref') || ''
+  ).trim();
+
+  // Dispatcher: prefix non-ZS dianggap punya toko lain, forward as-is.
+  // Catatan: prefix bisa dikonfigurasi via env.WEBSTREAM_REF_PREFIX (default 'ZS-').
+  const ownPrefix = String(env.WEBSTREAM_REF_PREFIX || 'ZS-');
+  if (ref && !ref.startsWith(ownPrefix)) {
+    return forwardCallbackToToko1(request, rawText, ctype || 'application/x-www-form-urlencoded', env);
+  }
+
+  if (!ref) {
+    // Tidak ada ref sama sekali — kemungkinan VMP test ping. Forward ke
+    // upstream juga supaya toko 1 tidak kehilangan callback miliknya kalau
+    // memang itu mereka.
+    return forwardCallbackToToko1(request, rawText, ctype || 'application/x-www-form-urlencoded', env);
+  }
+
   const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&select=*`);
-  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) {
+    // Ref-nya prefix ZS- tapi nggak ada di DB kita — balikin 404 supaya VMP retry.
+    return err('Order tidak ditemukan', 404);
+  }
   const order = r.data[0];
   const newStatus = normalizeVioletStatus(body.status || body.payment_status);
   const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
@@ -2331,11 +2553,36 @@ export default {
     if (pathname === '/api/payments/checkout' && request.method === 'POST') {
       return paymentCheckout(request, env);
     }
+    if (pathname === '/api/payments/order' && request.method === 'GET') {
+      return paymentOrderGet(request, env);
+    }
+    if (pathname === '/api/payments/channels' && request.method === 'GET') {
+      return paymentChannelsList(request);
+    }
+    if (pathname === '/api/payments/start' && request.method === 'POST') {
+      return paymentStart(request, env);
+    }
     if (pathname === '/api/payments/status' && request.method === 'GET') {
       return paymentStatus(request, env);
     }
-    if (pathname === '/api/payments/violet/callback' && request.method === 'POST') {
+    // Callback URL VMP — terima POST & GET supaya VMP yang variant query-string juga aman.
+    // Dispatcher di violetCallback() akan forward ke toko 1 kalau ref bukan ZS-*.
+    if (pathname === '/api/payments/violet/callback' && (request.method === 'POST' || request.method === 'GET')) {
       return violetCallback(request, env);
+    }
+    // Alias supaya kamu bisa setup callback URL pendek di dashboard VMP.
+    if (pathname === '/api/callback' && (request.method === 'POST' || request.method === 'GET')) {
+      return violetCallback(request, env);
+    }
+
+    // === Payment page ===
+    // /payment/checkout?ref=... → serve public/payment.html
+    // /payment/success?ref=... → SPA index.html sudah handle polling
+    if (pathname === '/payment/checkout' && request.method === 'GET') {
+      if (env.ASSETS) {
+        const assetReq = new Request(new URL('/payment.html', url.origin).toString(), request);
+        return env.ASSETS.fetch(assetReq);
+      }
     }
     // === TMDB (any authenticated user; key tetap di-server, gak ke browser) ===
     if (pathname === '/api/tmdb/search' && request.method === 'GET') {
