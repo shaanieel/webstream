@@ -117,12 +117,25 @@ async function getUserFromAuth(request, env) {
 // Lookup users_profile in the LOCAL supabase by user_id, with email as a
 // fallback for legacy rows that may not have user_id populated.
 async function getUserProfile(env, userId, email) {
+  async function _normalizeVipState(row) {
+    if (!row) return row;
+    const exp = row.expired_at ? new Date(row.expired_at) : null;
+    const expired = !!(row.is_vip && exp && exp < new Date());
+    if (!expired) return row;
+    try {
+      await supabaseRest(env, `/users_profile?user_id=eq.${encodeURIComponent(row.user_id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_vip: false, expired_at: null }),
+      });
+    } catch {}
+    return { ...row, is_vip: false, expired_at: null };
+  }
   if (userId) {
     const r = await supabaseRest(
       env,
       `/users_profile?user_id=eq.${userId}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
-    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+    if (r.ok && Array.isArray(r.data) && r.data.length) return _normalizeVipState(r.data[0]);
   }
   if (email) {
     const e = encodeURIComponent(email.toLowerCase());
@@ -130,7 +143,7 @@ async function getUserProfile(env, userId, email) {
       env,
       `/users_profile?email=eq.${e}&select=user_id,email,is_vip,expired_at,password_plain,created_at`
     );
-    if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+    if (r.ok && Array.isArray(r.data) && r.data.length) return _normalizeVipState(r.data[0]);
   }
   return null;
 }
@@ -1532,7 +1545,14 @@ async function adminUserList(request, env) {
   );
   if (!r.ok) return err('Gagal load users', 500);
   const users = Array.isArray(r.data) ? r.data : [];
+  const now = new Date();
   for (const u of users) {
+    const exp = u.expired_at ? new Date(u.expired_at) : null;
+    const vipActive = !!(u.is_vip && exp && exp > now);
+    if (!vipActive) {
+      u.is_vip = false;
+      u.expired_at = null;
+    }
     const ents = await userEntitlements(env, u.user_id);
     u.entitlement_count = ents.length;
   }
@@ -1548,7 +1568,7 @@ async function adminUserCreate(request, env) {
   const email = (body && body.email || '').trim().toLowerCase();
   const password = (body && body.password || '').trim();
   const isVip = !!(body && body.is_vip);
-  const expiredAt = body && body.expired_at ? body.expired_at : null;
+  const expiredAt = isVip && body && body.expired_at ? body.expired_at : null;
   if (!email) return err('Email wajib diisi', 400);
   if (!password) return err('Password wajib diisi', 400);
   if (password.length < 6) return err('Password minimal 6 karakter', 400);
@@ -1592,8 +1612,11 @@ async function adminUserUpdate(request, env, userId) {
 
   // 1. Update users_profile (vip / expired_at / email / password_plain)
   const profilePatch = {};
+  if (body.is_vip !== undefined) {
+    profilePatch.is_vip = !!body.is_vip;
+    if (!profilePatch.is_vip) profilePatch.expired_at = null;
+  }
   if (body.expired_at !== undefined) profilePatch.expired_at = body.expired_at;
-  if (body.is_vip !== undefined) profilePatch.is_vip = !!body.is_vip;
   if (body.email !== undefined) profilePatch.email = (body.email || '').trim().toLowerCase();
   if (body.password) profilePatch.password_plain = body.password;
   if (Object.keys(profilePatch).length) {
@@ -1620,6 +1643,45 @@ async function adminUserUpdate(request, env, userId) {
   }
 
   return json({ ok: true });
+}
+
+async function adminUsersResetFree(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, '/users_profile', {
+    method: 'PATCH',
+    body: JSON.stringify({ is_vip: false, expired_at: null }),
+  });
+  if (!r.ok) return err('Gagal reset users ke free', 500);
+  return json({ ok: true });
+}
+
+async function adminGrantUserEntitlement(request, env, userId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
+  const filmId = Number(body.film_id || 0);
+  if (!filmId) return err('film_id wajib', 400);
+  const film = await getFilmById(env, filmId);
+  if (!film) return err('Film tidak ditemukan', 404);
+  const key = entitlementKeyForFilm(film);
+  const kind = normalizeFilmKind(film);
+  const up = await supabaseRest(env, '/film_entitlements', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: JSON.stringify({
+      user_id: userId,
+      film_id: film.id,
+      kind,
+      entitlement_key: key,
+      title: film.judul || 'Film',
+      season: film.season || null,
+      expires_at: null,
+    }),
+  });
+  if (!up.ok) return err('Gagal tambah akses film', 500);
+  return json({ ok: true, entitlement: Array.isArray(up.data) ? up.data[0] : up.data });
 }
 
 async function adminUserDelete(request, env, userId) {
@@ -1809,7 +1871,7 @@ async function validateVioletCallbackSignature(env, body) {
 // asli, jadi VMP charge pembeli total (gross) tapi penjual tetap terima
 // harga asli setelah fee dipotong.
 const VMP_CHANNELS_ORDERED = [
-  { code: 'QRIS2',     label: 'QRIS',         metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 100 },
+  { code: 'QRIS2',     label: 'QRIS2',        metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 100 },
   { code: 'MANDIRIVA', label: 'Mandiri VA',   metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 3000 },
   { code: 'DANA',      label: 'DANA',         metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 1.67, fee_min: 100 },
   { code: 'SHOPEEPAY', label: 'ShopeePay',    metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 4,    fee_min: 100 },
@@ -1859,8 +1921,8 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
   const amountMerchant = Number(order.amount) || 0;
   const feeCharged = Number.isFinite(Number(fee)) ? Math.max(0, Math.floor(Number(fee))) : computeVmpFee(amountMerchant, channel);
   const grossNominal = Number.isFinite(Number(nominal)) ? Math.max(0, Math.floor(Number(nominal))) : amountMerchant + feeCharged;
-  // Signature VMP: HMAC_SHA256(secret, ref_kode + api_key + amount) — amount = nominal yg dibayar buyer (gross).
-  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${grossNominal}`);
+  const nominalToGateway = amountMerchant;
+  const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${nominalToGateway}`);
   const origin = (env.PUBLIC_BASE_URL || new URL(env.WORKER_SELF_URL || 'https://webstream.zaeinstreamx.workers.dev').origin).replace(/\/$/, '');
   const callbackUrl = `${origin}/api/payments/violet/callback`;
   const customerName = (userEmail || '').split('@')[0] || 'Pelanggan';
@@ -1876,8 +1938,8 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
     channel_payment: channel.code,
     code_payment: channel.code,
     ref_kode: String(order.ref),
-    nominal: String(grossNominal),
-    amount: String(grossNominal),
+    nominal: String(nominalToGateway),
+    amount: String(nominalToGateway),
     amount_merchant: String(amountMerchant),
     fee: String(feeCharged),
     cus_nama: customerName,
@@ -1903,7 +1965,7 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`Violet HTTP ${res.status}: ${text.slice(0, 180)}`);
-  return { data, channel: channel.code, nominal: grossNominal, fee: feeCharged, amount_merchant: amountMerchant };
+  return { data, channel: channel.code, nominal: nominalToGateway, fee: feeCharged, amount_merchant: amountMerchant, estimated_gross: grossNominal };
 }
 
 // Pick the first VMP transaction entry from a /create or /transactions response.
@@ -2773,10 +2835,17 @@ export default {
     if (pathname === '/api/admin/users' && request.method === 'POST') {
       return adminUserCreate(request, env);
     }
+    if (pathname === '/api/admin/users/reset-free' && request.method === 'POST') {
+      return adminUsersResetFree(request, env);
+    }
     {
       const m = pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
       if (m && request.method === 'PATCH') return adminUserUpdate(request, env, m[1]);
       if (m && request.method === 'DELETE') return adminUserDelete(request, env, m[1]);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements$/);
+      if (m && request.method === 'POST') return adminGrantUserEntitlement(request, env, m[1]);
     }
 
     // === Static assets (index.html, dll) ===
