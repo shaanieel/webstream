@@ -2626,10 +2626,17 @@ export default {
     // Backward-compat: beberapa link lama masih pakai /payment?ref=...
     // Redirect ke route baru /payment/checkout?ref=...
     if (pathname === '/payment' && request.method === 'GET') {
-      const ref = (url.searchParams.get('ref') || '').trim();
+      const ref = (
+        url.searchParams.get('ref')
+        || url.searchParams.get('ref_kode')
+        || url.searchParams.get('reference')
+        || url.searchParams.get('order_ref')
+        || ''
+      ).trim();
       if (ref) {
         return Response.redirect(`${url.origin}/payment/checkout?ref=${encodeURIComponent(ref)}`, 302);
       }
+      return Response.redirect(`${url.origin}/`, 302);
     }
     // /payment/checkout?ref=... → serve public/payment.html
     // /payment/success?ref=... → SPA index.html sudah handle polling
