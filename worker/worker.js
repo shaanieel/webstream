@@ -1684,6 +1684,20 @@ async function adminGrantUserEntitlement(request, env, userId) {
   return json({ ok: true, entitlement: Array.isArray(up.data) ? up.data[0] : up.data });
 }
 
+async function adminRevokeUserEntitlement(request, env, userId, entitlementId) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const entId = String(entitlementId || '').trim();
+  if (!entId) return err('entitlement_id wajib', 400);
+  const r = await supabaseRest(
+    env,
+    `/film_entitlements?id=eq.${encodeURIComponent(entId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: 'DELETE' }
+  );
+  if (!r.ok) return err('Gagal hapus akses film user', 500);
+  return json({ ok: true });
+}
+
 async function adminUserDelete(request, env, userId) {
   const admin = await requireAdmin(request, env);
   if (!admin) return err('Forbidden', 403);
@@ -2930,6 +2944,10 @@ export default {
     {
       const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements$/);
       if (m && request.method === 'POST') return adminGrantUserEntitlement(request, env, m[1]);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/users\/([^/]+)\/entitlements\/([^/]+)$/);
+      if (m && request.method === 'DELETE') return adminRevokeUserEntitlement(request, env, m[1], m[2]);
     }
 
     // === Static assets (index.html, dll) ===
