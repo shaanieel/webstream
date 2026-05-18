@@ -1743,6 +1743,25 @@ async function applyPaidOrder(env, order) {
   if (meta.vip_days) return grantVip(env, order.user_id, Number(meta.vip_days));
 }
 
+// HMAC-SHA256 via Web Crypto (tersedia di Cloudflare Workers runtime).
+// Mengikuti spesifikasi Violet Media Pay:
+//   signature = HMAC_SHA256( secret_key, ref_kode + api_key + amount ) → hex
+async function sha256HmacHex(secret, message) {
+  if (!secret || !String(secret).trim()) {
+    throw new Error('VIOLET_SECRET_KEY kosong atau belum di-set di Cloudflare secrets');
+  }
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(String(secret)),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const buf = await crypto.subtle.sign('HMAC', key, enc.encode(String(message)));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function createVioletTransaction(env, order, userEmail) {
   const apiKey = env.VIOLET_API_KEY || '';
   const secret = env.VIOLET_SECRET_KEY || '';
@@ -1750,31 +1769,118 @@ async function createVioletTransaction(env, order, userEmail) {
   const base = cleanPaymentBase(env);
   const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${order.amount}`);
   const origin = (env.PUBLIC_BASE_URL || 'https://webstream.zaeinstreamx.workers.dev').replace(/\/$/, '');
-  const body = {
+  const callbackUrl = `${origin}/api/payments/violet/callback`;
+  const channel = env.VIOLET_DEFAULT_CHANNEL || 'QRIS';
+  const customerName = (userEmail || '').split('@')[0] || 'Pelanggan';
+  // VMP `/create` lebih konsisten kalau dikirim sebagai form-urlencoded
+  // (sesuai contoh dokumentasi mereka & implementasi proyek lain).
+  // Kirim juga beberapa alias callback (url_callback / callback_url /
+  // callback / callbackUrl) supaya VMP route per-transaksi ke endpoint kita
+  // alih-alih ke callback global yang sudah dipakai proyek lain.
+  const formBody = new URLSearchParams({
     api_key: apiKey,
+    apikey: apiKey,
     secret_key: secret,
-    channel_payment: env.VIOLET_DEFAULT_CHANNEL || 'QRIS',
-    ref_kode: order.ref,
-    nominal: order.amount,
-    cus_nama: userEmail.split('@')[0] || 'Pelanggan',
-    cus_email: userEmail,
+    signature: String(signature),
+    channel_payment: channel,
+    code_payment: channel,
+    ref_kode: String(order.ref),
+    nominal: String(order.amount),
+    amount: String(order.amount),
+    amount_merchant: String(order.amount),
+    cus_nama: customerName,
+    nama: customerName,
+    cus_email: String(userEmail || ''),
+    email: String(userEmail || ''),
     cus_phone: env.VIOLET_DEFAULT_PHONE || '081234567890',
-    produk: order.product_name,
+    phone: env.VIOLET_DEFAULT_PHONE || '081234567890',
+    produk: String(order.product_name || ''),
     url_redirect: `${origin}/payment/success?ref=${encodeURIComponent(order.ref)}`,
-    url_callback: `${origin}/api/payments/violet/callback`,
-    expired_time: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
-    signature,
-  };
+    url_callback: callbackUrl,
+    callback_url: callbackUrl,
+    callback: callbackUrl,
+    callbackUrl: callbackUrl,
+    expired_time: String(Math.floor(Date.now() / 1000) + 24 * 60 * 60),
+  });
   const res = await fetch(`${base}/create`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', Accept: 'application/json' },
+    body: formBody,
   });
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`Violet HTTP ${res.status}: ${text.slice(0, 180)}`);
   return data;
+}
+
+// Pick the first VMP transaction entry from a /create or /transactions response.
+function pickVioletEntry(data) {
+  if (!data || typeof data !== 'object') return {};
+  if (Array.isArray(data.data) && data.data.length) return data.data[0] || {};
+  if (data.data && typeof data.data === 'object') return data.data;
+  return data;
+}
+
+// Some VMP fields have a stray trailing space in their JSON keys (e.g. "ref_kode ",
+// "id_reference ", "nominal "). Try both variants when reading.
+function vioField(obj, key) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  if (obj[key] !== undefined) return obj[key];
+  if (obj[`${key} `] !== undefined) return obj[`${key} `];
+  return undefined;
+}
+
+function extractVioletRefId(data) {
+  const entry = pickVioletEntry(data);
+  return (
+    vioField(entry, 'id_reference')
+    || vioField(entry, 'ref_id')
+    || vioField(data, 'id_reference')
+    || vioField(data, 'ref_id')
+    || null
+  );
+}
+
+function extractVioletStatus(data) {
+  const entry = pickVioletEntry(data);
+  return String(
+    vioField(entry, 'status')
+    || vioField(entry, 'payment_status')
+    || vioField(data, 'status')
+    || ''
+  ).toLowerCase();
+}
+
+// Map VMP status string → internal status. VMP can return e.g. 'success',
+// 'Belum Dibayar' (unpaid), 'kadaluarsa' (expired), 'failed', 'cancel'.
+function normalizeVioletStatus(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (!s) return 'pending';
+  if (['success', 'paid', 'settlement', 'berhasil', 'sukses'].some(k => s.includes(k))) return 'success';
+  if (['kadaluarsa', 'expired', 'failed', 'cancel', 'gagal'].some(k => s.includes(k))) return 'failed';
+  return 'pending';
+}
+
+// Poll VMP for transaction status (used by /api/payments/status as a fallback
+// when the merchant-wide callback URL is owned by another project).
+async function fetchVioletTransactionStatus(env, refKode, refId) {
+  const apiKey = env.VIOLET_API_KEY || '';
+  const secret = env.VIOLET_SECRET_KEY || '';
+  if (!apiKey || !secret) throw new Error('VIOLET_API_KEY / VIOLET_SECRET_KEY belum di-set di Cloudflare secrets');
+  const base = cleanPaymentBase(env);
+  const payload = { api_key: apiKey, secret_key: secret };
+  if (refKode) payload.ref = String(refKode);
+  if (refId) payload.ref_id = String(refId);
+  const res = await fetch(`${base}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  return { ok: res.ok, status: res.status, data };
 }
 
 async function paymentCheckout(request, env) {
@@ -1832,10 +1938,18 @@ async function paymentCheckout(request, env) {
   const order = Array.isArray(insert.data) ? insert.data[0] : insert.data;
   try {
     const violet = await createVioletTransaction(env, order, user.email || '');
-    const checkoutUrl = violet.checkout_url || violet.data?.checkout_url || violet.result?.checkout_url || violet.url || null;
+    const entry = pickVioletEntry(violet);
+    const checkoutUrl = vioField(entry, 'checkout_url') || violet.checkout_url || violet.result?.checkout_url || violet.url || null;
+    const refId = extractVioletRefId(violet);
+    const patchBody = { gateway_response: violet, checkout_url: checkoutUrl };
+    if (refId) {
+      // Simpan id_reference VMP ke metadata supaya bisa dipakai polling
+      // /transactions nanti — kita TIDAK menambahkan kolom baru ke skema DB.
+      patchBody.metadata = { ...(order.metadata || metadata || {}), violet_ref_id: String(refId) };
+    }
     const patch = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ gateway_response: violet, checkout_url: checkoutUrl }),
+      body: JSON.stringify(patchBody),
     });
     return json({ ok: true, order: patch.ok && Array.isArray(patch.data) ? patch.data[0] : order, checkout_url: checkoutUrl, gateway: violet });
   } catch (e) {
@@ -1855,27 +1969,82 @@ async function paymentStatus(request, env) {
   if (!ref) return err('ref wajib');
   const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&user_id=eq.${encodeURIComponent(user.id)}&select=*`);
   if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
-  return json({ ok: true, order: r.data[0] });
+  let order = r.data[0];
+
+  // Kalau status di DB masih 'pending', sync ke Violet Media Pay.
+  // Ini menutupi kasus di mana callback VMP global terdaftar ke project lain,
+  // jadi kita TIDAK pernah dapat notifikasi sukses. Setelah user redirect
+  // balik ke /payment/success?ref=..., frontend akan poll endpoint ini dan
+  // worker akan otomatis tanya ke VMP + apply order kalau memang sudah lunas.
+  if (order.status === 'pending' && (env.VIOLET_API_KEY && env.VIOLET_SECRET_KEY)) {
+    try {
+      const meta = parseOrderMetadata(order.metadata);
+      const refId = meta.violet_ref_id || extractVioletRefId(order.gateway_response) || null;
+      const sync = await fetchVioletTransactionStatus(env, order.ref, refId);
+      const rawStatus = extractVioletStatus(sync.data);
+      const normalized = normalizeVioletStatus(rawStatus);
+      if (normalized !== 'pending' && normalized !== order.status) {
+        const patchBody = {
+          status: normalized,
+          gateway_response: { ...(order.gateway_response || {}), last_sync: sync.data, last_sync_at: new Date().toISOString() },
+        };
+        if (normalized === 'success' && !order.paid_at) patchBody.paid_at = new Date().toISOString();
+        const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(order.ref)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(patchBody),
+        });
+        if (up.ok && Array.isArray(up.data) && up.data.length) {
+          order = up.data[0];
+        } else {
+          order = { ...order, ...patchBody };
+        }
+        if (normalized === 'success') {
+          try { await applyPaidOrder(env, order); } catch (_) { /* idempotent grants — ignore secondary errors */ }
+        }
+      }
+    } catch (_) {
+      // Sync ke VMP gagal — jangan throw, biarkan FE polling lagi nanti.
+    }
+  }
+  return json({ ok: true, order });
 }
 
 async function violetCallback(request, env) {
-  let body;
-  try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
-  const ref = body.ref_kode || body.id_reference || body.reference || body.ref || '';
+  // VMP mengirim callback bisa dengan JSON, form-urlencoded, atau bahkan query
+  // string (tergantung channel). Toleran semua bentuk.
+  let body = {};
+  try {
+    const ctype = String(request.headers.get('content-type') || '').toLowerCase();
+    if (ctype.includes('application/json')) {
+      body = await request.json();
+    } else if (ctype.includes('application/x-www-form-urlencoded') || ctype.includes('multipart/form-data')) {
+      const form = await request.formData();
+      body = Object.fromEntries(form.entries());
+    } else {
+      const text = await request.text();
+      try { body = JSON.parse(text); }
+      catch {
+        try { body = Object.fromEntries(new URLSearchParams(text)); }
+        catch { body = { raw: text }; }
+      }
+    }
+  } catch (_) { body = {}; }
+
+  const u = new URL(request.url);
+  const ref = body.ref_kode || body.ref || body.reference || u.searchParams.get('ref_kode') || u.searchParams.get('ref') || '';
   if (!ref) return err('ref kosong', 400);
   const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&select=*`);
   if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Order tidak ditemukan', 404);
   const order = r.data[0];
-  const statusRaw = String(body.status || body.payment_status || '').toLowerCase();
-  const paid = ['success', 'paid', 'berhasil', 'settlement'].some(s => statusRaw.includes(s));
-  const failed = ['kadaluarsa', 'expired', 'failed', 'cancel'].some(s => statusRaw.includes(s));
-  const newStatus = paid ? 'success' : failed ? 'failed' : 'pending';
+  const newStatus = normalizeVioletStatus(body.status || body.payment_status);
   const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ status: newStatus, gateway_response: body, paid_at: paid ? new Date().toISOString() : order.paid_at }),
+    body: JSON.stringify({ status: newStatus, gateway_response: body, paid_at: newStatus === 'success' ? new Date().toISOString() : order.paid_at }),
   });
   const updated = up.ok && Array.isArray(up.data) ? up.data[0] : { ...order, status: newStatus };
-  if (paid) await applyPaidOrder(env, updated);
+  if (newStatus === 'success') {
+    try { await applyPaidOrder(env, updated); } catch (_) { /* idempotent */ }
+  }
   return json({ ok: true });
 }
 
