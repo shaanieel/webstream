@@ -1762,6 +1762,43 @@ async function sha256HmacHex(secret, message) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function validateVioletCallbackSignature(env, body) {
+  const secret = env.VIOLET_SECRET_KEY || '';
+  const apiKey = env.VIOLET_API_KEY || '';
+  if (!secret || !apiKey) {
+    return { ok: false, error: 'VIOLET_API_KEY / VIOLET_SECRET_KEY belum di-set' };
+  }
+  const ref = String(body.ref_kode || body.ref || body.reference || '').trim();
+  const signature = String(body.signature || body['x-callback-signature'] || '').trim().toLowerCase();
+  if (!ref || !signature) {
+    return { ok: false, error: 'Callback VMP tidak punya ref/signature' };
+  }
+
+  const amountCandidates = [
+    body.total_amount,
+    body.nominal,
+    body.amount,
+    body.amount_received,
+    body.amount_merchant,
+  ]
+    .map(v => String(v || '').replace(/[^\d]/g, '').trim())
+    .filter(Boolean);
+
+  const messages = [
+    ref,
+    `${ref}${apiKey}`,
+    ...amountCandidates.map(a => `${ref}${apiKey}${a}`),
+  ];
+  const expectedSet = new Set();
+  for (const msg of messages) {
+    expectedSet.add((await sha256HmacHex(secret, msg)).toLowerCase());
+  }
+  if (!expectedSet.has(signature)) {
+    return { ok: false, error: 'Signature callback VMP tidak valid' };
+  }
+  return { ok: true };
+}
+
 // ───────────────────────────────────────────────────────────────────
 // VMP channel catalog
 // ───────────────────────────────────────────────────────────────────
@@ -2185,7 +2222,7 @@ async function paymentStatus(request, env) {
 //   - prefix lain → forward as-is ke https://api.semuapro.store/api/callback
 // Kembalikan apa pun yang dijawab upstream (default 200 OK kalau gagal).
 async function forwardCallbackToToko1(request, rawBody, contentType, env) {
-  const upstream = (env.TOKO1_CALLBACK_URL || 'https://api.semuapro.store/api/callback').replace(/\/$/, '');
+  const upstream = (env.TOKO1_CALLBACK_URL || 'https://api.semuapro.store/api/callback').trim();
   try {
     const headers = { Accept: 'application/json' };
     if (contentType) headers['Content-Type'] = contentType;
@@ -2237,6 +2274,8 @@ async function violetCallback(request, env) {
     body.ref_kode || body.ref || body.reference
     || u.searchParams.get('ref_kode') || u.searchParams.get('ref') || ''
   ).trim();
+  const headerSig = String(request.headers.get('x-callback-signature') || '').trim();
+  if (headerSig && !body['x-callback-signature']) body['x-callback-signature'] = headerSig;
 
   // Dispatcher: prefix non-ZS dianggap punya toko lain, forward as-is.
   // Catatan: prefix bisa dikonfigurasi via env.WEBSTREAM_REF_PREFIX (default 'ZS-').
@@ -2254,10 +2293,18 @@ async function violetCallback(request, env) {
 
   const r = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}&select=*`);
   if (!r.ok || !Array.isArray(r.data) || !r.data.length) {
-    // Ref-nya prefix ZS- tapi nggak ada di DB kita — balikin 404 supaya VMP retry.
-    return err('Order tidak ditemukan', 404);
+    // Ref terlihat milik webstream tapi tidak ditemukan. Supaya callback toko1
+    // tetap aman (mis. ada ref legacy/bentrok), forward juga ke toko1.
+    return forwardCallbackToToko1(request, rawText, ctype || 'application/x-www-form-urlencoded', env);
   }
   const order = r.data[0];
+  const enforceSig = ['1', 'true', 'yes', 'on'].includes(
+    String(env.WEBSTREAM_VERIFY_VMP_CALLBACK_SIG || '0').toLowerCase()
+  );
+  if (enforceSig) {
+    const sigCheck = await validateVioletCallbackSignature(env, body);
+    if (!sigCheck.ok) return err(sigCheck.error, 401);
+  }
   const newStatus = normalizeVioletStatus(body.status || body.payment_status);
   const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
     method: 'PATCH',
@@ -2576,6 +2623,14 @@ export default {
     }
 
     // === Payment page ===
+    // Backward-compat: beberapa link lama masih pakai /payment?ref=...
+    // Redirect ke route baru /payment/checkout?ref=...
+    if (pathname === '/payment' && request.method === 'GET') {
+      const ref = (url.searchParams.get('ref') || '').trim();
+      if (ref) {
+        return Response.redirect(`${url.origin}/payment/checkout?ref=${encodeURIComponent(ref)}`, 302);
+      }
+    }
     // /payment/checkout?ref=... → serve public/payment.html
     // /payment/success?ref=... → SPA index.html sudah handle polling
     if (pathname === '/payment/checkout' && request.method === 'GET') {
