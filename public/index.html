@@ -2810,6 +2810,7 @@ let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
 let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
 let cart = JSON.parse(localStorage.getItem('zaein_cart')||'[]');
+cart = Array.isArray(cart) ? cart.map(i => ({ ...i, selected: i && i.selected !== false })) : [];
 let currentEntitlements = [];
 let currentFilm = null;
 let currentResumeFrom = 0;
@@ -6057,11 +6058,51 @@ async function renderPaymentCheckoutPage(){
     mount.innerHTML = `<div style="text-align:center;color:var(--red);font-weight:700;">Gagal memuat order: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
-function addToCart(id){ const f=allFilms.find(x=>String(x.id)===String(id)); if(!f) return; const key=filmEntitlementKey(f); if(!cart.some(i=>i.key===key)) cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f)}); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); closePayModal(); showToast('Masuk keranjang','success'); }
+function addToCart(id){ const f=allFilms.find(x=>String(x.id)===String(id)); if(!f) return; const key=filmEntitlementKey(f); if(!cart.some(i=>i.key===key)) cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f),selected:true}); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); closePayModal(); showToast('Masuk keranjang','success'); }
 function updateCartCount(){ const el=document.getElementById('cartCount'); if(!el) return; el.textContent=cart.length; el.style.display=cart.length?'inline-flex':'none'; }
-function removeCartItem(key){ cart=cart.filter(i=>i.key!==key); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); renderCartPage(); }
-function renderCartPage(){ const list=document.getElementById('cartList'); if(!list) return; if(!cart.length){ list.innerHTML='<div class="empty-state">Keranjang masih kosong.</div>'; document.getElementById('cartTotal').textContent='Rp0'; return; } list.innerHTML=cart.map(i=>`<div class="cart-row"><div><div class="cart-row-title">${escapeHtml(i.title)}</div><div class="cart-row-meta">${i.type==='series'?'Season '+(i.season||1):'Movie'} • ${rupiah(i.price)}</div></div><button class="action-btn action-delete" onclick="removeCartItem('${escapeHtml(i.key)}')">Hapus</button></div>`).join(''); document.getElementById('cartTotal').textContent=rupiah(cart.reduce((s,i)=>s+Number(i.price||0),0)); }
-function checkoutCart(){ if(!cart.length){ showToast('Keranjang kosong','error'); return; } checkoutFilm(cart[0].id); }
+function saveCart(){ localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); }
+function removeCartItem(key){ cart=cart.filter(i=>i.key!==key); saveCart(); renderCartPage(); }
+function clearCart(){ if(!cart.length) return; if(!confirm('Kosongkan semua isi keranjang?')) return; cart=[]; saveCart(); renderCartPage(); }
+function selectAllCart(val){ cart=cart.map(i=>({...i,selected:!!val})); saveCart(); renderCartPage(); }
+function toggleCartItem(key, val){ cart=cart.map(i=>i.key===key?{...i,selected:!!val}:i); saveCart(); renderCartPage(); }
+function selectedCartItems(){ return cart.filter(i=>i.selected !== false); }
+function renderCartPage(){
+  const list=document.getElementById('cartList');
+  if(!list) return;
+  const totalEl=document.getElementById('cartTotal');
+  if(!cart.length){
+    list.innerHTML='<div class="empty-state">Keranjang masih kosong.</div>';
+    if(totalEl) totalEl.textContent='Rp0';
+    return;
+  }
+  const selected=selectedCartItems();
+  const allChecked = selected.length === cart.length;
+  list.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+      <button class="action-btn action-extend" onclick="selectAllCart(true)">Pilih semua</button>
+      <button class="action-btn action-edit" onclick="selectAllCart(false)">Batalkan semua</button>
+      <button class="action-btn action-delete" onclick="clearCart()">Hapus semua</button>
+      <span style="margin-left:auto;color:var(--muted);font-size:.86rem;">Dipilih ${selected.length}/${cart.length}</span>
+    </div>
+    ${cart.map(i=>`<div class="cart-row">
+      <label style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <input type="checkbox" ${i.selected!==false?'checked':''} onchange="toggleCartItem('${escapeHtml(i.key)}', this.checked)"/>
+        <div>
+          <div class="cart-row-title">${escapeHtml(i.title)}</div>
+          <div class="cart-row-meta">${i.type==='series'?'Season '+(i.season||1):'Movie'} • ${rupiah(i.price)}</div>
+        </div>
+      </label>
+      <button class="action-btn action-delete" onclick="removeCartItem('${escapeHtml(i.key)}')">Hapus</button>
+    </div>`).join('')}
+  `;
+  if(totalEl) totalEl.textContent=rupiah(selected.reduce((s,i)=>s+Number(i.price||0),0));
+}
+async function checkoutCart(){
+  const selected=selectedCartItems();
+  if(!cart.length){ showToast('Keranjang kosong','error'); return; }
+  if(!selected.length){ showToast('Pilih minimal 1 item di keranjang','error'); return; }
+  await startCheckout({ type:'cart', items:selected.map(i=>i.id) });
+}
 function renderCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
 function fmtPreviewTime(totalSeconds){
   const s = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
