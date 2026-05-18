@@ -2326,6 +2326,39 @@ async function paymentStatus(request, env) {
   return json({ ok: true, order });
 }
 
+// GET /api/payments/my-orders — riwayat pembelian user login.
+async function paymentMyOrders(request, env) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return err('Login dulu', 401);
+  const r = await supabaseRest(
+    env,
+    `/payment_orders?user_id=eq.${encodeURIComponent(user.id)}&select=ref,product_type,product_name,amount,status,created_at,paid_at,metadata&order=created_at.desc&limit=200`
+  );
+  if (!r.ok) return err('Gagal memuat riwayat pembelian', 500);
+  const orders = (Array.isArray(r.data) ? r.data : []).map(o => {
+    const meta = parseOrderMetadata(o.metadata);
+    const items = Array.isArray(meta.cart_items) && meta.cart_items.length
+      ? meta.cart_items.map(i => ({
+          title: i.title || 'Film',
+          kind: i.kind || 'movie',
+          season: i.season || null,
+          price: Number(i.price || 0),
+        }))
+      : [{
+          title: meta.title || o.product_name || 'Produk',
+          kind: meta.kind || o.product_type || 'other',
+          season: meta.season || null,
+          price: Number(o.amount || 0),
+        }];
+    return {
+      ...o,
+      channel: meta.violet_channel || null,
+      items,
+    };
+  });
+  return json({ ok: true, orders });
+}
+
 // Forward callback ke worker lain (toko 1 / auto-drive-share). Dipakai supaya
 // callback URL VMP yang sudah disetel ke project lain BISA jadi 1 URL bersama:
 //   - prefix ZS-* → handle di sini (webstream — grant VIP / akses film)
@@ -2721,6 +2754,9 @@ export default {
     }
     if (pathname === '/api/payments/status' && request.method === 'GET') {
       return paymentStatus(request, env);
+    }
+    if (pathname === '/api/payments/my-orders' && request.method === 'GET') {
+      return paymentMyOrders(request, env);
     }
     // Callback URL VMP — terima POST & GET supaya VMP yang variant query-string juga aman.
     // Dispatcher di violetCallback() akan forward ke toko 1 kalau ref bukan ZS-*.
