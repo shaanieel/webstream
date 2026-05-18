@@ -2646,6 +2646,15 @@ export default {
         return env.ASSETS.fetch(assetReq);
       }
     }
+    // Hard-guard: root homepage MUST serve index.html.
+    // This avoids accidental fallback to payment.html when asset/CDN routing
+    // gets stale after deploy.
+    if (pathname === '/' && request.method === 'GET') {
+      if (env.ASSETS) {
+        const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
+        return env.ASSETS.fetch(assetReq);
+      }
+    }
     // === TMDB (any authenticated user; key tetap di-server, gak ke browser) ===
     if (pathname === '/api/tmdb/search' && request.method === 'GET') {
       const u = await getUserFromAuth(request, env);
