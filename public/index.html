@@ -2825,9 +2825,107 @@ let p2State = null;
 const PLAYER_ENGINE_KEY = 'streamex-player-engine';
 
 /* ════════════════════════════════════════════════════════════════════
+   PAYMENT RETURN — auto-sync setelah user kembali dari VMP
+   ────────────────────────────────────────────────────────────────────
+   Callback URL global di akun VMP sudah dipakai project lain, jadi
+   kita TIDAK bisa bergantung ke webhook untuk auto-grant. Sebagai
+   gantinya, kalau user mendarat di /payment/success?ref=..., kita
+   poll /api/payments/status?ref=... yang di backend akan tanya VMP
+   /transactions dan apply order kalau memang sudah lunas.
+   ════════════════════════════════════════════════════════════════════ */
+const PAYMENT_RETURN_PATH = '/payment/success';
+function readPaymentReturnRef(){
+  try{
+    if(location.pathname !== PAYMENT_RETURN_PATH) return null;
+    const ref = new URLSearchParams(location.search).get('ref') || '';
+    return ref.trim() || null;
+  }catch(_){ return null; }
+}
+function showPaymentVerifyOverlay(msg){
+  let el = document.getElementById('payVerifyOverlay');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'payVerifyOverlay';
+    el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(8,10,16,.92);color:#fff;font-family:inherit;padding:24px;text-align:center;';
+    el.innerHTML = ''
+      + '<div style="width:42px;height:42px;border:3px solid rgba(245,197,24,.25);border-top-color:#f5c518;border-radius:50%;animation:payspin 1s linear infinite;"></div>'
+      + '<div id="payVerifyMsg" style="font-size:1.05rem;max-width:32ch;line-height:1.45;"></div>'
+      + '<div id="payVerifySub" style="color:#9aa3b2;font-size:.85rem;max-width:34ch;line-height:1.4;">Jangan tutup halaman ini. Akses kamu akan otomatis terbuka begitu pembayaran terkonfirmasi.</div>'
+      + '<style>@keyframes payspin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(el);
+  }
+  const m = document.getElementById('payVerifyMsg');
+  if(m) m.textContent = msg || 'Memverifikasi pembayaran...';
+  el.style.display = 'flex';
+}
+function hidePaymentVerifyOverlay(){
+  const el = document.getElementById('payVerifyOverlay');
+  if(el) el.remove();
+}
+async function handlePaymentReturn(ref){
+  if(!ref) return;
+  showPaymentVerifyOverlay('Memverifikasi pembayaran...');
+  // Bersihkan URL supaya reload tidak men-trigger ulang flow ini.
+  try{ history.replaceState({}, '', '/'); }catch(_){}
+  // Tunggu sesi auth siap (bisa kosong di tab baru).
+  let token = '';
+  for(let i=0;i<10;i++){
+    try{ token = session?.access_token || (sb && (await sb.auth.getSession()).data.session?.access_token) || ''; }catch(_){ token = ''; }
+    if(token) break;
+    await new Promise(r=>setTimeout(r, 300));
+  }
+  if(!token){
+    hidePaymentVerifyOverlay();
+    showToast('Login dulu untuk konfirmasi pembayaran.', 'error');
+    return;
+  }
+  const deadline = Date.now() + 90_000; // poll up to 90s
+  let lastStatus = 'pending';
+  while(Date.now() < deadline){
+    try{
+      const r = await fetch('/api/payments/status?ref=' + encodeURIComponent(ref), {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      const d = await r.json().catch(()=>({}));
+      if(r.ok && d.ok && d.order){
+        lastStatus = String(d.order.status || '').toLowerCase();
+        if(lastStatus === 'success'){
+          hidePaymentVerifyOverlay();
+          showToast('Pembayaran berhasil — akses sudah aktif.', 'success');
+          // Refresh profil + entitlements supaya VIP/film akses langsung kelihatan.
+          try{ if(typeof onAuthSuccess === 'function' && session) await onAuthSuccess(session); }catch(_){}
+          try{ if(typeof renderProfilePage === 'function') renderProfilePage(); }catch(_){}
+          return;
+        }
+        if(lastStatus === 'failed'){
+          hidePaymentVerifyOverlay();
+          showToast('Pembayaran dibatalkan / kadaluarsa.', 'error');
+          return;
+        }
+      }
+    }catch(_){ /* abaikan dan coba lagi */ }
+    await new Promise(r=>setTimeout(r, 3000));
+  }
+  hidePaymentVerifyOverlay();
+  showToast('Belum ada konfirmasi dari Violet Media Pay. Coba refresh sebentar lagi.', 'error');
+}
+
+/* ════════════════════════════════════════════════════════════════════
    BOOT
    ════════════════════════════════════════════════════════════════════ */
+// Disimpan di scope module supaya onAuthSuccess bisa men-trigger polling
+// pembayaran setelah user login fresh dari layar auth.
+let __pendingPaymentRef = null;
 async function bootstrap(){
+  // Tangkap return-URL pembayaran sebelum apa-apa lain. Path-nya bukan
+  // VALID_PAGES → kalau dibiarkan, applyRoute akan fallback ke /home dan
+  // ref-nya hilang.
+  __pendingPaymentRef = readPaymentReturnRef();
+  if(__pendingPaymentRef){
+    // Tampilkan overlay verifikasi langsung supaya user nggak lihat halaman
+    // home kosong sambil kita nunggu auth + polling.
+    showPaymentVerifyOverlay('Memverifikasi pembayaran...');
+  }
   try{
     const r = await fetch('/api/config');
     CONFIG = await r.json();
@@ -2920,6 +3018,15 @@ async function onAuthSuccess(authSession){
   showApp();
   updateCartCount();
   await loadCatalog();
+  // Kalau user baru saja redirect balik dari Violet Media Pay
+  // (/payment/success?ref=...), trigger polling status di latar belakang.
+  // handlePaymentReturn juga sudah me-replaceState('/'), jadi applyRoute
+  // di bawah akan jatuh ke home seperti biasa.
+  if(__pendingPaymentRef){
+    const r = __pendingPaymentRef;
+    __pendingPaymentRef = null;
+    handlePaymentReturn(r);
+  }
   // After catalog is loaded, apply whatever route is in the URL
   // (handles /movies, /tv, /film/123, etc. on initial load/reload)
   applyRoute({ fromPopState:true });
