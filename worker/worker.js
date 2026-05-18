@@ -1780,7 +1780,29 @@ async function grantVip(env, userId, days) {
 
 async function grantFilmAccess(env, order) {
   const meta = parseOrderMetadata(order.metadata);
-  if (!order.user_id || !meta.film_id || !meta.entitlement_key) return;
+  if (!order.user_id) return;
+  const items = Array.isArray(meta.cart_items) ? meta.cart_items : [];
+  if (items.length) {
+    for (const item of items) {
+      if (!item || !item.entitlement_key) continue;
+      await supabaseRest(env, '/film_entitlements', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=representation',
+        body: JSON.stringify({
+          user_id: order.user_id,
+          film_id: item.film_id || null,
+          kind: item.kind || 'movie',
+          entitlement_key: item.entitlement_key,
+          title: item.title || order.product_name || 'Film',
+          season: item.season || null,
+          payment_ref: order.ref,
+          expires_at: null,
+        }),
+      });
+    }
+    return;
+  }
+  if (!meta.film_id || !meta.entitlement_key) return;
   await supabaseRest(env, '/film_entitlements', {
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=representation',
@@ -2124,6 +2146,32 @@ async function paymentCheckout(request, env) {
       title: film.judul || 'Film',
       season: film.season || null,
     };
+  } else if (productType === 'cart') {
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const uniq = [...new Set(rawItems.map(x => String(x || '').trim()).filter(Boolean))];
+    if (!uniq.length) return err('Keranjang kosong');
+    const cartItems = [];
+    let total = 0;
+    for (const fid of uniq) {
+      const film = await getFilmById(env, fid);
+      if (!film) continue;
+      const kind = normalizeFilmKind(film);
+      const price = kind === 'series_season' ? settings.series_season_price : settings.movie_price;
+      total += price;
+      cartItems.push({
+        film_id: film.id,
+        kind,
+        entitlement_key: entitlementKeyForFilm(film),
+        title: film.judul || 'Film',
+        season: film.season || null,
+        price,
+      });
+    }
+    if (!cartItems.length) return err('Tidak ada item valid di keranjang');
+    amount = total;
+    productType = 'film';
+    productName = `Keranjang ${cartItems.length} item`;
+    metadata = { cart_items: cartItems };
   } else {
     return err('Tipe checkout tidak valid');
   }
