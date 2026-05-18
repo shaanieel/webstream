@@ -5920,7 +5920,32 @@ function openVipPlans(){
   modal.classList.add('show');
 }
 function closePayModal(){ document.getElementById('payModal')?.classList.remove('show'); }
-async function startCheckout(payload){ if(!session){ showToast('Login dulu','error'); return; } try{ const r=await fetch('/api/payments/checkout',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify(payload)}); const d=await r.json().catch(()=>({})); if(!r.ok||!d.ok) throw new Error(d.error||'Checkout gagal'); if(d.checkout_url) location.href=d.checkout_url; else showToast('Checkout dibuat, tapi URL pembayaran kosong.','error'); }catch(e){ showToast(e.message,'error'); } }
+async function startCheckout(payload){
+  if(!session){ showToast('Login dulu','error'); return; }
+  try{
+    const r=await fetch('/api/payments/checkout',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+      body:JSON.stringify(payload)
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok) throw new Error(d.error||'Checkout gagal');
+    if(!d.checkout_url){ showToast('Checkout dibuat, tapi URL pembayaran kosong.','error'); return; }
+
+    // Hindari full reload yang kadang kena route/cache mismatch.
+    // Kalau checkout internal (/payment/checkout), pindahkan via SPA route.
+    const target = new URL(String(d.checkout_url), location.origin);
+    if(target.origin === location.origin && target.pathname.startsWith('/payment/checkout')){
+      history.pushState({ kind:'page', name:'payment' }, '', target.pathname + target.search);
+      applyRoute({ fromPopState:true });
+      return;
+    }
+    // Untuk checkout eksternal (Violet), lanjut hard redirect normal.
+    location.href = target.toString();
+  }catch(e){
+    showToast(e.message,'error');
+  }
+}
 function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
 function checkoutVip(type){ closePayModal(); startCheckout({ type }); }
 async function renderPaymentCheckoutPage(){
