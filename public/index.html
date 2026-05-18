@@ -6410,6 +6410,69 @@ window.addEventListener('beforeunload', () => {
     return false;
   }, true);
 
+  // 1b) Extra-hard block for media player surfaces (video / iframe /
+  //     web-component shadow roots). Some player internals don't always
+  //     bubble `contextmenu` to the main document.
+  const mediaBlocker = (ev)=>{
+    if(isEditable(ev.target)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    return false;
+  };
+  const mediaRightButtonBlocker = (ev)=>{
+    if(ev.button !== 2) return;
+    return mediaBlocker(ev);
+  };
+  const _boundMediaNodes = new WeakSet();
+  const bindMediaNode = (node)=>{
+    if(!node || _boundMediaNodes.has(node)) return;
+    _boundMediaNodes.add(node);
+    try{ node.oncontextmenu = ()=>false; }catch{}
+    try{ node.addEventListener('contextmenu', mediaBlocker, true); }catch{}
+    try{ node.addEventListener('auxclick', mediaRightButtonBlocker, true); }catch{}
+    try{ node.addEventListener('mousedown', mediaRightButtonBlocker, true); }catch{}
+    try{ node.addEventListener('pointerdown', mediaRightButtonBlocker, true); }catch{}
+
+    // If this is an open shadow host (e.g. web component player), bind
+    // inside the shadow root too.
+    try{
+      if(node.shadowRoot){
+        bindMediaNode(node.shadowRoot);
+      }
+    }catch{}
+
+    // Try same-origin iframe document (cross-origin will throw; ignore).
+    try{
+      if(node.tagName === 'IFRAME'){
+        const doc = node.contentWindow && node.contentWindow.document;
+        if(doc){
+          bindMediaNode(doc);
+          bindMediaNode(doc.documentElement);
+          bindMediaNode(doc.body);
+        }
+      }
+    }catch{}
+  };
+  const bindAllMediaSurfaces = ()=>{
+    const sels = [
+      '#playerWrap',
+      '#multitrackPlayer',
+      '#player2Wrap',
+      '#p2VsPlayer',
+      '#vhFrame',
+      '#trailerIframe',
+      'media-player',
+      'video',
+      'iframe'
+    ];
+    document.querySelectorAll(sels.join(',')).forEach(bindMediaNode);
+  };
+  bindAllMediaSurfaces();
+  const mediaMo = new MutationObserver(bindAllMediaSurfaces);
+  mediaMo.observe(document.documentElement, { childList:true, subtree:true });
+  // Some players replace inner nodes lazily; refresh binder periodically.
+  setInterval(bindAllMediaSurfaces, 1200);
+
   // 2) Block keyboard shortcuts that are commonly used to inspect / steal /
   //    print / save / view source. Redirect to YouTube on hit.
   function redirectAway(){
