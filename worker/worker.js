@@ -2622,9 +2622,10 @@ export default {
       return violetCallback(request, env);
     }
 
-    // === Payment page ===
+    // === Payment page (handled inside SPA index.html) ===
     // Backward-compat: beberapa link lama masih pakai /payment?ref=...
-    // Redirect ke route baru /payment/checkout?ref=...
+    // Redirect ke route baru /payment/checkout?ref=... (route ini ditangani
+    // oleh client-side router di index.html, bukan file payment terpisah).
     if (pathname === '/payment' && request.method === 'GET') {
       const ref = (
         url.searchParams.get('ref')
@@ -2638,11 +2639,11 @@ export default {
       }
       return Response.redirect(`${url.origin}/`, 302);
     }
-    // /payment/checkout?ref=... → serve public/payment.html
-    // /payment/success?ref=... → SPA index.html sudah handle polling
+    // /payment/checkout?ref=... & /payment/success?ref=...
+    // keduanya di-handle SPA index.html.
     if (pathname === '/payment/checkout' && request.method === 'GET') {
       if (env.ASSETS) {
-        const assetReq = new Request(new URL('/payment.html', url.origin).toString(), request);
+        const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
         return env.ASSETS.fetch(assetReq);
       }
     }
