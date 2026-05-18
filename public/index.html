@@ -5978,20 +5978,57 @@ async function renderPaymentCheckoutPage(){
       return;
     }
     const first = channels[0] || null;
-    const channelOptions = channels.map(ch =>
-      `<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);cursor:pointer;">
-         <span><b>${escapeHtml(ch.label || ch.code || '-')}</b><br><small style="color:var(--muted);">${escapeHtml(ch.tipe || '')}</small></span>
-         <input type="radio" name="payChannel" value="${escapeHtml(ch.code || '')}" ${first && ch.code===first.code ? 'checked' : ''}/>
-       </label>`
-    ).join('');
+    const safeFee = n => Number(n || 0);
+    const safeTotal = n => Number(n || 0);
+    const channelOptions = channels.map(ch => {
+      const code = String(ch.code || '').toUpperCase();
+      const label = code === 'QRIS2' ? 'QRIS2' : (ch.label || ch.code || '-');
+      return `<label class="pay-row" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);cursor:pointer;">
+        <input type="radio" name="payChannel" value="${escapeHtml(code)}" data-fee="${safeFee(ch.fee)}" data-total="${safeTotal(ch.total)}" ${first && code===String(first.code||'').toUpperCase() ? 'checked' : ''}/>
+        <div style="flex:1;">
+          <div style="font-weight:800;">${escapeHtml(label)}</div>
+          <div style="font-size:.86rem;color:var(--muted);">${escapeHtml(ch.metode || ch.tipe || '')}</div>
+          <div style="font-size:.82rem;color:var(--muted);">Fee: ${rupiah(ch.fee || 0)}</div>
+        </div>
+      </label>`;
+    }).join('');
     mount.innerHTML = `
-      <div style="display:grid;gap:14px;">
-        <div><b>${escapeHtml(order.product_name || 'Pembayaran')}</b><div style="color:var(--muted);font-size:.9rem;">Ref: ${escapeHtml(order.ref || '')}</div></div>
-        <div style="font-size:1.1rem;font-weight:800;">Total: ${rupiah(order.amount || 0)}</div>
-        <div style="display:grid;gap:8px;">${channelOptions || '<div style="color:var(--red);">Channel pembayaran tidak tersedia.</div>'}</div>
-        <button id="payNowBtn" class="btn-primary" style="max-width:260px;">Bayar Sekarang</button>
+      <div style="display:grid;gap:16px;max-width:820px;margin:0 auto;">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px;">
+          <div>
+            <div style="font-size:1.35rem;font-weight:900;letter-spacing:.4px;">PEMBAYARAN</div>
+            <div style="color:var(--muted);font-size:.9rem;">Ref: ${escapeHtml(order.ref || '')}</div>
+          </div>
+          <div style="color:var(--muted);font-size:.9rem;">Produk: <b style="color:var(--text);">${escapeHtml(order.product_name || 'Pembayaran')}</b></div>
+        </div>
+
+        <div style="display:grid;gap:10px;">
+          <div style="font-weight:800;">Metode Pembayaran</div>
+          ${channelOptions || '<div style="color:var(--red);">Channel pembayaran tidak tersedia.</div>'}
+        </div>
+
+        <div style="border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:14px;">
+          <div style="display:flex;justify-content:space-between;gap:12px;"><span>Harga Produk</span><b id="payBase">${rupiah(order.amount || 0)}</b></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;color:var(--muted);margin-top:6px;"><span>Fee Channel</span><b id="payFee">${rupiah(first ? (first.fee || 0) : 0)}</b></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:1.15rem;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><span><b>Total Estimasi Pembayaran</b></span><b id="payTotal">${rupiah(first ? (first.total || order.amount || 0) : (order.amount || 0))}</b></div>
+          <div style="margin-top:8px;font-size:.82rem;color:var(--muted);">Nominal order tetap <b>${rupiah(order.amount || 0)}</b>. Fee mengikuti aturan channel Violet.</div>
+        </div>
+
+        <button id="payNowBtn" class="btn-primary" style="width:100%;max-width:420px;justify-self:center;">Bayar Sekarang</button>
       </div>
     `;
+    const radios = Array.from(document.querySelectorAll('input[name="payChannel"]'));
+    const feeEl = document.getElementById('payFee');
+    const totalEl = document.getElementById('payTotal');
+    const syncSummary = () => {
+      const selected = document.querySelector('input[name="payChannel"]:checked');
+      const fee = selected ? Number(selected.dataset.fee || 0) : 0;
+      const total = selected ? Number(selected.dataset.total || (order.amount || 0)) : Number(order.amount || 0);
+      if(feeEl) feeEl.textContent = rupiah(fee);
+      if(totalEl) totalEl.textContent = rupiah(total);
+    };
+    radios.forEach(radio => radio.addEventListener('change', syncSummary));
+    syncSummary();
     const payBtn = document.getElementById('payNowBtn');
     if(payBtn){
       payBtn.onclick = async () => {
