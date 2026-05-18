@@ -1893,7 +1893,7 @@ async function validateVioletCallbackSignature(env, body) {
 // asli, jadi VMP charge pembeli total (gross) tapi penjual tetap terima
 // harga asli setelah fee dipotong.
 const VMP_CHANNELS_ORDERED = [
-  { code: 'QRIS2',     label: 'QRIS2',        metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 100 },
+  { code: 'QRIS2',     label: 'QRIS2',        metode: 'QRIS / E-Wallet',     tipe: 'qris',     fee_kind: 'percent', fee_value: 0.8,  fee_min: 0 },
   { code: 'MANDIRIVA', label: 'Mandiri VA',   metode: 'Virtual Account',     tipe: 'va',       fee_kind: 'flat',    fee_value: 3000 },
   { code: 'DANA',      label: 'DANA',         metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 1.67, fee_min: 100 },
   { code: 'SHOPEEPAY', label: 'ShopeePay',    metode: 'E-Wallet',            tipe: 'ewallet',  fee_kind: 'percent', fee_value: 4,    fee_min: 100 },

@@ -5964,9 +5964,53 @@ async function startCheckout(payload){
 }
 function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
 function checkoutVip(type){ closePayModal(); startCheckout({ type }); }
+function ensurePaymentCheckoutStyles(){
+  if(document.getElementById('paymentCheckoutStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'paymentCheckoutStyles';
+  style.textContent = `
+    .pay-shell{display:grid;gap:14px;max-width:900px;margin:0 auto;animation:payFadeIn .22s ease;}
+    .pay-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 16px;border-radius:14px;border:1px solid var(--border);background:linear-gradient(135deg,rgba(126,151,255,.16),rgba(126,151,255,.04));}
+    .pay-head-title{font-size:1.24rem;font-weight:900;letter-spacing:.01em;}
+    .pay-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:.78rem;color:var(--muted);}
+    .pay-layout{display:grid;gap:12px;grid-template-columns:1.1fr .9fr;}
+    .pay-card{border:1px solid var(--border);border-radius:14px;background:var(--surface-2);padding:14px;}
+    .pay-card-title{font-weight:900;margin-bottom:10px;}
+    .pay-channel-list{display:grid;gap:10px;}
+    .pay-chan-card input{display:none;}
+    .pay-chan-body{display:flex;align-items:flex-start;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;}
+    .pay-chan-body:hover{transform:translateY(-1px);border-color:var(--accent-2);}
+    .pay-chan-card input:checked + .pay-chan-body{border-color:var(--accent-2);box-shadow:0 0 0 1px var(--accent-2),0 10px 22px rgba(126,151,255,.18);}
+    .pay-chan-icon{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:1.12rem;background:linear-gradient(135deg,rgba(126,151,255,.24),rgba(126,151,255,.08));}
+    .pay-chan-name{font-weight:800;}
+    .pay-chan-meta{font-size:.83rem;color:var(--muted);margin-top:2px;}
+    .pay-chan-fee{font-size:.82rem;color:var(--muted);margin-top:4px;}
+    .pay-items{display:grid;gap:8px;}
+    .pay-item-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;}
+    .pay-item-row + .pay-item-row{border-top:1px dashed var(--border);}
+    .pay-summary-line{display:flex;justify-content:space-between;gap:10px;}
+    .pay-summary-muted{color:var(--muted);}
+    .pay-summary-total{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:1.12rem;}
+    .pay-note{font-size:.82rem;color:var(--muted);margin-top:8px;}
+    .pay-btn-wrap{display:flex;justify-content:center;}
+    @keyframes payFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    @media (max-width:860px){.pay-layout{grid-template-columns:1fr;}}
+  `;
+  document.head.appendChild(style);
+}
+function paymentChannelIcon(ch){
+  const code = String(ch?.code || '').toUpperCase();
+  const tipe = String(ch?.tipe || '').toLowerCase();
+  if(code.includes('QRIS')) return '🔳';
+  if(tipe === 'va') return '🏦';
+  if(tipe === 'retail') return '🏪';
+  if(tipe === 'ewallet') return '📱';
+  return '💳';
+}
 async function renderPaymentCheckoutPage(){
   const mount = document.getElementById('paymentMount');
   if(!mount) return;
+  ensurePaymentCheckoutStyles();
   const q = new URLSearchParams(location.search || '');
   const ref = (q.get('ref') || q.get('ref_kode') || q.get('reference') || q.get('order_ref') || '').trim();
   if(!ref){
@@ -5998,60 +6042,72 @@ async function renderPaymentCheckoutPage(){
     const first = channels[0] || null;
     const safeFee = n => Number(n || 0);
     const safeTotal = n => Number(n || 0);
+    const safeAmount = Number(order.amount || 0);
+    const itemCount = orderItems.length || 1;
     const channelOptions = channels.map(ch => {
       const code = String(ch.code || '').toUpperCase();
       const label = code === 'QRIS2' ? 'QRIS2' : (ch.label || ch.code || '-');
-      return `<label class="pay-row" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);cursor:pointer;">
+      return `<label class="pay-chan-card">
         <input type="radio" name="payChannel" value="${escapeHtml(code)}" data-fee="${safeFee(ch.fee)}" data-total="${safeTotal(ch.total)}" ${first && code===String(first.code||'').toUpperCase() ? 'checked' : ''}/>
-        <div style="flex:1;">
-          <div style="font-weight:800;">${escapeHtml(label)}</div>
-          <div style="font-size:.86rem;color:var(--muted);">${escapeHtml(ch.metode || ch.tipe || '')}</div>
-          <div style="font-size:.82rem;color:var(--muted);">Fee: ${rupiah(ch.fee || 0)}</div>
+        <div class="pay-chan-body">
+          <div class="pay-chan-icon">${paymentChannelIcon(ch)}</div>
+          <div style="flex:1;">
+            <div class="pay-chan-name">${escapeHtml(label)}</div>
+            <div class="pay-chan-meta">${escapeHtml(ch.metode || ch.tipe || '')}</div>
+            <div class="pay-chan-fee">Fee: ${rupiah(ch.fee || 0)}</div>
+          </div>
         </div>
       </label>`;
     }).join('');
     const itemListHtml = orderItems.length
-      ? `<div style="border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:14px;">
-          <div style="font-weight:800;margin-bottom:8px;">Produk yang dibeli (${orderItems.length})</div>
-          ${orderItems.map((item, idx)=>`
-            <div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;${idx? 'border-top:1px dashed var(--border);':''}">
+      ? `<div class="pay-card">
+          <div class="pay-card-title">Produk yang dibeli (${orderItems.length})</div>
+          <div class="pay-items">
+          ${orderItems.map(item=>`
+            <div class="pay-item-row">
               <span>${escapeHtml(item.title || 'Film')}</span>
               <b>${rupiah(item.price || 0)}</b>
             </div>
           `).join('')}
+          </div>
         </div>`
-      : `<div style="border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:14px;">
-          <div style="font-weight:800;margin-bottom:6px;">Produk</div>
-          <div style="display:flex;justify-content:space-between;gap:10px;">
+      : `<div class="pay-card">
+          <div class="pay-card-title">Produk yang dibeli (1)</div>
+          <div class="pay-item-row">
             <span>${escapeHtml(order.product_name || 'Pembayaran')}</span>
-            <b>${rupiah(order.amount || 0)}</b>
+            <b>${rupiah(safeAmount)}</b>
           </div>
         </div>`;
     mount.innerHTML = `
-      <div style="display:grid;gap:16px;max-width:820px;margin:0 auto;">
-        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px;">
+      <div class="pay-shell">
+        <div class="pay-head">
           <div>
-            <div style="font-size:1.35rem;font-weight:900;letter-spacing:.4px;">PEMBAYARAN</div>
-            <div style="color:var(--muted);font-size:.9rem;">Ref: ${escapeHtml(order.ref || '')}</div>
+            <div class="pay-head-title">Checkout Pembayaran</div>
+            <div style="color:var(--muted);font-size:.86rem;">Ref: <b style="color:var(--text);">${escapeHtml(order.ref || ref)}</b></div>
           </div>
-          <div style="color:var(--muted);font-size:.9rem;">Produk: <b style="color:var(--text);">${escapeHtml(order.product_name || 'Pembayaran')}</b></div>
+          <div class="pay-chip">🧾 ${itemCount} Produk</div>
         </div>
 
-        <div style="display:grid;gap:10px;">
-          <div style="font-weight:800;">Metode Pembayaran</div>
-          ${channelOptions || '<div style="color:var(--red);">Channel pembayaran tidak tersedia.</div>'}
+        <div class="pay-layout">
+          <div class="pay-card">
+            <div class="pay-card-title">Pilih Metode Pembayaran</div>
+            <div class="pay-channel-list">
+              ${channelOptions || '<div style="color:var(--red);">Channel pembayaran tidak tersedia.</div>'}
+            </div>
+          </div>
+          ${itemListHtml}
         </div>
 
-        ${itemListHtml}
-
-        <div style="border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:14px;">
-          <div style="display:flex;justify-content:space-between;gap:12px;"><span>Harga Produk</span><b id="payBase">${rupiah(order.amount || 0)}</b></div>
-          <div style="display:flex;justify-content:space-between;gap:12px;color:var(--muted);margin-top:6px;"><span>Fee Channel</span><b id="payFee">${rupiah(first ? (first.fee || 0) : 0)}</b></div>
-          <div style="display:flex;justify-content:space-between;gap:12px;font-size:1.15rem;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"><span><b>Total Estimasi Pembayaran</b></span><b id="payTotal">${rupiah(first ? (first.total || order.amount || 0) : (order.amount || 0))}</b></div>
-          <div style="margin-top:8px;font-size:.82rem;color:var(--muted);">Nominal order tetap <b>${rupiah(order.amount || 0)}</b>. Fee mengikuti aturan channel Violet.</div>
+        <div class="pay-card">
+          <div class="pay-summary-line"><span>Harga Produk</span><b id="payBase">${rupiah(safeAmount)}</b></div>
+          <div class="pay-summary-line pay-summary-muted" style="margin-top:6px;"><span>Fee Channel</span><b id="payFee">${rupiah(first ? (first.fee || 0) : 0)}</b></div>
+          <div class="pay-summary-line pay-summary-total"><span><b>Total Estimasi Pembayaran</b></span><b id="payTotal">${rupiah(first ? (first.total || safeAmount) : safeAmount)}</b></div>
+          <div class="pay-note">Harga produk sistem tetap <b>${rupiah(safeAmount)}</b>. Fee mengikuti channel Violet (QRIS2 = 0.8%).</div>
         </div>
 
-        <button id="payNowBtn" class="btn-primary" style="width:100%;max-width:420px;justify-self:center;">Bayar Sekarang</button>
+        <div class="pay-btn-wrap">
+          <button id="payNowBtn" class="btn-primary" style="width:100%;max-width:420px;">Bayar Sekarang</button>
+        </div>
       </div>
     `;
     const radios = Array.from(document.querySelectorAll('input[name="payChannel"]'));
