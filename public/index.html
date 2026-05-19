@@ -101,6 +101,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
           <span class="nav-item-label">Home</span>
         </button>
+        <button class="nav-item" data-page="collections" onclick="goPage('collections')" title="Collections">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h18"/><path d="M3 12h18"/><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="9.5" r="1.2"/><circle cx="14" cy="14" r="1.2"/></svg>
+          <span class="nav-item-label">Collections</span>
+        </button>
         <button class="nav-item" data-page="search" onclick="goPage('search')" title="Search">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
           <span class="nav-item-label">Search</span>
@@ -129,9 +133,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h8.95a2 2 0 0 0 1.95-1.57l1.35-6.43H5.12"/></svg>
           <span class="nav-item-label">Cart</span><span class="nav-cart-count" id="cartCount" style="display:none;">0</span>
         </button>
-        <button class="nav-item" data-page="collections" onclick="goPage('collections')" title="Collections">
+        <button class="nav-item" data-page="my-collections" onclick="goPage('my-collections')" title="My Collections">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h6"/></svg>
-          <span class="nav-item-label">Collections</span>
+          <span class="nav-item-label">My Collections</span>
         </button>
         <button class="nav-item" data-page="orders" onclick="goPage('orders')" title="Transactions">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h18"/><path d="M7 3h10v4H7z"/><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
@@ -371,15 +375,47 @@
       </div>
     </section>
 
-    <!-- ════ COLLECTIONS ════ -->
-    <section class="page" id="page-collections">
-      <div class="page-title">Collections</div>
+    <!-- ════ MY COLLECTIONS (films user has bought) ════ -->
+    <section class="page" id="page-my-collections">
+      <div class="page-title">My Collections</div>
       <div class="grid" id="collectionsGrid"></div>
       <div id="collectionsEmpty" class="empty-state" style="display:none;">
         <div class="emoji">🎞️</div>
         <h3>Belum ada koleksi</h3>
         <p>Film yang sudah kamu beli akan muncul di sini.</p>
       </div>
+    </section>
+
+    <!-- ════ COLLECTIONS browse (curated movie collections) ════ -->
+    <section class="page" id="page-collections">
+      <div class="collections-header">
+        <h1 class="collections-title">Movie Collections</h1>
+        <p class="collections-sub" id="collectionsBrowseSub">Browse popular movie franchises</p>
+      </div>
+      <div class="collections-grid" id="collectionsBrowseGrid"></div>
+      <div id="collectionsBrowseEmpty" class="empty-state" style="display:none;">
+        <div class="emoji">🎬</div>
+        <h3>Belum ada koleksi</h3>
+        <p>Admin belum membuat koleksi. Cek lagi nanti.</p>
+      </div>
+    </section>
+
+    <!-- ════ COLLECTION DETAIL ════ -->
+    <section class="page" id="page-collection">
+      <div class="collection-hero" id="collectionHero">
+        <div class="collection-hero-bg" id="collectionHeroBg"></div>
+        <div class="collection-hero-shade"></div>
+        <div class="collection-hero-content">
+          <button class="collection-back-btn" onclick="collectionBack()" type="button">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="15 18 9 12 15 6"/></svg>
+            <span>Back</span>
+          </button>
+          <h1 class="collection-hero-title" id="collectionHeroTitle"></h1>
+          <p class="collection-hero-meta" id="collectionHeroMeta"></p>
+        </div>
+      </div>
+      <p class="collection-desc" id="collectionDesc" style="display:none;"></p>
+      <div class="grid" id="collectionFilmsGrid"></div>
     </section>
 
     <section class="page" id="page-orders">
@@ -605,7 +641,7 @@
         <span>TV Shows</span>
       </button>
       <button type="button" onclick="closeMoreSheet();goPage('collections')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h6"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M3 12h18"/><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="9.5" r="1.2"/><circle cx="14" cy="14" r="1.2"/></svg>
         <span>Collections</span>
       </button>
       <button type="button" onclick="closeMoreSheet();goPage('watchlist')">
@@ -615,6 +651,10 @@
       <button type="button" onclick="closeMoreSheet();goPage('cart')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h8.95a2 2 0 0 0 1.95-1.57l1.35-6.43H5.12"/></svg>
         <span>Cart</span>
+      </button>
+      <button type="button" onclick="closeMoreSheet();goPage('my-collections')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h6"/></svg>
+        <span>My Collections</span>
       </button>
       <button type="button" onclick="closeMoreSheet();goPage('orders')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M7 3h10v4H7z"/><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>
