@@ -4313,9 +4313,15 @@ async function _resolveDrivePath(drivePath){
 }
 
 async function loadVideo(film){
-  // Single-player mode: every film plays via the video host iframe.
-  // Films missing video_url are misconfigured — surface a clear toast
-  // instead of silently rendering a blank iframe.
+  // Prefer the native in-page player whenever we have a Drive source. Its
+  // controls live in this document, so right-click blocking works without
+  // sacrificing settings/subtitle interaction.
+  const hasDriveSource = !!(film && (film.drive_path || film.drive_link || (Array.isArray(film.videos) && film.videos.length)));
+  if(hasDriveSource){
+    return loadNativeDrivePlayer(film);
+  }
+
+  // Fallback: films that only have a hosted Player4Me URL still use iframe.
   if(film && film._playback && film._playback.video_url){
     return loadVideoHost(film);
   }
@@ -4350,6 +4356,51 @@ function _showLegacyPlayer(){
   if(sp) sp.style.display = '';
   const subBtn = document.getElementById('toolBtnSubs');
   if(subBtn) subBtn.style.display = '';
+}
+
+async function loadNativeDrivePlayer(film){
+  releaseVipDownloadSlot();
+  setHostContextShield(false);
+
+  const fr = document.getElementById('vhFrame');
+  if(fr){
+    fr.src = 'about:blank';
+    fr.dataset.currentSrc = '';
+    fr.style.display = 'none';
+  }
+
+  const peBar = document.getElementById('playerEngineBar');
+  if(peBar) peBar.style.display = 'none';
+  const mp = document.getElementById('multitrackPlayer');
+  if(mp) mp.style.display = 'none';
+  const p2 = document.getElementById('player2Wrap');
+  if(p2) p2.style.display = '';
+
+  const subsPanel = document.getElementById('subsPanel');
+  if(subsPanel){ subsPanel.classList.remove('open'); subsPanel.style.display = 'none'; }
+  const subBtn = document.getElementById('toolBtnSubs');
+  if(subBtn) subBtn.style.display = 'none';
+
+  resetPreviewGate();
+  const hasFullAccess = film._playback && film._playback.access === 'full';
+  const fullBar = document.getElementById('fullAccessBar');
+  if(fullBar) fullBar.style.display = hasFullAccess ? 'none' : 'flex';
+
+  const sources = await _resolveFilmSources(film);
+  if(!sources){
+    if(film && film._playback && film._playback.video_url) return loadVideoHost(film);
+    return;
+  }
+
+  film._sources = sources;
+  activeEngine = 2;
+  try{ teardownEngine1(); }catch{}
+  try{ teardownEngine2(); }catch{}
+  await loadVideoEngine2(film, sources);
+  if(sources.videos && sources.videos[0] && sources.videos[0].path){
+    setStreamActions(sources.videos[0].path, film.judul || film.title || '');
+  }
+  armPreviewGate(film);
 }
 
 // Hide legacy players + show video host iframe. Set up Drive Index extras
