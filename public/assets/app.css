@@ -258,27 +258,27 @@ img{display:block;max-width:100%;}
 .vip-hero-cta:hover{transform:translateY(-1px);box-shadow:0 10px 28px rgba(245,197,24,.5);}
 .vip-hero-cta:active{transform:translateY(0);}
 
-.vip-benefits{
+.vip-benefits-grid{
   display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px;
 }
-.vip-benefit{
+.vip-benefit-card{
   display:flex;align-items:center;gap:12px;padding:14px;
   border:1px solid rgba(245,197,24,.18);border-radius:14px;
   background:linear-gradient(135deg,rgba(245,197,24,.07) 0%,rgba(245,197,24,.02) 100%);
 }
-.vip-benefit-icon{
+.vip-benefit-card-icon{
   width:42px;height:42px;flex-shrink:0;
   display:grid;place-items:center;font-size:1.25rem;
   background:rgba(245,197,24,.12);border-radius:10px;
 }
-.vip-benefit-text{min-width:0;}
-.vip-benefit-title{font-size:.9rem;font-weight:800;color:#fff5cc;}
-.vip-benefit-sub{font-size:.78rem;color:var(--muted);margin-top:2px;line-height:1.35;}
+.vip-benefit-card-text{min-width:0;}
+.vip-benefit-card-title{font-size:.9rem;font-weight:800;color:#fff5cc;}
+.vip-benefit-card-sub{font-size:.78rem;color:var(--muted);margin-top:2px;line-height:1.35;}
 @media (max-width:900px){
-  .vip-benefits{grid-template-columns:repeat(2,1fr);}
+  .vip-benefits-grid{grid-template-columns:repeat(2,1fr);}
 }
 @media (max-width:520px){
-  .vip-benefits{grid-template-columns:1fr;}
+  .vip-benefits-grid{grid-template-columns:1fr;}
 }
 
 .vip-toolbar{
@@ -1413,52 +1413,74 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 
 @media(max-width:640px){
   .vip-locked-modal{
-    padding:14px;
-    align-items:center;
+    padding:12px;
+    align-items:flex-start;
   }
 
   .vip-locked-box{
-    padding:36px 18px 24px;
+    padding:30px 14px 22px;
     border-radius:20px;
-    max-height:88vh;
+    max-height:calc(100vh - 24px);
     overflow-y:auto;
+    margin-top:24px;
+  }
+
+  .vip-locked-box::before{
+    inset:-1px;
+    border-radius:21px;
   }
 
   .vip-locked-box h2{
-    font-size:1.38rem;
+    font-size:1.32rem;
+    line-height:1.2;
   }
 
   .vip-locked-box p{
-    font-size:.9rem;
-    margin-bottom:18px;
+    font-size:.86rem;
+    line-height:1.45;
+    margin-bottom:16px;
+    padding:0 4px;
   }
 
+  /* Tighten the benefits column so cards have breathing room from the
+     gold gradient border, and the .primary card no longer collides with
+     the modal's outer ::before glow. */
   .vip-benefits{
     gap:8px;
-    margin:18px 0 22px;
+    margin:14px 4px 20px;
   }
 
   .vip-benefit{
-    grid-template-columns:30px 1fr;
+    grid-template-columns:28px 1fr;
     gap:10px;
-    padding:9px 10px;
+    padding:10px 12px;
+    border-radius:11px;
+  }
+
+  .vip-benefit.primary{
+    padding:10px 12px;
   }
 
   .vip-benefit iconify-icon{
     font-size:22px;
+    margin-top:2px;
   }
 
   .vip-benefit strong{
-    font-size:.88rem;
+    font-size:.87rem;
+    line-height:1.25;
   }
 
   .vip-benefit span{
     font-size:.74rem;
+    line-height:1.35;
   }
 
   .vip-upgrade-btn{
-    height:52px;
-    font-size:.88rem;
+    height:50px;
+    font-size:.9rem;
+    border-radius:12px;
+    margin:4px 4px 0;
   }
 }
 /* Desktop/Laptop fix for VIP modal */
