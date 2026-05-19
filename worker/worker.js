@@ -3062,6 +3062,33 @@ export default {
       if (m && request.method === 'DELETE') return adminRevokeUserEntitlement(request, env, m[1], m[2]);
     }
 
+    // === Public collections ===
+    if (pathname === '/api/collections' && request.method === 'GET') {
+      return collectionsList(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/collections\/([^/]+)$/);
+      if (m && request.method === 'GET') return collectionsDetail(request, env, m[1]);
+    }
+
+    // === Admin: collections ===
+    if (pathname === '/api/admin/collections' && request.method === 'GET') {
+      return adminCollectionsList(request, env);
+    }
+    if (pathname === '/api/admin/collections' && request.method === 'POST') {
+      return adminCollectionCreate(request, env);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/collections\/([^/]+)$/);
+      if (m && request.method === 'PATCH')  return adminCollectionUpdate(request, env, m[1]);
+      if (m && request.method === 'DELETE') return adminCollectionDelete(request, env, m[1]);
+      if (m && request.method === 'GET')    return adminCollectionDetail(request, env, m[1]);
+    }
+    {
+      const m = pathname.match(/^\/api\/admin\/collections\/([^/]+)\/films$/);
+      if (m && request.method === 'PUT') return adminCollectionFilmsReplace(request, env, m[1]);
+    }
+
     // === Static assets (index.html, dll) ===
     // Cloudflare akan otomatis serve dari ./public/ via [assets] di wrangler.toml
     if (env.ASSETS) return serveAsset(request, env);
@@ -3069,3 +3096,209 @@ export default {
     return err('Not Found', 404);
   },
 };
+
+// ───────────────────────────────────────────────────────────────────
+// COLLECTIONS — public list/detail + admin CRUD
+// ───────────────────────────────────────────────────────────────────
+
+// GET /api/collections — list all collections (no films, just cards for grid)
+async function collectionsList(request, env) {
+  const r = await supabaseRest(env, '/collections?select=id,title,description,cover_url,sort_order&order=sort_order.asc,id.asc');
+  if (!r.ok) return err('Gagal load collections', 500);
+  const collections = Array.isArray(r.data) ? r.data : [];
+  // Attach film count per collection.
+  const ids = collections.map(c => c.id);
+  if (!ids.length) return json({ ok: true, collections: [] });
+  const inList = ids.join(',');
+  const cf = await supabaseRest(env, `/collection_films?select=collection_id&collection_id=in.(${inList})`);
+  const counts = {};
+  if (cf.ok && Array.isArray(cf.data)) {
+    for (const row of cf.data) counts[row.collection_id] = (counts[row.collection_id] || 0) + 1;
+  }
+  return json({
+    ok: true,
+    collections: collections.map(c => ({
+      id: c.id,
+      title: c.title,
+      description: c.description || '',
+      cover_url: c.cover_url || '',
+      film_count: counts[c.id] || 0,
+    })),
+  });
+}
+
+// GET /api/collections/:id — detail with films
+async function collectionsDetail(request, env, id) {
+  const r = await supabaseRest(env, `/collections?id=eq.${encodeURIComponent(id)}&select=id,title,description,cover_url,sort_order`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Collection not found', 404);
+  const collection = r.data[0];
+  const cf = await supabaseRest(env, `/collection_films?select=position,films(*)&collection_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+  const films = (cf.ok && Array.isArray(cf.data))
+    ? cf.data
+        .map(row => row.films)
+        .filter(Boolean)
+        .map(f => {
+          const copy = { ...f };
+          // Public detail strips streaming sources — same convention as /api/catalog.
+          delete copy.video_url;
+          delete copy.preview_video_url;
+          delete copy.drive_link;
+          delete copy.drive_path;
+          delete copy.videos;
+          delete copy.audio_tracks;
+          return copy;
+        })
+    : [];
+  return json({
+    ok: true,
+    collection: {
+      id: collection.id,
+      title: collection.title,
+      description: collection.description || '',
+      cover_url: collection.cover_url || '',
+      film_count: films.length,
+    },
+    films,
+  });
+}
+
+// GET /api/admin/collections — admin list (with raw cover URL for editing)
+async function adminCollectionsList(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, '/collections?select=*&order=sort_order.asc,id.asc');
+  if (!r.ok) return err('Gagal load collections', 500);
+  const collections = Array.isArray(r.data) ? r.data : [];
+  const ids = collections.map(c => c.id);
+  let counts = {};
+  if (ids.length) {
+    const cf = await supabaseRest(env, `/collection_films?select=collection_id&collection_id=in.(${ids.join(',')})`);
+    if (cf.ok && Array.isArray(cf.data)) {
+      for (const row of cf.data) counts[row.collection_id] = (counts[row.collection_id] || 0) + 1;
+    }
+  }
+  return json({
+    ok: true,
+    collections: collections.map(c => ({ ...c, film_count: counts[c.id] || 0 })),
+  });
+}
+
+// GET /api/admin/collections/:id — admin detail (full film records, including streaming sources for preview)
+async function adminCollectionDetail(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, `/collections?id=eq.${encodeURIComponent(id)}&select=*`);
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return err('Collection not found', 404);
+  const cf = await supabaseRest(env, `/collection_films?select=position,film_id,films(id,judul,tahun,tipe,poster_url,backdrop_url,tmdb_id)&collection_id=eq.${encodeURIComponent(id)}&order=position.asc`);
+  const films = (cf.ok && Array.isArray(cf.data))
+    ? cf.data.map(row => ({ ...row.films, position: row.position }))
+    : [];
+  return json({ ok: true, collection: r.data[0], films });
+}
+
+// POST /api/admin/collections — create collection.
+// Body: { title, description?, cover_url?, sort_order?, film_ids?: number[] }
+async function adminCollectionCreate(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const body = await request.json().catch(() => ({}));
+  const title = String(body.title || '').trim();
+  if (!title) return err('Title wajib diisi');
+  const filmIds = Array.isArray(body.film_ids) ? body.film_ids.filter(x => Number.isFinite(Number(x))).map(Number) : [];
+
+  let coverUrl = (typeof body.cover_url === 'string' ? body.cover_url.trim() : '') || null;
+  // If admin didn't supply cover URL but added films, auto-pick the first film's
+  // backdrop (TMDB landscape image). Fallback to poster_url if no backdrop.
+  if (!coverUrl && filmIds.length) {
+    const first = await supabaseRest(env, `/films?id=eq.${filmIds[0]}&select=backdrop_url,poster_url`);
+    if (first.ok && Array.isArray(first.data) && first.data[0]) {
+      coverUrl = first.data[0].backdrop_url || first.data[0].poster_url || null;
+    }
+  }
+
+  const insert = await supabaseRest(env, '/collections', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      title,
+      description: (typeof body.description === 'string' ? body.description.trim() : '') || null,
+      cover_url: coverUrl,
+      sort_order: Number.isFinite(Number(body.sort_order)) ? Number(body.sort_order) : 0,
+    }),
+  });
+  if (!insert.ok || !Array.isArray(insert.data) || !insert.data[0]) return err('Gagal buat collection', 500);
+  const collection = insert.data[0];
+
+  // Insert film junction rows.
+  if (filmIds.length) {
+    const rows = filmIds.map((fid, idx) => ({
+      collection_id: collection.id,
+      film_id: fid,
+      position: idx,
+    }));
+    await supabaseRest(env, '/collection_films', {
+      method: 'POST',
+      body: JSON.stringify(rows),
+    });
+  }
+
+  return json({ ok: true, collection });
+}
+
+// PATCH /api/admin/collections/:id
+async function adminCollectionUpdate(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const body = await request.json().catch(() => ({}));
+  const patch = {};
+  if (typeof body.title === 'string') patch.title = body.title.trim();
+  if (typeof body.description === 'string') patch.description = body.description.trim() || null;
+  if (typeof body.cover_url === 'string') patch.cover_url = body.cover_url.trim() || null;
+  if (Number.isFinite(Number(body.sort_order))) patch.sort_order = Number(body.sort_order);
+  patch.updated_at = new Date().toISOString();
+  const r = await supabaseRest(env, `/collections?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) return err('Gagal update', 500);
+  return json({ ok: true });
+}
+
+// DELETE /api/admin/collections/:id (cascade deletes collection_films)
+async function adminCollectionDelete(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const r = await supabaseRest(env, `/collections?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!r.ok) return err('Gagal delete', 500);
+  return json({ ok: true });
+}
+
+// PUT /api/admin/collections/:id/films — replace film list and reorder.
+// Body: { film_ids: number[] } — order matters; positions are reset.
+async function adminCollectionFilmsReplace(request, env, id) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const body = await request.json().catch(() => ({}));
+  const filmIds = Array.isArray(body.film_ids) ? body.film_ids.filter(x => Number.isFinite(Number(x))).map(Number) : [];
+  // Clear existing junction rows.
+  await supabaseRest(env, `/collection_films?collection_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+  // Insert fresh rows.
+  if (filmIds.length) {
+    const rows = filmIds.map((fid, idx) => ({
+      collection_id: Number(id),
+      film_id: fid,
+      position: idx,
+    }));
+    const ins = await supabaseRest(env, '/collection_films', {
+      method: 'POST',
+      body: JSON.stringify(rows),
+    });
+    if (!ins.ok) return err('Gagal save film list', 500);
+  }
+  // Bump updated_at on parent.
+  await supabaseRest(env, `/collections?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ updated_at: new Date().toISOString() }),
+  });
+  return json({ ok: true, count: filmIds.length });
+}

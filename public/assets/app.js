@@ -596,7 +596,7 @@ document.addEventListener('keydown',(e)=>{
    Pages:  /, /movies, /tv, /browse, /watchlist, /search, /vip, /profile
    Film:   /film/{id}
    ════════════════════════════════════════════════════════════════════ */
-const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','orders','vip','profile','payment'];
+const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','my-collections','collection','orders','vip','profile','payment'];
 let _currentPage = 'home';
 
 function pagePath(name){
@@ -626,7 +626,8 @@ function goPage(name, opts){
   if(name==='browse') renderBrowsePage();
   if(name==='watchlist') renderWatchlistPage();
   if(name==='cart') renderCartPage();
-  if(name==='collections') renderCollectionsPage();
+  if(name==='collections') renderCollectionsBrowsePage();
+  if(name==='my-collections') renderMyCollectionsPage();
   if(name==='orders') renderOrdersPage();
   if(name==='search') renderSearchInitial();
   if(name==='vip') renderVipPage();
@@ -675,6 +676,12 @@ function parseRoute(){
     return { kind:'film', id: parts[1], vipMode: false };
   }
 
+  // Collection detail route:
+  // /collection/123
+  if(parts[0] === 'collection' && parts[1]){
+    return { kind:'collection', id: parts[1] };
+  }
+
   // Payment checkout route:
   // /payment/checkout?ref=...
   if(parts[0] === 'payment' && (parts[1] === 'checkout' || !parts[1])){
@@ -712,7 +719,10 @@ function applyRoute(opts){
   } else {
     goPage('home', { fromPopState:true });
   }
-} else {
+} else if(r.kind === 'collection'){
+    goPage('collection', { fromPopState:true });
+    loadCollectionDetail(r.id);
+  } else {
     // Close player if open (e.g., back button from /film/X → /something)
     const pm = document.getElementById('playerModal');
     if(pm && pm.classList.contains('open')){ closePlayer({ fromPopState:true }); }
@@ -3650,7 +3660,122 @@ async function checkoutCart(){
   if(!selected.length){ showToast('Pilih minimal 1 item di keranjang','error'); return; }
   await startCheckout({ type:'cart', items:selected.map(i=>i.id) });
 }
-function renderCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
+function renderMyCollectionsPage(){ const grid=document.getElementById('collectionsGrid'); const empty=document.getElementById('collectionsEmpty'); const keys=new Set(currentEntitlements.map(e=>e.entitlement_key)); const items=_dedupeSeries(allFilms.filter(f=>keys.has(filmEntitlementKey(f)))); if(!items.length){ grid.innerHTML=''; empty.style.display='block'; return; } empty.style.display='none'; renderGrid('collectionsGrid', items); }
+
+/* ════════════════════════════════════════════════════════════════════
+   COLLECTIONS — public browse + detail (curated by admin)
+   ════════════════════════════════════════════════════════════════════ */
+let _collectionsCache = null;
+
+async function renderCollectionsBrowsePage(){
+  const grid = document.getElementById('collectionsBrowseGrid');
+  const empty = document.getElementById('collectionsBrowseEmpty');
+  const sub = document.getElementById('collectionsBrowseSub');
+  if(!grid) return;
+  grid.innerHTML = '<div style="grid-column:1/-1;color:var(--muted);">Memuat koleksi...</div>';
+  try{
+    const r = await fetch('/api/collections');
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) throw new Error(d.error || 'Gagal memuat collections');
+    _collectionsCache = d.collections || [];
+    if(!_collectionsCache.length){
+      grid.innerHTML = '';
+      empty.style.display = 'block';
+      sub.textContent = 'Browse popular movie franchises';
+      return;
+    }
+    empty.style.display = 'none';
+    sub.textContent = `Browse ${_collectionsCache.length} popular movie ${_collectionsCache.length === 1 ? 'collection' : 'collections'}`;
+    grid.innerHTML = _collectionsCache.map(c => collectionCardHTML(c)).join('');
+    grid.querySelectorAll('[data-coll-id]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.dataset.collId;
+        openCollection(id);
+      });
+    });
+  }catch(e){
+    grid.innerHTML = `<div style="grid-column:1/-1;color:var(--red);">${escapeHtml(e.message || 'Error')}</div>`;
+  }
+}
+
+function collectionCardHTML(c){
+  const cover = c.cover_url ? `<div class="collection-card-img" style="background-image:url('${escapeHtml(c.cover_url)}')"></div>` : `<div class="collection-card-empty">${escapeHtml(c.title)}</div>`;
+  const count = c.film_count || 0;
+  const countLabel = count === 1 ? '1 movie' : `${count} movies`;
+  return `
+    <div class="collection-card" data-coll-id="${escapeHtml(c.id)}" tabindex="0" role="button">
+      ${cover}
+      <div class="collection-card-shade"></div>
+      <div class="collection-card-content">
+        <div class="collection-card-title">${escapeHtml(c.title)}</div>
+        <div class="collection-card-count">${countLabel}</div>
+      </div>
+    </div>
+  `;
+}
+
+function openCollection(id){
+  const path = '/collection/' + encodeURIComponent(id);
+  if(location.pathname !== path){
+    history.pushState({ kind:'collection', id: String(id) }, '', path);
+  }
+  goPage('collection', { fromPopState:true });
+  loadCollectionDetail(id);
+}
+
+function collectionBack(){
+  if(history.length > 1){ history.back(); return; }
+  goPage('collections');
+}
+
+async function loadCollectionDetail(id){
+  const heroBg = document.getElementById('collectionHeroBg');
+  const titleEl = document.getElementById('collectionHeroTitle');
+  const metaEl = document.getElementById('collectionHeroMeta');
+  const descEl = document.getElementById('collectionDesc');
+  const grid = document.getElementById('collectionFilmsGrid');
+  if(!grid) return;
+  titleEl.textContent = 'Memuat...';
+  metaEl.textContent = '';
+  descEl.style.display = 'none';
+  grid.innerHTML = '';
+  if(heroBg){ heroBg.style.backgroundImage = ''; }
+  try{
+    const r = await fetch('/api/collections/' + encodeURIComponent(id));
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok || !d.ok) throw new Error(d.error || 'Collection tidak ditemukan');
+    const c = d.collection;
+    titleEl.textContent = c.title || '';
+    const count = c.film_count || (Array.isArray(d.films) ? d.films.length : 0);
+    metaEl.textContent = (count === 1 ? '1 movie' : `${count} movies`) + ' in this collection';
+    if(heroBg && c.cover_url){
+      heroBg.style.backgroundImage = `url('${c.cover_url}')`;
+    }
+    if(c.description){
+      descEl.textContent = c.description;
+      descEl.style.display = 'block';
+    }
+    const films = Array.isArray(d.films) ? d.films : [];
+    if(!films.length){
+      grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="emoji">🎬</div><h3>Belum ada film</h3><p>Admin belum menambah film ke koleksi ini.</p></div>';
+      return;
+    }
+    grid.innerHTML = films.map(f => cardHTML(f)).join('');
+    grid.querySelectorAll('[data-film-id]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const filmId = el.dataset.filmId;
+        // Films in collections are returned with full local DB id; reuse the
+        // cached `allFilms` so streaming sources resolve against the user's
+        // tier / entitlement.
+        const film = allFilms.find(x => String(x.id) === String(filmId));
+        if(film) openFilm(film);
+      });
+    });
+  }catch(e){
+    titleEl.textContent = 'Error';
+    metaEl.textContent = e.message || 'Gagal memuat collection';
+  }
+}
 async function renderOrdersPage(){
   const wrap = document.getElementById('ordersList');
   if(!wrap) return;
