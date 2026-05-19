@@ -99,6 +99,11 @@
   .collection-hero-meta{font-size:.85rem;}
   .collection-desc{font-size:.9rem;}
 }
+
+/* Application color tokens (continues :root from app.css top — split here
+   because the Collections media query above orphan'd these declarations
+   when introduced and broke --sidebar-w resolution). */
+:root{
   --bg-2:#0f0f17;
   --surface:#15151f;
   --surface-2:#1a1a26;
