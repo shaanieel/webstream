@@ -1415,19 +1415,36 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   .vip-locked-modal{
     padding:12px;
     align-items:flex-start;
+    /* Scroll terjadi pada overlay (modal-modal), bukan pada .vip-locked-box.
+       Tanpa ini, modal pakai overflow-y:auto internal yang bikin pseudo
+       ::before border ke-clip waktu user scroll dan kelihatan jadi garis
+       emas random di tengah konten. */
+    overflow-y:auto;
   }
 
   .vip-locked-box{
     padding:30px 14px 22px;
     border-radius:20px;
-    max-height:calc(100vh - 24px);
-    overflow-y:auto;
-    margin-top:24px;
+    /* Hilangkan max-height + overflow-y internal supaya ::before gold
+       border tetap melingkari seluruh modal, gak terpotong. */
+    max-height:none;
+    overflow:visible;
+    margin:24px 0;
   }
 
   .vip-locked-box::before{
     inset:-1px;
     border-radius:21px;
+  }
+
+  .vip-close-btn{
+    /* Lebih kecil dan lebih masuk ke dalam supaya gak "menempel" di
+       border emas yang bikin terlihat keluar dari modal. */
+    top:10px;
+    right:10px;
+    width:34px;
+    height:34px;
+    font-size:20px;
   }
 
   .vip-locked-box h2{
