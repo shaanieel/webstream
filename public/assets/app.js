@@ -1391,10 +1391,11 @@ function renderEpListForSeason(season, activeId){
   list.innerHTML = eps.map(ep => {
     const num = ep.episode || 0;
     const t = tmdbByNum[num];
-    // Title = nama file dari Drive (tanpa ext .mkv/.mp4). TMDB title TIDAK dipakai — user wants filename only.
-    const filename = _filenameFromDrivePath(ep.drive_path);
-    const epTitle = filename || `Episode ${num || '?'}`;
-    // TMDB still_path tetap dipakai untuk thumbnail kanan (kalau tersedia) — bukan untuk title.
+    // Title = TMDB episode name. Falls back to "Episode N" if TMDB hasn't
+    // returned the season yet (renderEpListForSeason runs synchronously
+    // before fetchTmdbSeasonAndRerender resolves; the second pass replaces
+    // these placeholders with real names).
+    const epTitle = (t && t.name) ? t.name : `Episode ${num || '?'}`;
     const still = t && t.still_path ? STILL_BASE + t.still_path : '';
     const active = String(ep.id) === String(activeId);
     const thumbStyle = still ? `style="background-image:url('${still}')"` : '';
@@ -1456,6 +1457,11 @@ async function fetchTmdbSeasonAndRerender(season, activeId){
         first_ep: d.data.episodes[0] ? { num: d.data.episodes[0].episode_number, name: d.data.episodes[0].name, has_still: !!d.data.episodes[0].still_path } : null,
       });
       renderEpListForSeason(season, activeId);
+      // Refresh "Now Playing" card so the placeholder "Episode N" gets
+      // replaced with the real TMDB title once it's available.
+      if(currentFilm && (currentFilm.season || 1) === season){
+        updateNowPlayingBar(currentFilm);
+      }
     } else {
       console.warn('[ep-picker] tmdb season returned no episodes', d);
     }
@@ -1469,9 +1475,12 @@ function updateNowPlayingBar(film){
     `Season ${film.season||1} • Episode ${film.episode||'?'}`;
   document.getElementById('npbRight').textContent =
     `${totalEpsInSeason} Episode${totalEpsInSeason>1?'s':''}`;
-  // Now playing card subtitle = nama file dari Drive (tanpa ext) — sesuai permintaan user (no TMDB chapter title).
-  const filename = _filenameFromDrivePath(film.drive_path);
-  const epTitle = filename || `Episode ${film.episode||'?'}`;
+  // Now playing card subtitle = TMDB episode title for the current season,
+  // matching the right-hand episode picker. Fallback to "Episode N" while
+  // the TMDB season fetch is still in flight.
+  const tmdbEps = epPickerState.tmdbBySeason[film.season || 1] || [];
+  const tmdbEp = tmdbEps.find(e => e.episode_number === (film.episode || 0));
+  const epTitle = (tmdbEp && tmdbEp.name) ? tmdbEp.name : `Episode ${film.episode||'?'}`;
   document.getElementById('npcSubtitle').textContent = epTitle;
 }
 
@@ -3427,7 +3436,7 @@ function renderCartPage(){
   if(!list) return;
   const totalEl=document.getElementById('cartTotal');
   if(!cart.length){
-    list.innerHTML='<div class="empty-state">Keranjang masih kosong.</div>';
+    list.innerHTML='<div class="empty-state">Your cart is empty.</div>';
     if(totalEl) totalEl.textContent='Rp0';
     return;
   }
@@ -3455,7 +3464,7 @@ function renderCartPage(){
 }
 async function checkoutCart(){
   const selected=selectedCartItems();
-  if(!cart.length){ showToast('Keranjang kosong','error'); return; }
+  if(!cart.length){ showToast('Cart is empty','error'); return; }
   if(!selected.length){ showToast('Pilih minimal 1 item di keranjang','error'); return; }
   await startCheckout({ type:'cart', items:selected.map(i=>i.id) });
 }
@@ -3478,7 +3487,7 @@ async function renderOrdersPage(){
       const itemRows = items.map(i=>`<li style="display:flex;justify-content:space-between;gap:10px;"><span>${escapeHtml(i.title || 'Produk')}</span><b>${rupiah(i.price||0)}</b></li>`).join('');
       return `<div class="profile-card" style="margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <div><b>${escapeHtml(o.product_name || 'Pembelian')}</b><div style="color:var(--muted);font-size:.85rem;">Ref: ${escapeHtml(o.ref || '-')}</div></div>
+          <div><b>${escapeHtml(o.product_name || 'Transaction')}</b><div style="color:var(--muted);font-size:.85rem;">Ref: ${escapeHtml(o.ref || '-')}</div></div>
           <div style="text-align:right;"><div style="font-weight:800;color:${stColor};text-transform:uppercase;">${escapeHtml(st)}</div><div style="font-size:.82rem;color:var(--muted);">${new Date(o.created_at).toLocaleString('id-ID')}</div></div>
         </div>
         <ul style="margin:10px 0 0;padding-left:18px;display:grid;gap:6px;">${itemRows || '<li>—</li>'}</ul>
