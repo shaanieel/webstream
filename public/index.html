@@ -22,11 +22,22 @@
 </head>
 <body>
 
+<!-- Boot splash: kept up until bootstrap() decides to show authPage or the
+     app shell. Without this, refreshing while logged-in briefly flashes the
+     login form because authPage is in the DOM before getSession() resolves. -->
+<div id="bootSplash" style="position:fixed;inset:0;z-index:99998;display:flex;align-items:center;justify-content:center;background:#0a0a0f;">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:14px;">
+    <div style="font-family:system-ui,-apple-system,sans-serif;font-weight:800;letter-spacing:.18em;font-size:1.05rem;background:linear-gradient(135deg,#7e97ff,#5fc8ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">ZAEINSTREAM</div>
+    <div style="width:28px;height:28px;border:3px solid rgba(126,151,255,.2);border-top-color:#7e97ff;border-radius:50%;animation:bootspin 1s linear infinite;"></div>
+  </div>
+  <style>@keyframes bootspin{to{transform:rotate(360deg)}}</style>
+</div>
+
 </div>
 <!-- ══════════════════════════════════════════════════════════════════
      AUTH PAGE
      ══════════════════════════════════════════════════════════════════ -->
-<div class="auth-page" id="authPage">
+<div class="auth-page" id="authPage" style="display:none;">
   <div class="auth-bg-grad"></div>
   <div class="auth-card">
     <div class="auth-logo">ZAEINSTREAM</div>
@@ -378,12 +389,65 @@
 
     <!-- ════ VIP ════ -->
     <section class="page vip-page" id="page-vip">
-      <div class="vip-hero">
-        <div class="vip-crown">👑</div>
-        <h1>VIP ZONE</h1>
-        <p id="vipHeroDesc">Akses eksklusif ke koleksi premium ZAEINSTREAM.</p>
+      <div class="vip-hero" id="vipHero">
+        <div class="vip-hero-bg" id="vipHeroBg"></div>
+        <div class="vip-hero-shade"></div>
+        <div class="vip-hero-content">
+          <div class="vip-crown">👑</div>
+          <h1>VIP ZONE</h1>
+          <p id="vipHeroDesc">Akses eksklusif ke koleksi premium ZAEINSTREAM.</p>
+          <div class="vip-hero-featured" id="vipHeroFeatured" style="display:none;">
+            <div class="vip-hero-featured-label">Sedang Tayang</div>
+            <div class="vip-hero-featured-title" id="vipHeroFeaturedTitle"></div>
+            <button class="vip-hero-cta" id="vipHeroCta" type="button">▶ Tonton Sekarang</button>
+          </div>
+        </div>
       </div>
-      <div class="page-title" style="color:var(--gold);">Koleksi VIP</div>
+
+      <div class="vip-benefits">
+        <div class="vip-benefit">
+          <div class="vip-benefit-icon">🎬</div>
+          <div class="vip-benefit-text">
+            <div class="vip-benefit-title">Tanpa Iklan</div>
+            <div class="vip-benefit-sub">Streaming bersih dari awal sampai akhir.</div>
+          </div>
+        </div>
+        <div class="vip-benefit">
+          <div class="vip-benefit-icon">📺</div>
+          <div class="vip-benefit-text">
+            <div class="vip-benefit-title">Kualitas 4K</div>
+            <div class="vip-benefit-sub">Resolusi tertinggi untuk pengalaman bioskop.</div>
+          </div>
+        </div>
+        <div class="vip-benefit">
+          <div class="vip-benefit-icon">⚡</div>
+          <div class="vip-benefit-text">
+            <div class="vip-benefit-title">Akses Awal</div>
+            <div class="vip-benefit-sub">Tonton rilisan terbaru sebelum semua orang.</div>
+          </div>
+        </div>
+        <div class="vip-benefit">
+          <div class="vip-benefit-icon">⬇️</div>
+          <div class="vip-benefit-text">
+            <div class="vip-benefit-title">Tanpa Antrian</div>
+            <div class="vip-benefit-sub">Server prioritas untuk member VIP.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vip-toolbar">
+        <div class="vip-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="vipSearchInput" type="search" placeholder="Cari film VIP..." oninput="onVipSearchInput()" autocomplete="off"/>
+        </div>
+        <div class="vip-tabs" role="tablist" aria-label="Filter koleksi VIP">
+          <button class="vip-tab active" data-vip-filter="all" onclick="setVipFilter('all')" role="tab">All</button>
+          <button class="vip-tab" data-vip-filter="movie" onclick="setVipFilter('movie')" role="tab">Movies</button>
+          <button class="vip-tab" data-vip-filter="series" onclick="setVipFilter('series')" role="tab">TV Shows</button>
+        </div>
+      </div>
+
+      <div class="page-title vip-collection-title" style="color:var(--gold);">Koleksi VIP</div>
       <div class="grid" id="vipGrid"></div>
       <div id="vipEmpty" class="empty-state" style="display:none;">
         <div class="emoji">👑</div>

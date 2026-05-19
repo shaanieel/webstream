@@ -163,6 +163,8 @@ async function bootstrap(){
     });
   }catch(e){
     console.error('Bootstrap error:', e);
+    hideBootSplash();
+    document.getElementById('authPage').style.display='flex';
     document.getElementById('authPage').innerHTML='<div style="text-align:center;color:#fca5a5;padding:40px;">Gagal memuat konfigurasi server. Coba refresh.</div>';
     return;
   }
@@ -181,13 +183,20 @@ async function bootstrap(){
 }
 
 function showAuthPage(){
+  hideBootSplash();
   document.getElementById('authPage').style.display='flex';
   document.getElementById('app').style.display='none';
 }
 
 function showApp(){
+  hideBootSplash();
   document.getElementById('authPage').style.display='none';
   document.getElementById('app').style.display='flex';
+}
+
+function hideBootSplash(){
+  const el = document.getElementById('bootSplash');
+  if(el) el.remove();
 }
 
 async function onAuthSuccess(authSession){
@@ -432,17 +441,27 @@ function renderProfilePage(){
 /* ════════════════════════════════════════════════════════════════════
    VIP PAGE
    ════════════════════════════════════════════════════════════════════ */
+let _vipFilter = 'all';        // 'all' | 'movie' | 'series'
+let _vipQuery = '';
+let _vipHeroTimer = null;
+let _vipHeroIndex = 0;
+
 function renderVipPage(){
   // VIP Zone: tampilkan film tier 'vip' (VIP saja) + 'free' (Basic + VIP) — series di-dedupe
   const vipFilms = _dedupeSeries(allFilms.filter(f=>f.tier==='vip' || f.tier==='free' || !f.tier));
   const grid = document.getElementById('vipGrid');
   const empty = document.getElementById('vipEmpty');
   const heroDesc = document.getElementById('vipHeroDesc');
+  const heroFeatured = document.getElementById('vipHeroFeatured');
+  const heroBg = document.getElementById('vipHeroBg');
 
   // Non-VIP: tampilkan modal langsung (gak boleh akses isi halaman)
   if(currentTier!=='vip'){
     showVipLocked({page:true});
     heroDesc.innerHTML = `<strong style="color:#facc15">Halaman ini hanya untuk member VIP.</strong>`;
+    if(heroFeatured) heroFeatured.style.display = 'none';
+    if(heroBg){ heroBg.classList.remove('show'); heroBg.style.backgroundImage = ''; }
+    if(_vipHeroTimer){ clearInterval(_vipHeroTimer); _vipHeroTimer = null; }
     grid.innerHTML = '';
     empty.style.display = 'none';
     return;
@@ -450,20 +469,94 @@ function renderVipPage(){
 
   heroDesc.textContent = 'Selamat datang VIP — semua film premium sudah unlock.';
 
-  if(!vipFilms.length){
+  // ── Hero featured rotation: pick films with backdrops, prefer VIP-only ──
+  const heroPool = vipFilms
+    .filter(f => f.backdrop_url || f.poster_url)
+    .sort((a, b) => {
+      const av = a.tier === 'vip' ? 0 : 1;
+      const bv = b.tier === 'vip' ? 0 : 1;
+      if(av !== bv) return av - bv;
+      return (Number(b.rating) || 0) - (Number(a.rating) || 0);
+    })
+    .slice(0, 6);
+
+  const renderHeroSlot = ()=>{
+    if(!heroPool.length){
+      if(heroFeatured) heroFeatured.style.display = 'none';
+      if(heroBg){ heroBg.classList.remove('show'); heroBg.style.backgroundImage = ''; }
+      return;
+    }
+    const film = heroPool[_vipHeroIndex % heroPool.length];
+    const bgUrl = film.backdrop_url || film.poster_url || '';
+    if(heroBg){
+      heroBg.style.backgroundImage = bgUrl ? `url('${bgUrl}')` : '';
+      heroBg.classList.toggle('show', !!bgUrl);
+    }
+    if(heroFeatured){
+      heroFeatured.style.display = 'flex';
+      document.getElementById('vipHeroFeaturedTitle').textContent = film.judul || '';
+      const cta = document.getElementById('vipHeroCta');
+      if(cta){
+        cta.onclick = ()=>openFilm(film, { vipMode: true });
+      }
+    }
+  };
+  renderHeroSlot();
+  if(_vipHeroTimer){ clearInterval(_vipHeroTimer); _vipHeroTimer = null; }
+  if(heroPool.length > 1){
+    _vipHeroTimer = setInterval(()=>{
+      _vipHeroIndex = (_vipHeroIndex + 1) % heroPool.length;
+      renderHeroSlot();
+    }, 7000);
+  }
+
+  // Cache full list for filter/search re-render without recomputing.
+  document.getElementById('vipGrid')._vipFilms = vipFilms;
+  applyVipFilter();
+}
+
+function applyVipFilter(){
+  const grid = document.getElementById('vipGrid');
+  const empty = document.getElementById('vipEmpty');
+  if(!grid) return;
+  const all = grid._vipFilms || [];
+  const q = (_vipQuery || '').toLowerCase().trim();
+  let items = all;
+  if(_vipFilter === 'movie') items = items.filter(f => f.tipe !== 'series');
+  else if(_vipFilter === 'series') items = items.filter(f => f.tipe === 'series');
+  if(q) items = items.filter(f => (f.judul || '').toLowerCase().includes(q));
+  if(!items.length){
     grid.innerHTML = '';
     empty.style.display = 'block';
-  } else {
-    empty.style.display = 'none';
-    grid.innerHTML = vipFilms.map(f=>cardHTML(f, /*vipStyle=*/true)).join('');
-    grid.querySelectorAll('[data-film-id]').forEach(el=>{
-      el.addEventListener('click', ()=>{
-        const id = el.dataset.filmId;
-        const film = allFilms.find(x=>String(x.id)===String(id));
-        if(film) openFilm(film, { vipMode: true });
-      });
-    });
+    empty.querySelector('h3').textContent = q ? 'Tidak ada hasil' : 'Belum ada film VIP';
+    empty.querySelector('p').textContent = q
+      ? `Tidak ada judul yang cocok dengan "${q}".`
+      : 'Admin belum menambahkan koleksi VIP. Cek lagi nanti.';
+    return;
   }
+  empty.style.display = 'none';
+  grid.innerHTML = items.map(f=>cardHTML(f, /*vipStyle=*/true)).join('');
+  grid.querySelectorAll('[data-film-id]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = el.dataset.filmId;
+      const film = allFilms.find(x=>String(x.id)===String(id));
+      if(film) openFilm(film, { vipMode: true });
+    });
+  });
+}
+
+function setVipFilter(filter){
+  if(filter !== 'all' && filter !== 'movie' && filter !== 'series') filter = 'all';
+  _vipFilter = filter;
+  document.querySelectorAll('.vip-tab').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.vipFilter === filter);
+  });
+  applyVipFilter();
+}
+
+function onVipSearchInput(){
+  _vipQuery = document.getElementById('vipSearchInput').value || '';
+  applyVipFilter();
 }
 
 function showVipLocked(opts){
