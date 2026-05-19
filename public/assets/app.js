@@ -33,6 +33,14 @@ let activeEngine = 1;
 let p2State = null;
 const PLAYER_ENGINE_KEY = 'zaeinstream-player-engine';
 
+async function authHeaders(extra = {}){
+  let token = '';
+  try{
+    token = session?.access_token || (sb && (await sb.auth.getSession()).data.session?.access_token) || '';
+  }catch(_){ token = ''; }
+  return token ? { ...extra, Authorization: 'Bearer ' + token } : { ...extra };
+}
+
 /* ════════════════════════════════════════════════════════════════════
    PAYMENT RETURN — auto-sync setelah user kembali dari VMP
    ────────────────────────────────────────────────────────────────────
@@ -1474,7 +1482,9 @@ function updateNowPlayingBar(film){
 async function _resolveDrivePath(drivePath){
   if(!drivePath) return null;
   try{
-    const r = await fetch('/api/drive/resolve?path='+encodeURIComponent(drivePath));
+    const r = await fetch('/api/drive/resolve?path='+encodeURIComponent(drivePath), {
+      headers: await authHeaders(),
+    });
     const d = await r.json();
     return d && d.ok ? d.stream_url : null;
   }catch{ return null; }
@@ -1651,7 +1661,9 @@ async function loadVideoHost(film){
       const param = film.drive_path
         ? 'path='+encodeURIComponent(film.drive_path)
         : 'link='+encodeURIComponent(film.drive_link);
-      const r = await fetch('/api/drive/resolve?download=1&'+param);
+      const r = await fetch('/api/drive/resolve?download=1&'+param, {
+        headers: await authHeaders(),
+      });
       const d = await r.json();
       if(d.ok && d.stream_url){
         setStreamActions(d.stream_url, film.judul || film.title || '', d.download_token || '');
@@ -1736,7 +1748,9 @@ async function _resolveFilmSources(film){
     }
     const param = film.drive_path ? 'path='+encodeURIComponent(film.drive_path) : 'link='+encodeURIComponent(film.drive_link);
     try{
-      const r = await fetch('/api/drive/resolve?'+param);
+      const r = await fetch('/api/drive/resolve?'+param, {
+        headers: await authHeaders(),
+      });
       const d = await r.json();
       if(!d.ok){ showToast('Drive: '+(d.error||'gagal resolve'), 'error'); return null; }
       videos.push({ name: 'Default', path: d.stream_url });

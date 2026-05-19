@@ -46,6 +46,7 @@ const json = (data, status = 200, extraHeaders = {}) =>
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
+      ...securityHeaders(),
       ...corsHeaders(),
       ...extraHeaders,
     },
@@ -68,6 +69,16 @@ function corsHeaders() {
   };
 }
 
+function securityHeaders() {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'Content-Security-Policy': "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+  };
+}
+
 function minifyHtml(html) {
   return String(html || '')
     .replace(/<!--[\s\S]*?-->/g, '')
@@ -84,6 +95,7 @@ async function serveAsset(request, env) {
   const headers = new Headers(res.headers);
   headers.set('Content-Type', 'text/html; charset=utf-8');
   headers.set('Cache-Control', 'no-store');
+  for (const [key, value] of Object.entries(securityHeaders())) headers.set(key, value);
   headers.delete('Content-Length');
 
   const html = await res.text();
@@ -923,6 +935,48 @@ async function releaseVipDownloadSlot(request, env) {
   return json({ ok: true });
 }
 
+async function findFilmByDrivePath(env, drivePath) {
+  const path = String(drivePath || '').trim();
+  if (!path) return null;
+  const r = await supabaseRest(
+    env,
+    `/films?or=(drive_path.eq.${encodeURIComponent(path)},drive_link.eq.${encodeURIComponent(path)})&select=*&limit=1`
+  );
+  if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
+
+  const all = await supabaseRest(env, '/films?select=*&limit=1000');
+  const films = all.ok && Array.isArray(all.data) ? all.data : [];
+  return films.find(f => filmReferencesDrivePath(f, path)) || null;
+}
+
+function filmReferencesDrivePath(film, path) {
+  if (!film || !path) return false;
+  if (String(film.drive_path || '').trim() === path) return true;
+  if (String(film.drive_link || '').trim() === path) return true;
+  for (const key of ['videos', 'audio_tracks', 'subtitles']) {
+    const list = Array.isArray(film[key]) ? film[key] : [];
+    if (list.some(item => String((item && (item.drive_path || item.drive_link)) || '').trim() === path)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function canResolveDrivePath(request, env, drivePath) {
+  const user = await getUserFromAuth(request, env);
+  if (!user) return { ok: false, response: err('Login dulu', 401) };
+  if (isAdminEmail(env, user.email || '')) return { ok: true, user, film: null, profile: null };
+
+  const film = await findFilmByDrivePath(env, drivePath);
+  if (!film) return { ok: false, response: err('Path Drive tidak terdaftar di katalog', 404) };
+
+  const profile = await getUserProfile(env, user.id, user.email);
+  const isVip = isVipProfileActive(profile);
+  const entitled = await hasFilmEntitlement(env, profile?.user_id || user.id, film);
+  if (!isVip && !entitled) return { ok: false, response: err('Akses video belum aktif', 403) };
+  return { ok: true, user, film, profile };
+}
+
 // GET /api/drive/resolve?path=/Movies/Foo.mp4  (atau ?link=full-url)
 async function driveResolve(request, env, opts = {}) {
   const u = new URL(request.url);
@@ -932,6 +986,8 @@ async function driveResolve(request, env, opts = {}) {
   if (!gdiBase) return err('GDI_WORKER_URL belum di-set di env worker', 500);
   const drivePath = normalizeDrivePath(raw, gdiBase);
   if (!drivePath) return err('Path drive tidak valid');
+  const access = await canResolveDrivePath(request, env, drivePath);
+  if (!access.ok) return access.response;
   let slot = null;
   if (opts.acquireSlot) {
     slot = await acquireVipDownloadSlot(request, env, drivePath);
@@ -1886,7 +1942,19 @@ async function sha256HmacHex(secret, message) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function validateVioletCallbackSignature(env, body) {
+function extractCallbackAmountCandidates(body) {
+  return [
+    body.total_amount,
+    body.nominal,
+    body.amount,
+    body.amount_received,
+    body.amount_merchant,
+  ]
+    .map(v => String(v || '').replace(/[^\d]/g, '').trim())
+    .filter(Boolean);
+}
+
+async function validateVioletCallbackSignature(env, body, expectedAmount = null) {
   const secret = env.VIOLET_SECRET_KEY || '';
   const apiKey = env.VIOLET_API_KEY || '';
   if (!secret || !apiKey) {
@@ -1898,27 +1966,38 @@ async function validateVioletCallbackSignature(env, body) {
     return { ok: false, error: 'Callback VMP tidak punya ref/signature' };
   }
 
-  const amountCandidates = [
-    body.total_amount,
-    body.nominal,
-    body.amount,
-    body.amount_received,
-    body.amount_merchant,
-  ]
-    .map(v => String(v || '').replace(/[^\d]/g, '').trim())
-    .filter(Boolean);
+  const amountCandidates = extractCallbackAmountCandidates(body);
+  const expected = expectedAmount === null || expectedAmount === undefined
+    ? ''
+    : String(Math.round(Number(expectedAmount) || 0));
 
   const messages = [
-    ref,
-    `${ref}${apiKey}`,
     ...amountCandidates.map(a => `${ref}${apiKey}${a}`),
   ];
+  if (expected) messages.unshift(`${ref}${apiKey}${expected}`);
+  if (!messages.length) {
+    return { ok: false, error: 'Callback VMP tidak punya nominal untuk verifikasi signature' };
+  }
   const expectedSet = new Set();
   for (const msg of messages) {
     expectedSet.add((await sha256HmacHex(secret, msg)).toLowerCase());
   }
   if (!expectedSet.has(signature)) {
     return { ok: false, error: 'Signature callback VMP tidak valid' };
+  }
+  return { ok: true };
+}
+
+function validateVioletCallbackAmount(body, order) {
+  const expected = Math.round(Number(order && order.amount) || 0);
+  if (!expected) return { ok: false, error: 'Nominal order lokal tidak valid' };
+  const meta = parseOrderMetadata(order && order.metadata);
+  const fee = Math.max(0, Math.round(Number(meta.violet_fee) || 0));
+  const allowed = new Set([expected, expected + fee]);
+  const amounts = extractCallbackAmountCandidates(body).map(v => Number(v)).filter(Number.isFinite);
+  if (!amounts.length) return { ok: false, error: 'Callback VMP tidak menyertakan nominal' };
+  if (!amounts.some(a => allowed.has(Math.round(a)))) {
+    return { ok: false, error: 'Nominal callback VMP tidak cocok dengan order' };
   }
   return { ok: true };
 }
@@ -2340,6 +2419,10 @@ async function paymentStatus(request, env) {
       const tx = findVioletTxByRef(sync.data, order.ref, refId);
       const rawStatus = tx ? (vioField(tx, 'status') || vioField(tx, 'payment_status')) : extractVioletStatus(sync.data);
       const normalized = normalizeVioletStatus(rawStatus);
+      if (normalized === 'success' && tx) {
+        const amountCheck = validateVioletCallbackAmount(tx, order);
+        if (!amountCheck.ok) return err(amountCheck.error, 400);
+      }
       if (normalized !== 'pending' && normalized !== order.status) {
         const patchBody = {
           status: normalized,
@@ -2481,14 +2564,17 @@ async function violetCallback(request, env) {
     return forwardCallbackToToko1(request, rawText, ctype || 'application/x-www-form-urlencoded', env);
   }
   const order = r.data[0];
-  const enforceSig = ['1', 'true', 'yes', 'on'].includes(
-    String(env.WEBSTREAM_VERIFY_VMP_CALLBACK_SIG || '0').toLowerCase()
-  );
+  const verifyMode = String(env.WEBSTREAM_VERIFY_VMP_CALLBACK_SIG || '1').toLowerCase();
+  const enforceSig = !['0', 'false', 'no', 'off'].includes(verifyMode);
   if (enforceSig) {
-    const sigCheck = await validateVioletCallbackSignature(env, body);
+    const sigCheck = await validateVioletCallbackSignature(env, body, order.amount);
     if (!sigCheck.ok) return err(sigCheck.error, 401);
   }
   const newStatus = normalizeVioletStatus(body.status || body.payment_status);
+  if (newStatus === 'success') {
+    const amountCheck = validateVioletCallbackAmount(body, order);
+    if (!amountCheck.ok) return err(amountCheck.error, 400);
+  }
   const up = await supabaseRest(env, `/payment_orders?ref=eq.${encodeURIComponent(ref)}`, {
     method: 'PATCH',
     body: JSON.stringify({ status: newStatus, gateway_response: body, paid_at: newStatus === 'success' ? new Date().toISOString() : order.paid_at }),
