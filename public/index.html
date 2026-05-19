@@ -603,20 +603,17 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 }
 .host-context-shield{
   position:absolute;
-  inset:0 0 74px 0;
+  inset:0;
   display:none;
   z-index:6;
   background:transparent;
-  cursor:none;
+  cursor:default;
   -webkit-user-select:none;
   user-select:none;
   touch-action:manipulation;
 }
 .host-context-shield.show{display:block;}
-.host-context-shield:active{cursor:none;}
-@media(max-width:700px){
-  .host-context-shield{inset:0 0 58px 0;}
-}
+.host-context-shield:active{cursor:default;}
 /* Multitrack.JS responsive override (lib defaults 854x480) */
 .mjs{width:100% !important;height:100% !important;display:block;}
 #multitrackPlayer .mjs__root{width:100%;height:100%;}
@@ -6548,14 +6545,19 @@ window.addEventListener('beforeunload', () => {
     shield.addEventListener('pointerdown', (ev)=>{
       if(ev.button === 2) return blockShieldEvent(ev);
       if(ev.button !== 0 || !frame || frame.style.display === 'none') return undefined;
-      // Cross-origin iframe context menus cannot be cancelled from the parent.
-      // This transparent shield catches right-click in the video canvas while
-      // briefly yielding on left-click so the host player can still receive
-      // normal play/pause interactions.
+      // Cross-origin iframe context menus cannot be cancelled from the parent,
+      // so the shield covers the full player. On left-click/tap we briefly
+      // yield to the iframe so native controls, settings, and subtitles remain
+      // usable; the shield snaps back shortly after the interaction window.
       shield.style.pointerEvents = 'none';
-      setTimeout(()=>{ shield.style.pointerEvents = ''; }, 650);
+      setTimeout(()=>{ shield.style.pointerEvents = ''; }, 1800);
       return undefined;
     }, true);
+    shield.addEventListener('touchstart', ()=>{
+      if(!frame || frame.style.display === 'none') return;
+      shield.style.pointerEvents = 'none';
+      setTimeout(()=>{ shield.style.pointerEvents = ''; }, 2200);
+    }, { capture:true, passive:true });
   };
   bindHostContextShield();
   document.addEventListener('DOMContentLoaded', bindHostContextShield);
