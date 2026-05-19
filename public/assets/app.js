@@ -3775,21 +3775,37 @@ window.addEventListener('beforeunload', () => {
     shield.addEventListener('auxclick', blockRightButton, true);
     shield.addEventListener('mousedown', blockRightButton, true);
     shield.addEventListener('mouseup', blockRightButton, true);
+    let shieldRestoreTimer = null;
+    const armShieldRestore = (ms)=>{
+      clearTimeout(shieldRestoreTimer);
+      shield.style.pointerEvents = 'none';
+      shieldRestoreTimer = setTimeout(()=>{ shield.style.pointerEvents = ''; }, ms);
+    };
+    const restoreShieldNow = ()=>{
+      clearTimeout(shieldRestoreTimer);
+      shieldRestoreTimer = null;
+      shield.style.pointerEvents = '';
+    };
     shield.addEventListener('pointerdown', (ev)=>{
       if(ev.button === 2) return blockShieldEvent(ev);
       if(ev.button !== 0 || !frame || frame.style.display === 'none') return undefined;
       // Cross-origin iframe context menus cannot be cancelled from the parent,
-      // so the shield covers the full player. On left-click/tap we briefly
-      // yield to the iframe so native controls, settings, and subtitles remain
-      // usable; the shield snaps back shortly after the interaction window.
-      shield.style.pointerEvents = 'none';
-      setTimeout(()=>{ shield.style.pointerEvents = ''; }, 1800);
+      // so the shield covers the full player. On left-click we briefly yield
+      // to the iframe so native controls, settings, and subtitles stay usable.
+      // Window kept short (300ms) so a sneaky right-click after a left-click
+      // can't slip through to the iframe and surface "View frame source" /
+      // "Inspect" via Chrome's native menu.
+      armShieldRestore(300);
       return undefined;
     }, true);
+    // If the user moves the mouse out of the player while the shield is
+    // yielded, snap it back instantly — they're done interacting.
+    shield.addEventListener('mouseleave', restoreShieldNow);
     shield.addEventListener('touchstart', ()=>{
       if(!frame || frame.style.display === 'none') return;
-      shield.style.pointerEvents = 'none';
-      setTimeout(()=>{ shield.style.pointerEvents = ''; }, 2200);
+      // Touch needs a slightly longer window because tap → menu → option
+      // takes more wall-time on mobile, but still well under the old 2.2s.
+      armShieldRestore(600);
     }, { capture:true, passive:true });
   };
   bindHostContextShield();
