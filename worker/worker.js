@@ -68,6 +68,32 @@ function corsHeaders() {
   };
 }
 
+function minifyHtml(html) {
+  return String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/>\s+</g, '><')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+async function serveAsset(request, env) {
+  const res = await env.ASSETS.fetch(request);
+  const contentType = res.headers.get('Content-Type') || '';
+  if (!contentType.includes('text/html')) return res;
+
+  const headers = new Headers(res.headers);
+  headers.set('Content-Type', 'text/html; charset=utf-8');
+  headers.set('Cache-Control', 'no-store');
+  headers.delete('Content-Length');
+
+  const html = await res.text();
+  return new Response(minifyHtml(html), {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Supabase REST helper (untuk admin API & verifikasi user)
 // ───────────────────────────────────────────────────────────────────
@@ -2804,7 +2830,7 @@ export default {
     if (pathname === '/payment/checkout' && request.method === 'GET') {
       if (env.ASSETS) {
         const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
-        return env.ASSETS.fetch(assetReq);
+        return serveAsset(assetReq, env);
       }
     }
     // Hard-guard: root homepage MUST serve index.html.
@@ -2813,7 +2839,7 @@ export default {
     if (pathname === '/' && request.method === 'GET') {
       if (env.ASSETS) {
         const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
-        return env.ASSETS.fetch(assetReq);
+        return serveAsset(assetReq, env);
       }
     }
     // === TMDB (any authenticated user; key tetap di-server, gak ke browser) ===
@@ -2952,7 +2978,7 @@ export default {
 
     // === Static assets (index.html, dll) ===
     // Cloudflare akan otomatis serve dari ./public/ via [assets] di wrangler.toml
-    if (env.ASSETS) return env.ASSETS.fetch(request);
+    if (env.ASSETS) return serveAsset(request, env);
 
     return err('Not Found', 404);
   },
