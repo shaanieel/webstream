@@ -20,7 +20,7 @@
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
 <style>
 /* ════════════════════════════════════════════════════════════════════
-   ZAEINSTREAM — Streamex-style theme
+   ZAEINSTREAM — application theme
    ════════════════════════════════════════════════════════════════════ */
 :root{
   --bg:#0a0a0f;
@@ -298,12 +298,12 @@ img{display:block;max-width:100%;}
 .audio-panel-item.active{background:var(--accent-2);color:#fff;}
 
 /* External player dropdown items */
-.stream-ext-item{
+.external-player-item{
   display:block;padding:9px 14px;color:var(--text);text-decoration:none;
   font-size:.84rem;border-bottom:1px solid rgba(255,255,255,.04);
 }
-.stream-ext-item:last-child{border-bottom:0;}
-.stream-ext-item:hover{background:var(--surface,#0a1628);color:var(--accent,#0ea5e9);}
+.external-player-item:last-child{border-bottom:0;}
+.external-player-item:hover{background:var(--surface,#0a1628);color:var(--accent,#0ea5e9);}
 
 /* Download button — cool style */
 .stream-dl-btn{
@@ -2706,25 +2706,25 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
             <span>DOWNLOAD</span>
           </a>
           <div style="position:relative;">
-            <button id="streamExtBtn" type="button" onclick="toggleStreamExtMenu()"
+            <button id="externalPlayerBtn" type="button" onclick="toggleExternalPlayerMenu()"
                     style="display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--text);padding:9px 14px;border:1px solid var(--border);border-radius:8px;font-weight:600;font-size:.85rem;cursor:pointer;">
               ▶ Buka di Player Eksternal
               <span style="font-size:.7rem;">▾</span>
             </button>
-            <div id="streamExtMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--card,#0d1c35);border:1px solid var(--border);border-radius:8px;min-width:200px;max-height:60vh;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4);">
-              <a class="stream-ext-item" id="streamExtIINA"     href="#">▶ IINA (macOS)</a>
-              <a class="stream-ext-item" id="streamExtPotPlayer" href="#">▶ PotPlayer (Win)</a>
-              <a class="stream-ext-item" id="streamExtVLCMobile" href="#">▶ VLC Mobile</a>
-              <a class="stream-ext-item" id="streamExtVLCDesk"   href="#">▶ VLC Desktop</a>
-              <a class="stream-ext-item" id="streamExtNPlayer"   href="#">▶ nPlayer (iOS)</a>
-              <a class="stream-ext-item" id="streamExtMpvAndroid" href="#">▶ mpv Android</a>
-              <a class="stream-ext-item" id="streamExtMpvX64"    href="#">▶ mpv x64 (Win)</a>
-              <a class="stream-ext-item" id="streamExtMXFree"    href="#">▶ MX Player Free</a>
-              <a class="stream-ext-item" id="streamExtMXPro"     href="#">▶ MX Player Pro</a>
+            <div id="externalPlayerMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--card,#0d1c35);border:1px solid var(--border);border-radius:8px;min-width:200px;max-height:60vh;overflow-y:auto;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.4);">
+              <a class="external-player-item" id="externalPlayerIINA"     href="#">▶ IINA (macOS)</a>
+              <a class="external-player-item" id="externalPlayerPotPlayer" href="#">▶ PotPlayer (Win)</a>
+              <a class="external-player-item" id="externalPlayerVLCMobile" href="#">▶ VLC Mobile</a>
+              <a class="external-player-item" id="externalPlayerVLCDesk"   href="#">▶ VLC Desktop</a>
+              <a class="external-player-item" id="externalPlayerNPlayer"   href="#">▶ nPlayer (iOS)</a>
+              <a class="external-player-item" id="externalPlayerMpvAndroid" href="#">▶ mpv Android</a>
+              <a class="external-player-item" id="externalPlayerMpvX64"    href="#">▶ mpv x64 (Win)</a>
+              <a class="external-player-item" id="externalPlayerMXFree"    href="#">▶ MX Player Free</a>
+              <a class="external-player-item" id="externalPlayerMXPro"     href="#">▶ MX Player Pro</a>
               <div style="border-top:1px solid var(--border);margin:4px 0;"></div>
-              <a class="stream-ext-item" id="streamExt1DMFree"   href="#">⬇ 1DM Free</a>
-              <a class="stream-ext-item" id="streamExt1DMLite"   href="#">⬇ 1DM Lite</a>
-              <a class="stream-ext-item" id="streamExt1DMPlus"   href="#">⬇ 1DM+ Plus</a>
+              <a class="external-player-item" id="externalPlayer1DMFree"   href="#">⬇ 1DM Free</a>
+              <a class="external-player-item" id="externalPlayer1DMLite"   href="#">⬇ 1DM Lite</a>
+              <a class="external-player-item" id="externalPlayer1DMPlus"   href="#">⬇ 1DM+ Plus</a>
             </div>
           </div>
         </div>
@@ -2863,7 +2863,7 @@ let mtPlayer = null;
 let videoPlayer = null;
 let activeEngine = 1;
 let p2State = null;
-const PLAYER_ENGINE_KEY = 'streamex-player-engine';
+const PLAYER_ENGINE_KEY = 'zaeinstream-player-engine';
 
 /* ════════════════════════════════════════════════════════════════════
    PAYMENT RETURN — auto-sync setelah user kembali dari VMP
@@ -4759,18 +4759,18 @@ function setStreamActions(url, title, downloadToken){
   dl.setAttribute('download', (title || 'video') + '.mp4');
   document.getElementById('streamUrlField').value = url;
   // Player schemes
-  document.getElementById('streamExtIINA').href       = 'iina://weblink?url='+url;
-  document.getElementById('streamExtPotPlayer').href  = 'potplayer://'+url;
-  document.getElementById('streamExtVLCMobile').href  = 'vlc://'+url;
-  document.getElementById('streamExtVLCDesk').href    = url;
-  document.getElementById('streamExtNPlayer').href    = 'nplayer-'+url;
-  document.getElementById('streamExtMpvAndroid').href = 'intent://'+url+'#Intent;type=video/any;package=is.xyz.mpv;scheme=https;end;';
-  document.getElementById('streamExtMpvX64').href     = 'mpv://'+b64;
-  document.getElementById('streamExtMXFree').href     = 'intent:'+url+'#Intent;package=com.mxtech.videoplayer.ad;S.title='+enc+';end';
-  document.getElementById('streamExtMXPro').href      = 'intent:'+url+'#Intent;package=com.mxtech.videoplayer.pro;S.title='+enc+';end';
-  document.getElementById('streamExt1DMFree').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager/idm.internet.download.manager.Downloader;S.title='+enc+';end';
-  document.getElementById('streamExt1DMLite').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.adm.lite/idm.internet.download.manager.Downloader;S.title='+enc+';end';
-  document.getElementById('streamExt1DMPlus').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.plus/idm.internet.download.manager.Downloader;S.title='+enc+';end';
+  document.getElementById('externalPlayerIINA').href       = 'iina://weblink?url='+url;
+  document.getElementById('externalPlayerPotPlayer').href  = 'potplayer://'+url;
+  document.getElementById('externalPlayerVLCMobile').href  = 'vlc://'+url;
+  document.getElementById('externalPlayerVLCDesk').href    = url;
+  document.getElementById('externalPlayerNPlayer').href    = 'nplayer-'+url;
+  document.getElementById('externalPlayerMpvAndroid').href = 'intent://'+url+'#Intent;type=video/any;package=is.xyz.mpv;scheme=https;end;';
+  document.getElementById('externalPlayerMpvX64').href     = 'mpv://'+b64;
+  document.getElementById('externalPlayerMXFree').href     = 'intent:'+url+'#Intent;package=com.mxtech.videoplayer.ad;S.title='+enc+';end';
+  document.getElementById('externalPlayerMXPro').href      = 'intent:'+url+'#Intent;package=com.mxtech.videoplayer.pro;S.title='+enc+';end';
+  document.getElementById('externalPlayer1DMFree').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager/idm.internet.download.manager.Downloader;S.title='+enc+';end';
+  document.getElementById('externalPlayer1DMLite').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.adm.lite/idm.internet.download.manager.Downloader;S.title='+enc+';end';
+  document.getElementById('externalPlayer1DMPlus').href    = 'intent:'+url+'#Intent;component=idm.internet.download.manager.plus/idm.internet.download.manager.Downloader;S.title='+enc+';end';
   document.getElementById('streamActions').style.display = 'block';
 }
 
@@ -4794,8 +4794,8 @@ function releaseVipDownloadSlot(){
   }).catch(()=>{});
 }
 
-function toggleStreamExtMenu(){
-  const m = document.getElementById('streamExtMenu');
+function toggleExternalPlayerMenu(){
+  const m = document.getElementById('externalPlayerMenu');
   m.style.display = (m.style.display === 'block') ? 'none' : 'block';
 }
 
@@ -4809,8 +4809,8 @@ function copyStreamUrl(){
 
 // Tutup dropdown player eksternal saat klik di luar
 document.addEventListener('click', function(e){
-  const m = document.getElementById('streamExtMenu');
-  const b = document.getElementById('streamExtBtn');
+  const m = document.getElementById('externalPlayerMenu');
+  const b = document.getElementById('externalPlayerBtn');
   if(!m || !b) return;
   if(!b.contains(e.target) && !m.contains(e.target)) m.style.display='none';
 });
@@ -5477,7 +5477,7 @@ function closePlayer(opts){
   if(fr){ fr.src = 'about:blank'; fr.style.display='none'; }
   const sa = document.getElementById('streamActions');
   if(sa) sa.style.display='none';
-  const sm = document.getElementById('streamExtMenu');
+  const sm = document.getElementById('externalPlayerMenu');
   if(sm) sm.style.display='none';
   if(_currentSubBlobUrl){
     URL.revokeObjectURL(_currentSubBlobUrl);

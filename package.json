@@ -1,7 +1,7 @@
 {
   "name": "zaeinstream-web",
   "version": "1.0.0",
-  "description": "ZAEINSTREAM - Streamex-style streaming web with Drive Index + Subsource subtitles",
+  "description": "ZAEINSTREAM streaming web with Drive Index and Subsource subtitles",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",

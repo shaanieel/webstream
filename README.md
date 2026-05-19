@@ -1,8 +1,8 @@
 # 🎬 ZAEINSTREAM
 
-Platform streaming film & series eksklusif dengan UI mirip [streamex.net](https://www.streamex.net/).
+Platform streaming film & series eksklusif dengan catalog curated, VIP gating, dan player terintegrasi.
 
-- **Frontend** — UI streamex-style (sidebar + grid + dark theme), responsive PC + mobile
+- **Frontend** — UI ZAEINSTREAM (sidebar + grid + dark theme), responsive PC + mobile
 - **Auth** — Supabase (email + password), VIP gating
 - **Video** — Google Drive Index (Cloudflare Worker terpisah)
 - **Subtitle** — Subsource API (search by judul + pilih bahasa, auto-load ke player)
@@ -18,7 +18,7 @@ URL produksi: <https://webstream.zaeinstreamx.workers.dev>
 ```
 webstream/
 ├── public/                    # Static assets (di-serve di "/")
-│   └── index.html             # Frontend utama (streamex-style)
+│   └── index.html             # Frontend utama
 │
 ├── worker/
 │   └── worker.js              # Main Cloudflare Worker
