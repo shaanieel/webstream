@@ -1698,7 +1698,16 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     transition:transform .32s cubic-bezier(.4,0,.2,1);
   }
   .more-sheet.show{transform:translateY(0);}
-  .more-sheet-handle{width:36px;height:4px;border-radius:2px;background:var(--border-2);margin:0 auto 14px;}
+  .more-sheet-handle-wrap{
+    /* Bigger touch target than just the visual pill, so users can grab
+       and drag from anywhere in the top strip. */
+    margin:-10px -20px 4px;
+    padding:14px 0 10px;
+    cursor:grab;
+    touch-action:none;
+  }
+  .more-sheet-handle-wrap:active{cursor:grabbing;}
+  .more-sheet-handle{width:42px;height:5px;border-radius:3px;background:var(--border-2);margin:0 auto;}
   .more-sheet-label{
     font-size:.65rem;font-weight:700;letter-spacing:1.2px;
     color:var(--muted-2);text-transform:uppercase;

@@ -591,7 +591,9 @@
   <!-- ── Mobile More bottom sheet ── -->
   <div class="more-sheet-overlay" id="moreSheetOverlay" onclick="closeMoreSheet()"></div>
   <div class="more-sheet" id="moreSheet">
-    <div class="more-sheet-handle"></div>
+    <div class="more-sheet-handle-wrap" id="moreSheetDragHandle">
+      <div class="more-sheet-handle"></div>
+    </div>
     <div class="more-sheet-label">Media</div>
     <div class="more-sheet-grid">
       <button type="button" onclick="closeMoreSheet();goPage('movies')">

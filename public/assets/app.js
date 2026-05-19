@@ -774,6 +774,95 @@ function toggleMoreSheet(){
   else openMoreSheet();
 }
 
+// ── Swipe-down to close bottom sheet (drag handle or anywhere on header)
+//    User taps the small horizontal pill near the top of the sheet, drags
+//    down → sheet follows the finger; release past 90px → close, else
+//    snap back. Implements native iOS-style behavior on Android/iPhone.
+(function attachSheetDragGesture(){
+  let startY = 0;
+  let currentY = 0;
+  let dragging = false;
+  let sheet = null;
+  const SHEET_BG_TRANSITION = 'transform .32s cubic-bezier(.4,0,.2,1)';
+
+  function onTouchStart(e){
+    sheet = document.getElementById('moreSheet');
+    if(!sheet || !sheet.classList.contains('show')) return;
+    const t = e.touches ? e.touches[0] : e;
+    startY = t.clientY;
+    currentY = startY;
+    dragging = true;
+    sheet.style.transition = 'none'; // disable spring during drag
+  }
+
+  function onTouchMove(e){
+    if(!dragging || !sheet) return;
+    const t = e.touches ? e.touches[0] : e;
+    currentY = t.clientY;
+    const dy = Math.max(0, currentY - startY); // only allow downward
+    sheet.style.transform = `translateY(${dy}px)`;
+    // Fade overlay too proportionally
+    const overlay = document.getElementById('moreSheetOverlay');
+    if(overlay){
+      const fade = Math.max(0.2, 1 - dy / 300);
+      overlay.style.opacity = fade;
+    }
+    if(e.cancelable) e.preventDefault();
+  }
+
+  function onTouchEnd(){
+    if(!dragging || !sheet) return;
+    dragging = false;
+    const dy = Math.max(0, currentY - startY);
+    sheet.style.transition = SHEET_BG_TRANSITION;
+    const overlay = document.getElementById('moreSheetOverlay');
+    if(dy > 90){
+      // close
+      sheet.style.transform = 'translateY(100%)';
+      if(overlay) overlay.style.opacity = '';
+      // After animation ends, remove .show so CSS reset kicks in.
+      setTimeout(() => {
+        closeMoreSheet();
+        sheet.style.transform = '';
+        sheet.style.transition = '';
+      }, 320);
+    } else {
+      // snap back
+      sheet.style.transform = '';
+      if(overlay) overlay.style.opacity = '';
+      setTimeout(() => { sheet.style.transition = ''; }, 320);
+    }
+  }
+
+  function bindHandle(){
+    const handle = document.getElementById('moreSheetDragHandle');
+    if(!handle || handle.dataset.bound) return;
+    handle.dataset.bound = '1';
+    handle.addEventListener('touchstart', onTouchStart, { passive: false });
+    handle.addEventListener('touchmove', onTouchMove, { passive: false });
+    handle.addEventListener('touchend', onTouchEnd);
+    handle.addEventListener('touchcancel', onTouchEnd);
+    // Mouse fallback for testing on desktop dev tools
+    handle.addEventListener('mousedown', (e) => {
+      onTouchStart(e);
+      const onMove = (ev) => onTouchMove(ev);
+      const onUp = () => {
+        onTouchEnd();
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', bindHandle);
+  } else {
+    bindHandle();
+  }
+})();
+
 // ── Mobile row arrows: scroll a tmdb-rail horizontally by ~2 cards ──
 function scrollRail(id, dir){
   const el = document.getElementById(id);
