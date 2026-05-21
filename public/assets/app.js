@@ -3841,11 +3841,24 @@ async function loadCollectionDetail(id){
       descEl.textContent = c.description;
       descEl.style.display = 'block';
     }
-    const films = Array.isArray(d.films) ? d.films : [];
+    const films = Array.isArray(d.films) ? d.films.slice() : [];
     if(!films.length){
       grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="emoji">🎬</div><h3>Belum ada film</h3><p>Admin belum menambah film ke koleksi ini.</p></div>';
       return;
     }
+    // Selalu urut berdasarkan tahun rilis (asc), terlepas dari urutan input admin.
+    // Film tanpa tahun (null/0/NaN) ditaro paling belakang. Tie-breaker: judul A→Z
+    // biar deterministic.
+    films.sort((a, b) => {
+      const ya = Number(a && a.tahun) || 0;
+      const yb = Number(b && b.tahun) || 0;
+      if(ya && yb && ya !== yb) return ya - yb;
+      if(ya && !yb) return -1;
+      if(!ya && yb) return 1;
+      const ta = String(a && a.judul || '').toLowerCase();
+      const tb = String(b && b.judul || '').toLowerCase();
+      return ta.localeCompare(tb);
+    });
     grid.innerHTML = films.map(f => cardHTML(f)).join('');
     grid.querySelectorAll('[data-film-id]').forEach(el=>{
       el.addEventListener('click', ()=>{
