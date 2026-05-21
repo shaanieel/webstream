@@ -948,6 +948,7 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   background:var(--surface-2);border:1px solid var(--border);border-radius:10px;
   cursor:pointer;transition:transform .15s, border-color .15s;
   display:flex;flex-direction:column;overflow:hidden;
+  flex-shrink:0;
 }
 .ep-card:hover{ border-color:var(--accent-2);transform:translateY(-1px); }
 .ep-card.active{ border-color:var(--accent-2);box-shadow:0 0 0 1px var(--accent-2); }
@@ -969,9 +970,10 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   font-size:.78rem;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.ep-list:not(.grid-mode) .ep-card{ flex-direction:row; }
-.ep-list:not(.grid-mode) .ep-card-thumb{ width:120px;flex-shrink:0; }
+.ep-list:not(.grid-mode) .ep-card{ flex-direction:row;min-height:72px; }
+.ep-list:not(.grid-mode) .ep-card-thumb{ width:120px;flex-shrink:0;aspect-ratio:16/9; }
 .ep-list:not(.grid-mode) .ep-card-info{ flex:1;justify-content:center; }
+.ep-list.grid-mode .ep-card{ min-height:120px; }
 
 /* Below-player info bar (Season N • Episode M ... N Episodes / Now Playing card) */
 .now-playing-bar{
