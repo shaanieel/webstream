@@ -79,6 +79,78 @@ function hidePaymentVerifyOverlay(){
   const el = document.getElementById('payVerifyOverlay');
   if(el) el.remove();
 }
+// Ambil judul film dari order: prioritas cart_items[].title (multi item),
+// fallback ke metadata.title atau order.product_name. Return array unique.
+function extractOrderFilmTitles(order){
+  if(!order || typeof order !== 'object') return [];
+  const out = [];
+  const push = t => {
+    const s = String(t || '').trim();
+    if(s && !out.includes(s)) out.push(s);
+  };
+  let meta = order.metadata;
+  if(typeof meta === 'string'){
+    try{ meta = JSON.parse(meta); }catch(_){ meta = null; }
+  }
+  if(meta && Array.isArray(meta.cart_items)){
+    for(const it of meta.cart_items){
+      if(it && it.title) push(it.title);
+    }
+  }
+  if(meta && meta.title) push(meta.title);
+  if(order.product_name) push(order.product_name);
+  return out;
+}
+// Toast khusus pembayaran film sukses — sebutkan judul + tombol ke My Collection.
+// Auto-hilang 6 detik (lebih lama dari toast normal karena pesan lebih panjang).
+function showPaymentSuccessFilmNotice(titles){
+  const list = Array.isArray(titles) ? titles.filter(Boolean) : [];
+  if(!list.length){
+    showToast('Pembayaran berhasil — akses film sudah aktif. Cek di My Collection.', 'success');
+    return;
+  }
+  // Build pesan: kalau 1 film "selamat kamu telah dapat akses \"Judul\"".
+  // Kalau >1 film, gabung dengan koma + " dan ".
+  let phrase;
+  if(list.length === 1){
+    phrase = `"${list[0]}"`;
+  } else if(list.length === 2){
+    phrase = `"${list[0]}" dan "${list[1]}"`;
+  } else {
+    phrase = list.slice(0, -1).map(t => `"${t}"`).join(', ') + `, dan "${list[list.length - 1]}"`;
+  }
+  const existing = document.getElementById('payFilmNotice');
+  if(existing) existing.remove();
+  const el = document.createElement('div');
+  el.id = 'payFilmNotice';
+  el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99998;max-width:min(92vw,420px);background:#0f1622;border:1px solid rgba(34,197,94,.45);box-shadow:0 12px 28px rgba(0,0,0,.45);border-radius:14px;padding:14px 16px;color:#e8eef7;font-family:inherit;display:flex;flex-direction:column;gap:10px;';
+  el.innerHTML = ''
+    + '<div style="display:flex;gap:10px;align-items:flex-start;">'
+    +   '<div style="width:28px;height:28px;flex:0 0 28px;border-radius:50%;background:rgba(34,197,94,.18);color:#22c55e;display:flex;align-items:center;justify-content:center;font-weight:700;">✓</div>'
+    +   '<div style="font-size:.95rem;line-height:1.45;">'
+    +     '<div style="font-weight:600;margin-bottom:2px;">Pembayaran berhasil</div>'
+    +     '<div id="payFilmNoticeMsg"></div>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    +   '<button type="button" id="payFilmNoticeClose" style="background:transparent;border:1px solid rgba(255,255,255,.18);color:#cbd5e1;padding:7px 12px;border-radius:8px;font-size:.85rem;cursor:pointer;">Tutup</button>'
+    +   '<button type="button" id="payFilmNoticeGo" style="background:#f5c518;border:0;color:#111;padding:7px 14px;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;">Buka My Collection</button>'
+    + '</div>';
+  document.body.appendChild(el);
+  // textContent supaya judul film aman dari XSS walau judul mengandung HTML.
+  const msg = el.querySelector('#payFilmNoticeMsg');
+  if(msg) msg.textContent = `Selamat, kamu telah dapat akses ${phrase}. Silahkan cek film kamu di My Collection.`;
+  const closeBtn = el.querySelector('#payFilmNoticeClose');
+  const goBtn = el.querySelector('#payFilmNoticeGo');
+  const dismiss = () => { try{ el.remove(); }catch(_){} };
+  if(closeBtn) closeBtn.addEventListener('click', dismiss);
+  if(goBtn) goBtn.addEventListener('click', () => {
+    dismiss();
+    try{ if(typeof goPage === 'function') goPage('my-collections'); }catch(_){}
+  });
+  // Auto-dismiss setelah 8 detik supaya nggak nutupin UI selamanya.
+  setTimeout(dismiss, 8000);
+}
 async function handlePaymentReturn(ref){
   if(!ref) return;
   showPaymentVerifyOverlay('Memverifikasi pembayaran...');
@@ -108,10 +180,24 @@ async function handlePaymentReturn(ref){
         lastStatus = String(d.order.status || '').toLowerCase();
         if(lastStatus === 'success'){
           hidePaymentVerifyOverlay();
-          showToast('Pembayaran berhasil — akses sudah aktif.', 'success');
           // Refresh profil + entitlements supaya VIP/film akses langsung kelihatan.
           try{ if(typeof onAuthSuccess === 'function' && session) await onAuthSuccess(session); }catch(_){}
           try{ if(typeof renderProfilePage === 'function') renderProfilePage(); }catch(_){}
+          // Notifikasi disesuaikan: kalau order film tertentu → sebutkan nama
+          // filmnya + arahkan ke My Collection. Untuk VIP / order tanpa nama
+          // film spesifik, fallback ke pesan generik.
+          const order = d.order || {};
+          const ptype = String(order.product_type || '').toLowerCase();
+          if(ptype === 'film'){
+            const titles = extractOrderFilmTitles(order);
+            if(titles.length){
+              showPaymentSuccessFilmNotice(titles);
+            } else {
+              showToast('Pembayaran berhasil — akses film sudah aktif. Cek di My Collection.', 'success');
+            }
+          } else {
+            showToast('Pembayaran berhasil — akses sudah aktif.', 'success');
+          }
           return;
         }
         if(lastStatus === 'failed'){
