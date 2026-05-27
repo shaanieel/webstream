@@ -2343,14 +2343,22 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 }
 .ep-drawer-root[hidden]{ display:none; }
 
-/* Backdrop — semi-transparent so user can still see the video. */
+/* Backdrop — semi-transparent so user can still see the video.
+   pointer-events:none so the iframe behind keeps receiving mousemove /
+   click events. That keeps player4me's cursor-auto-hide from triggering
+   (otherwise the iframe goes cursor:none after a few idle seconds and
+   the cursor visually disappears across the whole fullscreen area).
+   The X button and Esc are the only ways to close — click-outside-to-
+   close is intentionally dropped so video controls behind the dim stay
+   tappable while the drawer is open. */
 .ep-drawer-backdrop{
   position:absolute; inset:0;
   background:rgba(0,0,0,.30);
   opacity:0;
   transition:opacity .35s cubic-bezier(.4,0,.2,1);
-  pointer-events:auto;
+  pointer-events:none;
   -webkit-tap-highlight-color:transparent;
+  cursor:default;
 }
 
 /* Sliding panel itself. Translucent + heavy blur so the video shows
@@ -2367,6 +2375,9 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   transition:transform .42s cubic-bezier(.4,0,.2,1);
   display:flex; flex-direction:column;
   pointer-events:auto;
+  /* Force a visible cursor inside the panel so it never inherits the
+     iframe's cursor:none when the player auto-hides. */
+  cursor:default;
   /* iOS safe-area so the close button isn't under the notch */
   padding-top:env(safe-area-inset-top, 0);
 }
