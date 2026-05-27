@@ -1801,8 +1801,12 @@ function applyEngineButtons(){ /* no-op */ }
 function setHostContextShield(enabled){
   const shield = document.getElementById('hostContextShield');
   if(!shield) return;
-  shield.classList.toggle('show', !!enabled);
-  shield.dataset.enabled = enabled ? '1' : '0';
+  // The shield used to sit above the cross-origin host player to block the
+  // context menu. It also made the Play button feel hard to click, so keep it
+  // permanently disabled and let the iframe/video receive mouse events.
+  shield.classList.remove('show');
+  shield.dataset.enabled = '0';
+  shield.style.pointerEvents = 'none';
 }
 
 // Show legacy Vidstack/Multitrack players after a host-iframe film closes.
@@ -4082,16 +4086,33 @@ window.addEventListener('beforeunload', () => {
     return false;
   }
 
+  function isPlayerSurface(target, ev){
+    const sels = '#playerWrap,#vhFrame,#trailerIframe,#multitrackPlayer,#player2Wrap,#p2VsPlayer,media-player,video,iframe,.mjs,.mjs__video';
+    try{
+      const path = ev && typeof ev.composedPath === 'function' ? ev.composedPath() : [];
+      for(const node of path){
+        if(!node || node.nodeType !== 1) continue;
+        if(node.matches && node.matches(sels)) return true;
+        if(node.closest && node.closest(sels)) return true;
+      }
+    }catch{}
+    try{ return !!(target && target.closest && target.closest(sels)); }catch{}
+    return false;
+  }
+
   // 1) Block right-click context menu silently (no redirect).
-  try{ window.oncontextmenu = ()=>false; }catch{}
-  try{ document.oncontextmenu = ()=>false; }catch{}
-  try{ document.documentElement.oncontextmenu = ()=>false; }catch{}
+  const contextMenuGate = (e)=> isPlayerSurface(e && e.target, e) ? true : false;
+  try{ window.oncontextmenu = contextMenuGate; }catch{}
+  try{ document.oncontextmenu = contextMenuGate; }catch{}
+  try{ document.documentElement.oncontextmenu = contextMenuGate; }catch{}
   window.addEventListener('contextmenu', (e)=>{
+    if(isPlayerSurface(e.target, e)) return true;
     e.preventDefault();
     e.stopPropagation();
     return false;
   }, true);
   document.addEventListener('contextmenu', (e)=>{
+    if(isPlayerSurface(e.target, e)) return true;
     e.preventDefault();
     e.stopPropagation();
     return false;
@@ -4101,6 +4122,7 @@ window.addEventListener('beforeunload', () => {
   //     web-component shadow roots). Some player internals don't always
   //     bubble `contextmenu` to the main document.
   const mediaBlocker = (ev)=>{
+    if(isPlayerSurface(ev.target, ev)) return true;
     if(isEditable(ev.target)) return;
     ev.preventDefault();
     ev.stopPropagation();
@@ -4114,7 +4136,7 @@ window.addEventListener('beforeunload', () => {
   const bindMediaNode = (node)=>{
     if(!node || _boundMediaNodes.has(node)) return;
     _boundMediaNodes.add(node);
-    try{ node.oncontextmenu = ()=>false; }catch{}
+    try{ node.oncontextmenu = null; }catch{}
     try{ node.addEventListener('contextmenu', mediaBlocker, true); }catch{}
     try{ node.addEventListener('auxclick', mediaRightButtonBlocker, true); }catch{}
     try{ node.addEventListener('mousedown', mediaRightButtonBlocker, true); }catch{}
@@ -4156,11 +4178,11 @@ window.addEventListener('beforeunload', () => {
     ];
     document.querySelectorAll(sels.join(',')).forEach(bindMediaNode);
     document.querySelectorAll('video').forEach((v)=>{
-      try{ v.setAttribute('oncontextmenu', 'return false'); }catch{}
+      try{ v.removeAttribute('oncontextmenu'); }catch{}
       try{ v.setAttribute('controlslist', 'nodownload noplaybackrate noremoteplayback'); }catch{}
       try{ v.setAttribute('disablepictureinpicture', ''); }catch{}
       try{ v.setAttribute('disableremoteplayback', ''); }catch{}
-      try{ v.oncontextmenu = ()=>false; }catch{}
+      try{ v.oncontextmenu = null; }catch{}
     });
   };
   bindAllMediaSurfaces();
