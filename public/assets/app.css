@@ -192,6 +192,8 @@ img{display:block;max-width:100%;}
 .sidebar.collapsed .nav-item{ justify-content:center; padding:11px 0; }
 .sidebar.collapsed .sidebar-logo{ padding:18px 0; justify-content:center; }
 .sidebar.collapsed .sidebar-logo-img{ max-height:32px; }
+.sidebar.collapsed .sidebar-logo-text{ display:none; }
+.sidebar.collapsed .sidebar-logo-mark{ display:inline-block; }
 .sidebar.collapsed .profile-chip{ justify-content:center; padding:8px 0; }
 
 /* Sidebar collapse toggle button (vertically centered, on right edge of sidebar) */
@@ -214,11 +216,41 @@ img{display:block;max-width:100%;}
 .sidebar-logo{
   padding:18px 20px 22px;
   display:flex;align-items:center;gap:10px;
+  min-height:44px;
 }
 .sidebar-logo-img{
   max-width:100%; height:auto; max-height:44px;
   object-fit:contain; flex-shrink:0;
   transition:max-height .25s;
+}
+.sidebar-logo-text{
+  font-family:'Bebas Neue',system-ui,-apple-system,sans-serif;
+  font-weight:400;
+  letter-spacing:.14em;
+  font-size:1.55rem;
+  line-height:1;
+  white-space:nowrap;
+  user-select:none;
+  background:linear-gradient(135deg,#7e97ff,#5fc8ff);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  color:#7e97ff;
+}
+.sidebar-logo-mark{
+  display:none;
+  font-family:'Bebas Neue',system-ui,-apple-system,sans-serif;
+  font-weight:400;
+  letter-spacing:.04em;
+  font-size:1.35rem;
+  line-height:1;
+  white-space:nowrap;
+  user-select:none;
+  background:linear-gradient(135deg,#7e97ff,#5fc8ff);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  color:#7e97ff;
 }
 .sidebar-nav{flex:1;overflow-y:auto;padding:0 12px;}
 .nav-section{margin-bottom:24px;}
