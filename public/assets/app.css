@@ -2335,28 +2335,32 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   right:calc(14px + env(safe-area-inset-right, 0));
 }
 
-/* Drawer container — fixed to viewport. */
+/* Drawer container — fixed to viewport. While open we let the root own
+   pointer events so the backdrop's cursor:default applies even over the
+   iframe (which can flip cursor:none mid-load on player4me). */
 .ep-drawer-root{
   position:fixed; inset:0;
   z-index:9999;
   pointer-events:none;
+  cursor:default;
 }
+.ep-drawer-root.open{ pointer-events:auto; }
 .ep-drawer-root[hidden]{ display:none; }
 
 /* Backdrop — semi-transparent so user can still see the video.
-   pointer-events:none so the iframe behind keeps receiving mousemove /
-   click events. That keeps player4me's cursor-auto-hide from triggering
-   (otherwise the iframe goes cursor:none after a few idle seconds and
-   the cursor visually disappears across the whole fullscreen area).
-   The X button and Esc are the only ways to close — click-outside-to-
-   close is intentionally dropped so video controls behind the dim stay
-   tappable while the drawer is open. */
+   pointer-events:auto so the backdrop owns the cursor (otherwise the
+   browser reads the cursor from whatever sits behind it — usually the
+   player4me iframe, which sets cursor:none when idle or while
+   reloading the video. That made the cursor visually disappear across
+   the dim area, especially right after picking a new episode while the
+   iframe was switching `about:blank` → real URL).
+   Click on the dim area also closes the drawer (standard modal UX). */
 .ep-drawer-backdrop{
   position:absolute; inset:0;
   background:rgba(0,0,0,.30);
   opacity:0;
   transition:opacity .35s cubic-bezier(.4,0,.2,1);
-  pointer-events:none;
+  pointer-events:auto;
   -webkit-tap-highlight-color:transparent;
   cursor:default;
 }
