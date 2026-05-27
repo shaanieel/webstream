@@ -401,8 +401,16 @@ img{display:block;max-width:100%;}
 }
 .vip-benefit-card-icon{
   width:42px;height:42px;flex-shrink:0;
-  display:grid;place-items:center;font-size:1.25rem;
-  background:rgba(245,197,24,.12);border-radius:10px;
+  display:grid;place-items:center;
+  background:linear-gradient(135deg,rgba(245,197,24,.22) 0%,rgba(245,197,24,.08) 100%);
+  border:1px solid rgba(245,197,24,.28);
+  border-radius:10px;
+  color:#ffd84d;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 4px 12px rgba(245,197,24,.08);
+}
+.vip-benefit-card-icon svg{
+  width:22px;height:22px;display:block;
+  filter:drop-shadow(0 1px 2px rgba(245,197,24,.25));
 }
 .vip-benefit-card-text{min-width:0;}
 .vip-benefit-card-title{font-size:.9rem;font-weight:800;color:#fff5cc;}
