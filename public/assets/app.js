@@ -1487,6 +1487,11 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
     document.getElementById('epPicker').style.display='none';
     document.getElementById('nowPlayingBar').style.display='none';
     document.getElementById('nowPlayingCard').style.display='none';
+    // No episodes for a movie — hide the drawer trigger and dismiss
+    // the drawer if it happens to be open from a previous series view.
+    const _epBtn = document.getElementById('playerEpBtn');
+    if(_epBtn) _epBtn.style.display = 'none';
+    try{ closeEpDrawer(); }catch(_){ }
   }
 
   // Init video player
@@ -1525,6 +1530,19 @@ async function renderEpisodeList(film){
   const picker = document.getElementById('epPicker');
   const npb = document.getElementById('nowPlayingBar');
   const npc = document.getElementById('nowPlayingCard');
+  const epBtn = document.getElementById('playerEpBtn');
+
+  // Defensive: if a previous close is still mid-transition and the
+  // picker is parked in the drawer slot, restore it to .player-right
+  // so the right column has its episode list right away.
+  const drawerRoot = document.getElementById('epDrawerRoot');
+  if(picker && drawerRoot && (drawerRoot.hidden || !drawerRoot.classList.contains('open'))){
+    if(picker._origParent && picker.parentNode !== picker._origParent){
+      if(_epDrawerCloseTimer){ clearTimeout(_epDrawerCloseTimer); _epDrawerCloseTimer = null; }
+      _epDrawerRestorePicker();
+      drawerRoot.hidden = true;
+    }
+  }
 
   // Group all films with same judul where tipe==='series'
   const eps = allFilms.filter(f=>f.tipe==='series' && f.judul===film.judul);
@@ -1532,11 +1550,14 @@ async function renderEpisodeList(film){
     picker.style.display='none';
     npb.style.display='none';
     npc.style.display='none';
+    if(epBtn) epBtn.style.display='none';
+    try{ closeEpDrawer(); }catch(_){ }
     return;
   }
   picker.style.display='flex';
   npb.style.display='flex';
   npc.style.display='block';
+  if(epBtn) epBtn.style.display='inline-flex';
 
   epPickerState.seriesFilms = eps;
   epPickerState.currentSeason = film.season || 1;
@@ -1612,6 +1633,74 @@ function setEpView(v){
   epPickerState.view = v;
   localStorage.setItem('zaein_ep_view', v);
   applyEpView();
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   EPISODE DRAWER (slide-in panel from the right)
+
+   Tactic: instead of cloning the episode list, we physically move the
+   existing #epPicker element into the drawer's body when opened, and
+   move it back to its original home (inside .player-right) on close.
+   This way the existing render/season/view-switch logic keeps writing
+   to the same DOM nodes — no parallel state to maintain. The iframe
+   is never touched so playback keeps running.
+   ════════════════════════════════════════════════════════════════════ */
+let _epDrawerCloseTimer = null;
+function _epDrawerEscHandler(e){
+  if(e.key === 'Escape'){ closeEpDrawer(); }
+}
+function _epDrawerRestorePicker(){
+  const picker = document.getElementById('epPicker');
+  if(!picker || !picker._origParent) return;
+  try{
+    if(picker._origNext && picker._origNext.parentNode === picker._origParent){
+      picker._origParent.insertBefore(picker, picker._origNext);
+    } else {
+      picker._origParent.appendChild(picker);
+    }
+  }catch(_){ /* parent may have been detached — leave it where it is */ }
+}
+
+function openEpDrawer(){
+  const root   = document.getElementById('epDrawerRoot');
+  const slot   = document.getElementById('epDrawerSlot');
+  const picker = document.getElementById('epPicker');
+  if(!root || !slot || !picker) return;
+  // Cancel any pending close so quick toggles don't fight each other.
+  if(_epDrawerCloseTimer){ clearTimeout(_epDrawerCloseTimer); _epDrawerCloseTimer = null; }
+  // Remember where the picker normally lives so we can put it back.
+  if(!picker._origParent){
+    picker._origParent = picker.parentNode;
+    picker._origNext   = picker.nextSibling;
+  }
+  if(picker.parentNode !== slot){
+    slot.appendChild(picker);
+  }
+  picker.style.display = 'flex';
+  root.hidden = false;
+  // Force a layout flush so the transform transition runs from the
+  // off-screen state instead of snapping straight to open.
+  void root.offsetWidth;
+  root.classList.add('open');
+  document.body.classList.add('ep-drawer-open');
+  document.addEventListener('keydown', _epDrawerEscHandler);
+}
+
+function closeEpDrawer(){
+  const root = document.getElementById('epDrawerRoot');
+  if(!root || root.hidden) return;
+  root.classList.remove('open');
+  document.body.classList.remove('ep-drawer-open');
+  document.removeEventListener('keydown', _epDrawerEscHandler);
+  // Wait for the slide-out transition before hiding the root and
+  // returning the picker to its original parent.
+  if(_epDrawerCloseTimer){ clearTimeout(_epDrawerCloseTimer); }
+  _epDrawerCloseTimer = setTimeout(() => {
+    _epDrawerCloseTimer = null;
+    if(root.classList.contains('open')) return; // re-opened mid-transition
+    _epDrawerRestorePicker();
+    root.hidden = true;
+  }, 430);
 }
 
 function onEpSeasonChange(seasonStr){
@@ -2930,6 +3019,11 @@ function closePlayer(opts){
   if(fullBar) fullBar.style.display = 'none';
   opts = opts || {};
   releaseVipDownloadSlot();
+  // Dismiss the episode drawer if it was open so it doesn't bleed
+  // into the next player open or stay floating after navigation.
+  try{ closeEpDrawer(); }catch(_){ }
+  const _epBtn = document.getElementById('playerEpBtn');
+  if(_epBtn) _epBtn.style.display = 'none';
   document.getElementById('playerModal').classList.remove('open');
   document.body.style.overflow='';
   // If we pushed a /film/{id} URL, navigate back one step so URL reverts

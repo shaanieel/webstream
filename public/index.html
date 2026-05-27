@@ -18,7 +18,7 @@
 <!-- mp4box.js — client-side MP4 demuxer used by Player 2 to expose multi-audio tracks
      embedded inside a single MP4 file (the file Apex multi-language scenario). -->
 <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-<link rel="stylesheet" href="/assets/app.css?v=20260527-vipicons" />
+<link rel="stylesheet" href="/assets/app.css?v=20260527-epdrawer" />
 </head>
 <body>
 
@@ -799,6 +799,16 @@
         <iframe id="trailerIframe" style="display:none;position:absolute;inset:0;width:100%;height:100%;border:0;z-index:6;background:#000;" allow="autoplay;encrypted-media" allowfullscreen></iframe>
         <button id="trailerCloseBtn" onclick="closeTrailerOverlay()" style="display:none;position:absolute;top:10px;left:10px;z-index:7;background:rgba(0,0,0,.65);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:6px 10px;font-size:.78rem;font-weight:600;cursor:pointer;">✕ Tutup Trailer</button>
 
+        <!-- Episode drawer trigger (series only). Sits on top of the iframe so video keeps playing while drawer is open. -->
+        <button id="playerEpBtn" type="button" class="player-ep-btn" onclick="openEpDrawer()" aria-label="Daftar Episode" style="display:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <line x1="2" y1="10" x2="22" y2="10"/>
+            <line x1="7" y1="15" x2="17" y2="15"/>
+          </svg>
+          <span class="label">Episode</span>
+        </button>
+
         <!-- Subs panel -->
         <div class="subs-panel" id="subsPanel">
           <div class="subs-tabs">
@@ -958,12 +968,33 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
   </div>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       Episode drawer — slides in from the right when the user taps the
+       Episode button on the player. Backdrop is mostly transparent so
+       the running video stays visible through it; nothing here touches
+       the iframe so playback keeps going.
+       ──────────────────────────────────────────────────────────────── -->
+  <div class="ep-drawer-root" id="epDrawerRoot" hidden>
+    <div class="ep-drawer-backdrop" onclick="closeEpDrawer()" aria-hidden="true"></div>
+    <aside class="ep-drawer-panel" role="dialog" aria-modal="false" aria-label="Daftar Episode">
+      <div class="ep-drawer-head">
+        <div class="ep-drawer-title">Episode</div>
+        <button class="ep-drawer-close" type="button" onclick="closeEpDrawer()" aria-label="Tutup">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="ep-drawer-body" id="epDrawerSlot"></div>
+    </aside>
+  </div>
 </div>
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
 <script src="/multitrack.bundle.js"></script>
-<script src="/assets/app.js?v=20260527-vipicons" defer></script>
+<script src="/assets/app.js?v=20260527-epdrawer" defer></script>
 </body>
 </html>
