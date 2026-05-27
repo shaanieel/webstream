@@ -770,8 +770,9 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   -webkit-user-select:none;
   user-select:none;
   touch-action:manipulation;
+  pointer-events:none !important;
 }
-.host-context-shield.show{display:block;}
+.host-context-shield.show{display:none;}
 .host-context-shield:active{cursor:default;}
 /* Multitrack.JS responsive override (lib defaults 854x480) */
 .mjs{width:100% !important;height:100% !important;display:block;}
