@@ -2258,31 +2258,81 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
    iframe so playback keeps going.
    ════════════════════════════════════════════════════════════════════ */
 
-/* Trigger button sitting on top of the iframe (top-right of player). */
-.player-ep-btn{
+/* Container for the top-right overlay tools (Episode + Fullscreen).
+   Stays inside #playerWrap so the browser keeps it visible when the
+   wrap is fullscreened. */
+.player-overlay-tools{
   position:absolute; top:12px; right:14px; z-index:8;
+  display:flex; gap:8px; align-items:center;
+  pointer-events:none; /* children opt back in so the gap doesn't eat clicks */
+}
+.player-overlay-tools > button{ pointer-events:auto; }
+
+/* Shared visual style for both overlay buttons. */
+.player-ep-btn,
+.player-fs-btn{
   background:rgba(0,0,0,.62);
   -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
   color:#fff; border:1px solid rgba(255,255,255,.18);
-  border-radius:10px; padding:8px 12px;
-  font-size:.84rem; font-weight:600; letter-spacing:.2px;
+  border-radius:10px;
   cursor:pointer;
-  align-items:center; gap:7px;
   line-height:1;
   transition:background .15s, border-color .15s, transform .15s, box-shadow .15s;
   box-shadow:0 2px 10px rgba(0,0,0,.25);
 }
-.player-ep-btn:hover{
+.player-ep-btn:hover,
+.player-fs-btn:hover{
   background:rgba(0,0,0,.82);
   border-color:rgba(255,255,255,.32);
   transform:translateY(-1px);
   box-shadow:0 4px 14px rgba(0,0,0,.35);
 }
-.player-ep-btn:active{ transform:translateY(0); }
+.player-ep-btn:active,
+.player-fs-btn:active{ transform:translateY(0); }
+
+.player-ep-btn{
+  padding:8px 12px;
+  font-size:.84rem; font-weight:600; letter-spacing:.2px;
+  align-items:center; gap:7px;
+}
 .player-ep-btn svg{ width:16px; height:16px; flex-shrink:0; }
+
+/* Square fullscreen toggle (icon-only, no label). */
+.player-fs-btn{
+  width:36px; height:36px; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.player-fs-btn svg{ width:16px; height:16px; }
+.player-fs-btn .icon-exit{ display:none; }
+.player-wrap.is-fullscreen .player-fs-btn .icon-enter,
+.player-wrap:fullscreen .player-fs-btn .icon-enter{ display:none; }
+.player-wrap.is-fullscreen .player-fs-btn .icon-exit,
+.player-wrap:fullscreen .player-fs-btn .icon-exit{ display:inline-block; }
+
 @media(max-width:560px){
-  .player-ep-btn{ padding:8px 10px; right:10px; top:10px; }
+  .player-overlay-tools{ top:10px; right:10px; gap:6px; }
+  .player-ep-btn{ padding:8px 10px; }
   .player-ep-btn .label{ display:none; }
+  .player-fs-btn{ width:34px; height:34px; }
+}
+
+/* When the wrap is fullscreened, drop the 16:9 lock so the iframe fills
+   the actual screen instead of being letterboxed inside a 16:9 box. */
+.player-wrap:fullscreen,
+.player-wrap:-webkit-full-screen{
+  aspect-ratio:unset !important;
+  width:100vw !important;
+  height:100vh !important;
+  max-width:none !important;
+  max-height:none !important;
+  border-radius:0 !important;
+  background:#000;
+}
+/* Push the overlay tools below any system bars in mobile fullscreen. */
+.player-wrap:fullscreen .player-overlay-tools,
+.player-wrap:-webkit-full-screen .player-overlay-tools{
+  top:calc(12px + env(safe-area-inset-top, 0));
+  right:calc(14px + env(safe-area-inset-right, 0));
 }
 
 /* Drawer container — fixed to viewport. */

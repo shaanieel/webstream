@@ -1703,6 +1703,83 @@ function closeEpDrawer(){
   }, 430);
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   PLAYER FULLSCREEN
+
+   We fullscreen #playerWrap (not the iframe alone) so the overlay
+   Episode button + drawer ride along with the fullscreen view. The
+   iframe is a descendant of the wrap and naturally fills the screen.
+
+   If the user happens to tap the iframe's own native fullscreen button
+   (which fullscreens just the iframe element), we try to redirect by
+   exiting and re-requesting fullscreen on the wrap. That may fail on
+   browsers that don't carry user-activation across the cross-origin
+   boundary — in which case the user can press Esc and use our button
+   instead.
+   ════════════════════════════════════════════════════════════════════ */
+function _fsRequest(el){
+  if(!el) return null;
+  const fn = el.requestFullscreen
+          || el.webkitRequestFullscreen
+          || el.webkitRequestFullScreen
+          || el.msRequestFullscreen;
+  if(!fn) return null;
+  try{ return Promise.resolve(fn.call(el)); }catch(e){ return Promise.reject(e); }
+}
+function _fsExit(){
+  const fn = document.exitFullscreen
+          || document.webkitExitFullscreen
+          || document.webkitCancelFullScreen
+          || document.msExitFullscreen;
+  if(!fn) return null;
+  try{ return Promise.resolve(fn.call(document)); }catch(e){ return Promise.reject(e); }
+}
+function _fsCurrent(){
+  return document.fullscreenElement
+      || document.webkitFullscreenElement
+      || document.webkitCurrentFullScreenElement
+      || document.msFullscreenElement
+      || null;
+}
+
+function toggleWrapFullscreen(){
+  const wrap = document.getElementById('playerWrap');
+  if(!wrap) return;
+  const cur = _fsCurrent();
+  if(!cur){
+    const p = _fsRequest(wrap);
+    if(p && p.catch) p.catch(err => console.warn('[fs] request failed', err));
+  } else {
+    const p = _fsExit();
+    if(p && p.catch) p.catch(err => console.warn('[fs] exit failed', err));
+  }
+}
+
+let _fsRedirecting = false;
+function _onFullscreenChange(){
+  const fsEl = _fsCurrent();
+  const wrap = document.getElementById('playerWrap');
+  const vh   = document.getElementById('vhFrame');
+  if(wrap){
+    wrap.classList.toggle('is-fullscreen', fsEl === wrap);
+  }
+  // Iframe took fullscreen by itself (user hit the player4me fullscreen
+  // button). Try to upgrade to wrap fullscreen so the overlay survives.
+  if(fsEl && vh && fsEl === vh && wrap && !_fsRedirecting){
+    _fsRedirecting = true;
+    const exit = _fsExit();
+    if(!exit){ _fsRedirecting = false; return; }
+    exit
+      .then(() => _fsRequest(wrap))
+      .catch(err => console.warn('[fs] iframe \u2192 wrap redirect failed', err))
+      .finally(() => { _fsRedirecting = false; });
+  }
+}
+document.addEventListener('fullscreenchange',        _onFullscreenChange);
+document.addEventListener('webkitfullscreenchange',  _onFullscreenChange);
+document.addEventListener('mozfullscreenchange',     _onFullscreenChange);
+document.addEventListener('MSFullscreenChange',      _onFullscreenChange);
+
 function onEpSeasonChange(seasonStr){
   const season = parseInt(seasonStr, 10) || 1;
   epPickerState.currentSeason = season;
@@ -3019,6 +3096,9 @@ function closePlayer(opts){
   if(fullBar) fullBar.style.display = 'none';
   opts = opts || {};
   releaseVipDownloadSlot();
+  // Exit fullscreen if we were in wrap-fullscreen mode so closing the
+  // player drops us back to the normal browser chrome.
+  try{ if(_fsCurrent()){ _fsExit(); } }catch(_){ }
   // Dismiss the episode drawer if it was open so it doesn't bleed
   // into the next player open or stay floating after navigation.
   try{ closeEpDrawer(); }catch(_){ }
