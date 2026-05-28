@@ -2454,3 +2454,28 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 /* Lock body scroll while drawer is open (mobile safety). */
 body.ep-drawer-open{ overflow:hidden; }
 
+/* While the drawer is open, the iframe behind must not capture mouse
+   events. Otherwise the user sees player4me's own cursor (which it
+   hides on idle), tooltips like "Minimize", and clicks fall through
+   instead of hitting our backdrop / closing the drawer. Especially
+   important in fullscreen — the iframe fills the whole screen and
+   any mouse hover triggers its native overlay. */
+body.ep-drawer-open #vhFrame,
+body.ep-drawer-open #multitrackPlayer,
+body.ep-drawer-open #player2Wrap{
+  pointer-events:none !important;
+}
+body.ep-drawer-open #playerWrap,
+body.ep-drawer-open #playerWrap *{
+  cursor:default !important;
+}
+.ep-drawer-root.open,
+.ep-drawer-root.open *{ cursor:default !important; }
+.ep-drawer-panel,
+.ep-drawer-panel *{ cursor:auto; }
+.ep-drawer-panel button,
+.ep-drawer-panel select,
+.ep-drawer-panel .ep-card,
+.ep-drawer-panel .ep-view-btn,
+.ep-drawer-panel .ep-drawer-close{ cursor:pointer !important; }
+
