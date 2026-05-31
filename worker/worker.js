@@ -117,12 +117,45 @@ async function supabaseRest(env, path, opts = {}) {
     Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
     'Content-Type': 'application/json',
     Prefer: opts.prefer || 'return=representation',
+    ...(opts.headers || {}),
   };
   const res = await fetch(url, { ...opts, headers });
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, data, contentRange: res.headers.get('content-range') || '' };
+}
+
+// Read a PostgREST collection past Supabase's hard 1000-row default by
+// looping with the Range header until contentRange tells us we got it all.
+// Use this for endpoints that may need every row (catalog, films-by-tmdb,
+// etc.) — single supabaseRest() will silently truncate at 1000 otherwise.
+async function supabaseRestAll(env, path, opts = {}) {
+  const PAGE = 1000;
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    const to = from + PAGE - 1;
+    const r = await supabaseRest(env, path, {
+      ...opts,
+      prefer: 'count=exact',
+      headers: { ...(opts.headers || {}), Range: `${from}-${to}`, 'Range-Unit': 'items' },
+    });
+    if (!r.ok) return r;
+    const rows = Array.isArray(r.data) ? r.data : [];
+    out.push(...rows);
+    // Stop when fewer than PAGE rows came back (last page) or we exceed
+    // the total reported in Content-Range ("0-999/1161").
+    let total = null;
+    if (r.contentRange) {
+      const m = /\/(\d+|\*)$/.exec(r.contentRange);
+      if (m && m[1] !== '*') total = parseInt(m[1], 10);
+    }
+    if (rows.length < PAGE) break;
+    if (total != null && out.length >= total) break;
+    // Safety: cap at 50k rows so a malformed path can't infinite-loop.
+    if (out.length >= 50000) break;
+  }
+  return { ok: true, status: 200, data: out };
 }
 
 async function supabaseRpc(env, name, body) {
@@ -745,7 +778,8 @@ async function getLocalFilmIndex(env) {
   // whole request and we end up with an empty index. select=* is what
   // /api/catalog uses and it's known to work; we only read a handful of
   // fields anyway.
-  const r = await supabaseRest(env, '/films?select=*');
+  // Pakai supabaseRestAll supaya >1000 row gak ke-cap diam-diam.
+  const r = await supabaseRestAll(env, '/films?select=*');
   const rows = r.ok && Array.isArray(r.data) ? r.data : [];
   const byTmdb = new Map();
   const byTitle = new Map();
@@ -944,7 +978,7 @@ async function findFilmByDrivePath(env, drivePath) {
   );
   if (r.ok && Array.isArray(r.data) && r.data.length) return r.data[0];
 
-  const all = await supabaseRest(env, '/films?select=*&limit=1000');
+  const all = await supabaseRestAll(env, '/films?select=*');
   const films = all.ok && Array.isArray(all.data) ? all.data : [];
   return films.find(f => filmReferencesDrivePath(f, path)) || null;
 }
@@ -1422,6 +1456,8 @@ async function catalogList(request, env) {
   // fetch stream URL kalau perlu. Ini biar badge "VIP" tetap keliatan sebagai teaser
   // di grid utama meski user bukan VIP, sama kayak Netflix.
   // Nested-select auto_subtitle_tracks via PostgREST relationship (ON films.id = auto_subtitle_tracks.film_id).
+  // Pakai supabaseRestAll supaya pagination 1000-row default Supabase
+  // tidak ngecap row terbaru (kasus film >1000 row → If Wishes Could Kill, dst).
   const path = '/films?select=*,auto_subtitle_tracks(language,label,url,source)&order=created_at.desc';
   // Backward-compat: frontend lama boleh pakai ?tier=free untuk minta subset non-VIP
   let finalPath = path;
@@ -1433,7 +1469,7 @@ async function catalogList(request, env) {
     finalPath += '&tier.eq.basic';
   }
 
-  const r = await supabaseRest(env, finalPath);
+  const r = await supabaseRestAll(env, finalPath);
   if (!r.ok) return err('Gagal load katalog', 500);
   const isAdmin = isAdminEmail(env, user?.email || '');
   const films = Array.isArray(r.data) ? r.data : [];
