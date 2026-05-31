@@ -3106,25 +3106,56 @@ async function collectionsList(request, env) {
   const r = await supabaseRest(env, '/collections?select=id,title,description,cover_url,sort_order&order=sort_order.asc,id.asc');
   if (!r.ok) return err('Gagal load collections', 500);
   const collections = Array.isArray(r.data) ? r.data : [];
-  // Attach film count per collection.
+  if (!collections.length) return json({ ok: true, collections: [] });
   const ids = collections.map(c => c.id);
-  if (!ids.length) return json({ ok: true, collections: [] });
   const inList = ids.join(',');
-  const cf = await supabaseRest(env, `/collection_films?select=collection_id&collection_id=in.(${inList})`);
-  const counts = {};
+  // Pull collection_films join with the film tipe + judul so we can count
+  // movies and series SEPARATELY (series get deduped per-judul, since a
+  // multi-episode series shouldn't inflate the count).
+  const cf = await supabaseRest(
+    env,
+    `/collection_films?select=collection_id,films(tipe,judul)&collection_id=in.(${inList})`
+  );
+  // Per-collection counters: movies = unique movie ids; series = unique
+  // series titles.
+  const movieCount = {};
+  const seriesTitlesByColl = {};
   if (cf.ok && Array.isArray(cf.data)) {
-    for (const row of cf.data) counts[row.collection_id] = (counts[row.collection_id] || 0) + 1;
+    for (const row of cf.data) {
+      const cid = row.collection_id;
+      const f = row.films;
+      if (!f) continue;
+      if (f.tipe === 'series') {
+        if (!seriesTitlesByColl[cid]) seriesTitlesByColl[cid] = new Set();
+        if (f.judul) seriesTitlesByColl[cid].add(f.judul);
+      } else {
+        movieCount[cid] = (movieCount[cid] || 0) + 1;
+      }
+    }
   }
-  return json({
-    ok: true,
-    collections: collections.map(c => ({
-      id: c.id,
-      title: c.title,
-      description: c.description || '',
-      cover_url: c.cover_url || '',
-      film_count: counts[c.id] || 0,
-    })),
-  });
+  return json(
+    {
+      ok: true,
+      collections: collections.map(c => {
+        const movies = movieCount[c.id] || 0;
+        const series = seriesTitlesByColl[c.id] ? seriesTitlesByColl[c.id].size : 0;
+        return {
+          id: c.id,
+          title: c.title,
+          description: c.description || '',
+          cover_url: c.cover_url || '',
+          film_count: movies + series,
+          movie_count: movies,
+          series_count: series,
+        };
+      }),
+    },
+    200,
+    // Cache the collections list at the CF edge for 60 s. Detail cards
+    // change rarely (admin curation), so this hides Supabase round-trip
+    // latency that was making the page feel slow.
+    { 'Cache-Control': 'public, max-age=15, s-maxage=60, stale-while-revalidate=120' }
+  );
 }
 
 // GET /api/collections/:id — detail with films
@@ -3149,6 +3180,19 @@ async function collectionsDetail(request, env, id) {
           return copy;
         })
     : [];
+
+  // Count movies and series separately (series deduped by judul).
+  let movieCount = 0;
+  const seriesTitles = new Set();
+  for (const f of films) {
+    if (f.tipe === 'series') {
+      if (f.judul) seriesTitles.add(f.judul);
+    } else {
+      movieCount++;
+    }
+  }
+  const seriesCount = seriesTitles.size;
+
   return json({
     ok: true,
     collection: {
@@ -3156,9 +3200,13 @@ async function collectionsDetail(request, env, id) {
       title: collection.title,
       description: collection.description || '',
       cover_url: collection.cover_url || '',
-      film_count: films.length,
+      film_count: movieCount + seriesCount,
+      movie_count: movieCount,
+      series_count: seriesCount,
     },
     films,
+  }, 200, {
+    'Cache-Control': 'public, max-age=15, s-maxage=60, stale-while-revalidate=120',
   });
 }
 
@@ -3170,16 +3218,34 @@ async function adminCollectionsList(request, env) {
   if (!r.ok) return err('Gagal load collections', 500);
   const collections = Array.isArray(r.data) ? r.data : [];
   const ids = collections.map(c => c.id);
-  let counts = {};
+  const movieCount = {};
+  const seriesTitlesByColl = {};
   if (ids.length) {
-    const cf = await supabaseRest(env, `/collection_films?select=collection_id&collection_id=in.(${ids.join(',')})`);
+    const cf = await supabaseRest(
+      env,
+      `/collection_films?select=collection_id,films(tipe,judul)&collection_id=in.(${ids.join(',')})`
+    );
     if (cf.ok && Array.isArray(cf.data)) {
-      for (const row of cf.data) counts[row.collection_id] = (counts[row.collection_id] || 0) + 1;
+      for (const row of cf.data) {
+        const cid = row.collection_id;
+        const f = row.films;
+        if (!f) continue;
+        if (f.tipe === 'series') {
+          if (!seriesTitlesByColl[cid]) seriesTitlesByColl[cid] = new Set();
+          if (f.judul) seriesTitlesByColl[cid].add(f.judul);
+        } else {
+          movieCount[cid] = (movieCount[cid] || 0) + 1;
+        }
+      }
     }
   }
   return json({
     ok: true,
-    collections: collections.map(c => ({ ...c, film_count: counts[c.id] || 0 })),
+    collections: collections.map(c => {
+      const movies = movieCount[c.id] || 0;
+      const series = seriesTitlesByColl[c.id] ? seriesTitlesByColl[c.id].size : 0;
+      return { ...c, film_count: movies + series, movie_count: movies, series_count: series };
+    }),
   });
 }
 

@@ -1221,6 +1221,33 @@ function upsertContinueWatching(filmId, currentTime, duration){
   if(idx>=0) list[idx]=entry; else list.push(entry);
   saveContinueWatching(list);
 }
+
+// Iframe player (player4me) is cross-origin so we can't read currentTime.
+// Instead, mark the film as "in progress" the moment it's opened: progress
+// stays at a fake low value but the entry shows up in Continue Watching so
+// the user can re-open it from home. Caller should pass the LOCAL film id.
+let _hostCwTimer = null;
+function markFilmOpenedForCw(filmId){
+  if(!filmId) return;
+  const list = getContinueWatching();
+  const sid = String(filmId);
+  const idx = list.findIndex(x=>String(x.id)===sid);
+  // If we already have a real progress entry from a non-iframe engine, keep it.
+  if(idx >= 0 && list[idx].duration && list[idx].position > 5){
+    list[idx].lastWatched = Date.now();
+  } else {
+    // Synthesised entry — duration unknown. Use a tiny non-zero progress so
+    // the bar shows something. Real engines will overwrite this if/when the
+    // user moves to a multitrack/Vidstack-backed film.
+    const entry = idx>=0 ? list[idx] : { id: sid };
+    entry.position = entry.position || 1;
+    entry.duration = entry.duration || 0;
+    entry.progress = entry.progress || 0.01;
+    entry.lastWatched = Date.now();
+    if(idx >= 0) list[idx] = entry; else list.push(entry);
+  }
+  saveContinueWatching(list);
+}
 function removeContinueWatching(filmId){
   const list = getContinueWatching().filter(x=>String(x.id)!==String(filmId));
   localStorage.setItem(CW_KEY, JSON.stringify(list));
@@ -1311,16 +1338,19 @@ function cardHTML(f, vipStyle, opts){
   const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
   const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
   const tmdbNote = opts.tmdb && !f.is_available ? '<div class="tmdb-locked-note">Belum ada di katalog</div>' : '';
-  // Watchlist toggle (top-right corner, inside the poster). TMDB-only
-  // tiles that aren't in our catalog yet have no real id we can persist
-  // against — hide the button there to avoid stranding orphaned entries.
+  // Watchlist toggle (top-right corner, inside the poster).
+  // Persist against the LOCAL catalog id when one exists (TMDB tiles include
+  // local_id). Without that, clicking "+" on a TMDB-rendered card would write
+  // a tmdb-* id that the watchlist page (which iterates allFilms) couldn't
+  // match. TMDB tiles with no local match get no button at all.
   let wlBtn = '';
-  if(!opts.tmdb || f.is_available){
-    const inList = isInWatchlist(f.id);
+  const wlId = opts.tmdb ? (f.local_id || '') : f.id;
+  if(wlId){
+    const inList = isInWatchlist(wlId);
     const wlIcon = inList
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
-    wlBtn = `<button class="card-wl-btn${inList?' in-list':''}" data-wl-toggle="${escapeHtml(f.id)}" aria-label="${inList?'Edit watchlist status':'Add to watchlist'}" onclick="event.stopPropagation();openWatchlistMenu('${escapeHtml(f.id)}', this);">${wlIcon}</button>`;
+    wlBtn = `<button class="card-wl-btn${inList?' in-list':''}" data-wl-toggle="${escapeHtml(wlId)}" aria-label="${inList?'Edit watchlist status':'Add to watchlist'}" onclick="event.stopPropagation();openWatchlistMenu('${escapeHtml(wlId)}', this);">${wlIcon}</button>`;
   }
   return `
     <div class="${cls}" ${idAttr} tabindex="0">
@@ -2235,6 +2265,19 @@ async function loadNativeDrivePlayer(film){
 // (download + external player) ONLY for VIP films.
 async function loadVideoHost(film){
   releaseVipDownloadSlot();
+  // Mark in Continue Watching after 30 s — gives user time to bail without
+  // polluting the rail. Cleared if user navigates to another film inside the
+  // same session via the timeout being reset on each loadVideoHost call.
+  if(_hostCwTimer){ clearTimeout(_hostCwTimer); _hostCwTimer = null; }
+  if(film && film.id){
+    _hostCwTimer = setTimeout(()=>{
+      _hostCwTimer = null;
+      // Only mark if this film is still the one playing.
+      if(currentFilm && String(currentFilm.id) === String(film.id)){
+        markFilmOpenedForCw(film.id);
+      }
+    }, 30 * 1000);
+  }
   // Tear down whichever legacy engine was last active so it doesn't keep
   // playing audio / consuming bandwidth in the background.
   try { teardownEngine1(); } catch {}
@@ -4243,8 +4286,20 @@ async function renderCollectionsBrowsePage(){
 
 function collectionCardHTML(c){
   const cover = c.cover_url ? `<div class="collection-card-img" style="background-image:url('${escapeHtml(c.cover_url)}')"></div>` : `<div class="collection-card-empty">${escapeHtml(c.title)}</div>`;
-  const count = c.film_count || 0;
-  const countLabel = count === 1 ? '1 movie' : `${count} movies`;
+  // Show "3 Movies · 1 Series" instead of one collapsed count. Older API
+  // responses without the split fields fall back to film_count.
+  const movieCount = Number(c.movie_count || 0);
+  const seriesCount = Number(c.series_count || 0);
+  let countLabel;
+  if (movieCount || seriesCount) {
+    const parts = [];
+    if (movieCount) parts.push(`${movieCount} ${movieCount === 1 ? 'Movie' : 'Movies'}`);
+    if (seriesCount) parts.push(`${seriesCount} ${seriesCount === 1 ? 'Series' : 'Series'}`);
+    countLabel = parts.join(' · ');
+  } else {
+    const count = c.film_count || 0;
+    countLabel = count === 1 ? '1 movie' : `${count} movies`;
+  }
   return `
     <div class="collection-card" data-coll-id="${escapeHtml(c.id)}" tabindex="0" role="button">
       ${cover}
@@ -4289,8 +4344,16 @@ async function loadCollectionDetail(id){
     if(!r.ok || !d.ok) throw new Error(d.error || 'Collection tidak ditemukan');
     const c = d.collection;
     titleEl.textContent = c.title || '';
-    const count = c.film_count || (Array.isArray(d.films) ? d.films.length : 0);
-    metaEl.textContent = (count === 1 ? '1 movie' : `${count} movies`) + ' in this collection';
+    // Hero meta uses the same split-count pattern as the collection cards.
+    const heroParts = [];
+    if (c.movie_count) heroParts.push(`${c.movie_count} ${c.movie_count === 1 ? 'Movie' : 'Movies'}`);
+    if (c.series_count) heroParts.push(`${c.series_count} ${c.series_count === 1 ? 'Series' : 'Series'}`);
+    if (heroParts.length) {
+      metaEl.textContent = heroParts.join(' · ') + ' in this collection';
+    } else {
+      const count = c.film_count || (Array.isArray(d.films) ? d.films.length : 0);
+      metaEl.textContent = (count === 1 ? '1 title' : `${count} titles`) + ' in this collection';
+    }
     if(heroBg && c.cover_url){
       heroBg.style.backgroundImage = `url('${c.cover_url}')`;
     }
@@ -4321,8 +4384,12 @@ async function loadCollectionDetail(id){
       const tb = String(b && b.judul || '').toLowerCase();
       return ta.localeCompare(tb);
     });
-    // Update meta count to reflect deduped count, not raw episode count.
-    metaEl.textContent = (dedupedFilms.length === 1 ? '1 title' : `${dedupedFilms.length} titles`) + ' in this collection';
+    // Server already returns split counts in `c.movie_count`/`c.series_count`,
+    // which we used above. dedupedFilms.length is just for sanity — only
+    // overwrite the meta text if the server didn't supply split fields.
+    if (!c.movie_count && !c.series_count) {
+      metaEl.textContent = (dedupedFilms.length === 1 ? '1 title' : `${dedupedFilms.length} titles`) + ' in this collection';
+    }
     grid.innerHTML = dedupedFilms.map(f => cardHTML(f)).join('');
     grid.querySelectorAll('[data-film-id]').forEach(el=>{
       el.addEventListener('click', ()=>{

@@ -2487,7 +2487,7 @@ body.ep-drawer-open #playerWrap *{
    per-slice scaling that mimics a fish-eye lens.
    ════════════════════════════════════════════════════════════════════ */
 .zs-loader {
-  --main-size: 3em;
+  --main-size: 5.5em;
   --text-color: #ffffff;
   --shine-color: #ffffff40;
   --shadow-color: #aaaaaa;
@@ -2651,7 +2651,7 @@ body.ep-drawer-open #playerWrap *{
 }
 
 @media (max-width: 640px) {
-  .zs-loader { --main-size: 2em; }
+  .zs-loader { --main-size: 3.5em; }
 }
 
 /* ════════════════════════════════════════════════════════════════════
