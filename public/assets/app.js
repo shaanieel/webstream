@@ -696,7 +696,7 @@ document.addEventListener('keydown',(e)=>{
    Pages:  /, /movies, /tv, /browse, /watchlist, /search, /vip, /profile
    Film:   /film/{id}
    ════════════════════════════════════════════════════════════════════ */
-const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','my-collections','collection','orders','vip','profile','payment'];
+const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','my-collections','collection','orders','faq','vip','profile','payment'];
 let _currentPage = 'home';
 
 function pagePath(name){
