@@ -11,7 +11,21 @@ let session = null;
 let currentProfile = null;
 let currentTier = 'guest';   // guest | free | vip | expired
 let allFilms = [];
-let watchlist = JSON.parse(localStorage.getItem('zaein_watchlist')||'[]');
+// Watchlist: legacy was an array of ids. New format is an object
+// { id: { status, addedAt } } where status is one of WL_STATUSES.
+// Migration on load: bare ids become { status:'plan', addedAt:0 }.
+const WL_STATUSES = ['plan','watching','onhold','finished','dropped'];
+let watchlist = (function(){
+  let raw;
+  try{ raw = JSON.parse(localStorage.getItem('zaein_watchlist')||'{}'); }catch{ raw = {}; }
+  if(Array.isArray(raw)){
+    const obj = {};
+    for(const id of raw){ obj[String(id)] = { status:'plan', addedAt: Date.now() }; }
+    raw = obj;
+    try{ localStorage.setItem('zaein_watchlist', JSON.stringify(raw)); }catch{}
+  }
+  return raw && typeof raw === 'object' ? raw : {};
+})();
 let cart = JSON.parse(localStorage.getItem('zaein_cart')||'[]');
 cart = Array.isArray(cart) ? cart.map(i => ({ ...i, selected: i && i.selected !== false })) : [];
 let currentEntitlements = [];
@@ -1297,10 +1311,21 @@ function cardHTML(f, vipStyle, opts){
   const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
   const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
   const tmdbNote = opts.tmdb && !f.is_available ? '<div class="tmdb-locked-note">Belum ada di katalog</div>' : '';
+  // Watchlist toggle (top-right corner, inside the poster). TMDB-only
+  // tiles that aren't in our catalog yet have no real id we can persist
+  // against — hide the button there to avoid stranding orphaned entries.
+  let wlBtn = '';
+  if(!opts.tmdb || f.is_available){
+    const inList = isInWatchlist(f.id);
+    const wlIcon = inList
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    wlBtn = `<button class="card-wl-btn${inList?' in-list':''}" data-wl-toggle="${escapeHtml(f.id)}" aria-label="${inList?'Edit watchlist status':'Add to watchlist'}" onclick="event.stopPropagation();openWatchlistMenu('${escapeHtml(f.id)}', this);">${wlIcon}</button>`;
+  }
   return `
     <div class="${cls}" ${idAttr} tabindex="0">
       <div class="card-poster">
-        ${rating}${tier}${cwDelete}
+        ${rating}${tier}${cwDelete}${wlBtn}
         <div class="type-badge">${type}</div>
         ${posterHTML}${placeholder}
         <div class="card-play-overlay"><div class="play-circle"></div></div>
@@ -1340,14 +1365,51 @@ function renderBrowsePage(){
   renderGrid('browseGrid', _dedupeSeries(allFilms.filter(_mainGridFilter)));
 }
 function renderWatchlistPage(){
-  const items = _dedupeSeries(allFilms.filter(f=>watchlist.includes(String(f.id))));
+  // Read user-selected filters (defaults to "all"/"all")
+  const statusFilter = (document.querySelector('.wl-status-tab.active')?.dataset.status) || 'all';
+  const typeFilter = (document.querySelector('.wl-type-tab.active')?.dataset.type) || 'all';
+
+  let entries = Object.entries(watchlist).map(([id, meta]) => ({
+    id, status: (meta && meta.status) || 'plan', addedAt: (meta && meta.addedAt) || 0
+  }));
+  if(statusFilter !== 'all') entries = entries.filter(e => e.status === statusFilter);
+
+  let items = entries
+    .map(e => {
+      const film = allFilms.find(f => String(f.id) === String(e.id));
+      return film ? { ...film, _wlStatus: e.status, _wlAddedAt: e.addedAt } : null;
+    })
+    .filter(Boolean);
+
+  if(typeFilter === 'movie') items = items.filter(f => f.tipe !== 'series');
+  if(typeFilter === 'tv') items = items.filter(f => f.tipe === 'series');
+
+  items = _dedupeSeries(items);
+  items.sort((a, b) => (b._wlAddedAt || 0) - (a._wlAddedAt || 0));
+
+  const grid = document.getElementById('watchlistGrid');
+  const empty = document.getElementById('watchlistEmpty');
   if(!items.length){
-    document.getElementById('watchlistGrid').innerHTML='';
-    document.getElementById('watchlistEmpty').style.display='block';
+    grid.innerHTML = '';
+    empty.style.display = 'block';
   }else{
-    document.getElementById('watchlistEmpty').style.display='none';
+    empty.style.display = 'none';
     renderGrid('watchlistGrid', items);
   }
+}
+
+// Filter tab handlers (called from inline onclick in index.html)
+function setWlStatusFilter(status){
+  document.querySelectorAll('.wl-status-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.status === status);
+  });
+  renderWatchlistPage();
+}
+function setWlTypeFilter(type){
+  document.querySelectorAll('.wl-type-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.type === type);
+  });
+  renderWatchlistPage();
 }
 function renderSearchInitial(){
   document.getElementById('searchTitle').textContent='Trending Now';
@@ -1387,13 +1449,144 @@ function heroAddWatchlist(){
 
 /* ════════════════════════════════════════════════════════════════════
    WATCHLIST
+   Storage: { id: { status, addedAt } } in localStorage 'zaein_watchlist'.
    ════════════════════════════════════════════════════════════════════ */
-function toggleWatchlist(id){
-  const sid=String(id);
-  const idx=watchlist.indexOf(sid);
-  if(idx>=0){ watchlist.splice(idx,1); showToast('Dihapus dari watchlist'); }
-  else{ watchlist.push(sid); showToast('Ditambahkan ke watchlist','success'); }
-  localStorage.setItem('zaein_watchlist', JSON.stringify(watchlist));
+function isInWatchlist(id){
+  return !!watchlist[String(id)];
+}
+function getWatchlistStatus(id){
+  const e = watchlist[String(id)];
+  return e ? e.status : null;
+}
+function setWatchlistStatus(id, status){
+  if(!WL_STATUSES.includes(status)) return;
+  const sid = String(id);
+  const existed = !!watchlist[sid];
+  watchlist[sid] = { status, addedAt: existed ? watchlist[sid].addedAt : Date.now() };
+  try{ localStorage.setItem('zaein_watchlist', JSON.stringify(watchlist)); }catch{}
+  showToast(existed ? 'Status diubah ke ' + WL_STATUS_LABELS[status] : 'Ditambahkan ke ' + WL_STATUS_LABELS[status], 'success');
+  refreshAllWatchlistIcons();
+  if(document.getElementById('page-watchlist')?.classList.contains('active')) renderWatchlistPage();
+}
+function removeFromWatchlist(id){
+  const sid = String(id);
+  if(!watchlist[sid]) return;
+  delete watchlist[sid];
+  try{ localStorage.setItem('zaein_watchlist', JSON.stringify(watchlist)); }catch{}
+  showToast('Dihapus dari watchlist');
+  refreshAllWatchlistIcons();
+  if(document.getElementById('page-watchlist')?.classList.contains('active')) renderWatchlistPage();
+}
+const WL_STATUS_LABELS = {
+  plan:     'Plan to Watch',
+  watching: 'Watching',
+  onhold:   'On Hold',
+  finished: 'Finished',
+  dropped:  'Dropped',
+};
+// Lucide-style stroke icons rendered inline in the menu.
+const WL_STATUS_ICONS = {
+  plan:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+  watching: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+  onhold:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="4" x2="6" y2="20"/><line x1="18" y1="4" x2="18" y2="20"/></svg>',
+  finished: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  dropped:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+};
+const WL_FULL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>';
+
+// Open the popup that lets the user pick a status. The first row is
+// "Get Full Access" which routes to the buy flow (cart + buy-now).
+function openWatchlistMenu(filmId, anchorEl){
+  closeWatchlistMenu();
+  const film = allFilms.find(f => String(f.id) === String(filmId));
+  if(!film) return;
+  const current = getWatchlistStatus(filmId);
+
+  const menu = document.createElement('div');
+  menu.className = 'wl-menu';
+  menu.id = 'wlMenu';
+  menu.innerHTML = `
+    <button class="wl-menu-item wl-menu-full" type="button" data-act="full">
+      ${WL_FULL_ICON}<span>Get Full Access</span>
+    </button>
+    <div class="wl-menu-divider"></div>
+    ${WL_STATUSES.map(s => `
+      <button class="wl-menu-item${current === s ? ' active' : ''}" type="button" data-act="status" data-status="${s}">
+        ${WL_STATUS_ICONS[s]}<span>${WL_STATUS_LABELS[s]}</span>
+      </button>
+    `).join('')}
+    ${current ? `<div class="wl-menu-divider"></div>
+      <button class="wl-menu-item wl-menu-remove" type="button" data-act="remove">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+        <span>Remove from list</span>
+      </button>` : ''}
+  `;
+  document.body.appendChild(menu);
+
+  // Position near the anchor (clipped to viewport).
+  const r = anchorEl.getBoundingClientRect();
+  const mw = 220, mh = menu.offsetHeight || 240;
+  let left = r.right + 6;
+  let top = r.top;
+  if(left + mw > window.innerWidth - 8) left = Math.max(8, r.left - mw - 6);
+  if(top + mh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - mh - 8);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  menu.addEventListener('click', ev => {
+    const btn = ev.target.closest('[data-act]');
+    if(!btn) return;
+    ev.stopPropagation();
+    const act = btn.dataset.act;
+    if(act === 'full'){
+      closeWatchlistMenu();
+      try{ openAccessModal(film); }catch{ showToast('Buka detail film dulu untuk beli akses', 'error'); }
+    } else if(act === 'status'){
+      setWatchlistStatus(filmId, btn.dataset.status);
+      closeWatchlistMenu();
+    } else if(act === 'remove'){
+      removeFromWatchlist(filmId);
+      closeWatchlistMenu();
+    }
+  });
+
+  // Close on outside click / esc / scroll.
+  setTimeout(() => {
+    document.addEventListener('click', _wlMenuOutside, true);
+    document.addEventListener('keydown', _wlMenuEsc, true);
+    window.addEventListener('scroll', closeWatchlistMenu, true);
+  }, 0);
+}
+function _wlMenuOutside(ev){
+  const menu = document.getElementById('wlMenu');
+  if(menu && !menu.contains(ev.target) && !ev.target.closest('[data-wl-toggle]')) closeWatchlistMenu();
+}
+function _wlMenuEsc(ev){ if(ev.key === 'Escape') closeWatchlistMenu(); }
+function closeWatchlistMenu(){
+  const menu = document.getElementById('wlMenu');
+  if(menu) menu.remove();
+  document.removeEventListener('click', _wlMenuOutside, true);
+  document.removeEventListener('keydown', _wlMenuEsc, true);
+  window.removeEventListener('scroll', closeWatchlistMenu, true);
+}
+
+// Refresh the + / check icon on every visible card after a state change,
+// so the icon flips immediately without re-rendering whole rails.
+function refreshAllWatchlistIcons(){
+  document.querySelectorAll('[data-wl-toggle]').forEach(btn => {
+    const id = btn.dataset.wlToggle;
+    const inList = isInWatchlist(id);
+    btn.classList.toggle('in-list', inList);
+    btn.setAttribute('aria-label', inList ? 'Edit watchlist status' : 'Add to watchlist');
+  });
+}
+
+// Legacy callers (e.g. heroAddWatchlist) — keep working but route through
+// the new menu when an anchor is available, otherwise quick-add as 'plan'.
+function toggleWatchlist(id, anchorEl){
+  if(anchorEl){ openWatchlistMenu(id, anchorEl); return; }
+  if(isInWatchlist(id)) removeFromWatchlist(id);
+  else setWatchlistStatus(id, 'plan');
 }
 
 
@@ -2110,6 +2303,9 @@ async function loadVideoHost(film){
   // users see NOTHING below the player, per spec:
   //   "di basic gaada lagi yg didalam kotak saya tandain itu, itu hanya ada
   //    di video player yg bagian vip"
+  // Note: we do NOT acquire a download slot here. Just resolve the stream
+  // URL so external players + URL copy work. The actual slot is acquired
+  // ON CLICK of the DOWNLOAD button via beginVipDownload().
   const userIsVip = currentTier === 'vip';
   const showVipExtras = userIsVip && (film.drive_path || film.drive_link);
 
@@ -2118,12 +2314,12 @@ async function loadVideoHost(film){
       const param = film.drive_path
         ? 'path='+encodeURIComponent(film.drive_path)
         : 'link='+encodeURIComponent(film.drive_link);
-      const r = await fetch('/api/drive/resolve?download=1&'+param, {
+      const r = await fetch('/api/drive/resolve?'+param, {
         headers: await authHeaders(),
       });
       const d = await r.json();
       if(d.ok && d.stream_url){
-        setStreamActions(d.stream_url, film.judul || film.title || '', d.download_token || '');
+        setStreamActions(d.stream_url, film.judul || film.title || '', '');
       }else{
         document.getElementById('streamActions').style.display = 'none';
         if(d && d.error) showToast(d.error, 'error');
@@ -2431,6 +2627,89 @@ function releaseVipDownloadSlot(){
     body:JSON.stringify({ token }),
     keepalive:true,
   }).catch(()=>{});
+}
+
+// Track active download slots per session, so we can show a clear message
+// when the server says "max 2 concurrent" instead of letting the click fall
+// through to a broken URL.
+let _vipActiveDownloads = 0;
+
+// Click handler for the DOWNLOAD button. Acquires a server-side slot first
+// (max 2 concurrent per user, enforced in worker via active_downloads RPC).
+// On 429 we toast and cancel the navigation. On success we follow the
+// stream URL the server returned and schedule the slot release.
+async function beginVipDownload(event, btn){
+  if(!event || !btn) return false;
+  event.preventDefault();
+  if(btn.dataset.busy === '1') return false;
+  if(currentTier !== 'vip'){ showToast('Download hanya untuk member VIP', 'error'); return false; }
+  const film = currentFilm;
+  if(!film || !(film.drive_path || film.drive_link)){
+    showToast('File Drive belum terdaftar', 'error');
+    return false;
+  }
+  if(_vipActiveDownloads >= 2){
+    showToast('Maksimal 2 download berjalan sekaligus. Tunggu salah satunya selesai dulu.', 'error');
+    return false;
+  }
+
+  btn.dataset.busy = '1';
+  const labelEl = btn.querySelector('span');
+  const origLabel = labelEl ? labelEl.textContent : '';
+  if(labelEl) labelEl.textContent = 'PREPARING…';
+
+  try{
+    const param = film.drive_path
+      ? 'path='+encodeURIComponent(film.drive_path)
+      : 'link='+encodeURIComponent(film.drive_link);
+    const r = await fetch('/api/drive/resolve?download=1&'+param, { headers: await authHeaders() });
+    const d = await r.json();
+    if(r.status === 429){
+      showToast(d?.error || 'Maksimal 2 download berjalan sekaligus. Tunggu dulu.', 'error');
+      return false;
+    }
+    if(!d || !d.ok || !d.stream_url){
+      showToast(d?.error || 'Gagal siapkan download', 'error');
+      return false;
+    }
+    _vipActiveDownloads++;
+    btn.dataset.downloadToken = d.download_token || '';
+    btn.href = d.stream_url;
+    // Auto-release the slot after a generous TTL (server side TTL is the
+    // authoritative one; this just cleans up the local counter).
+    const releaseLater = (token) => {
+      if(!token) return;
+      _vipActiveDownloads = Math.max(0, _vipActiveDownloads - 1);
+      // best-effort release on the server
+      try{
+        fetch('/api/drive/release', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ token }),
+          keepalive:true,
+        }).catch(()=>{});
+      }catch{}
+    };
+    setTimeout(() => releaseLater(d.download_token), 30 * 60 * 1000);
+
+    // Trigger the actual download by simulating a fresh anchor click. The
+    // <a> already has the href set — but we need to bypass our own onclick
+    // guard, so we open the URL via a temp link without the handler.
+    const tmp = document.createElement('a');
+    tmp.href = d.stream_url;
+    tmp.download = btn.getAttribute('download') || '';
+    document.body.appendChild(tmp);
+    tmp.click();
+    tmp.remove();
+    showToast('Download dimulai. Maksimal 2 berjalan bersamaan.', 'success');
+    return false;
+  }catch(e){
+    showToast('Network error: '+(e.message||'unknown'), 'error');
+    return false;
+  }finally{
+    if(labelEl) labelEl.textContent = origLabel;
+    btn.dataset.busy = '';
+  }
 }
 
 function toggleExternalPlayerMenu(){
@@ -4024,10 +4303,15 @@ async function loadCollectionDetail(id){
       grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="emoji">🎬</div><h3>Belum ada film</h3><p>Admin belum menambah film ke koleksi ini.</p></div>';
       return;
     }
+    // Series dedupe: kalau admin sudah masukin satu series ke collection,
+    // kita tampilkan SATU poster aja walau punya banyak season/episode.
+    // _dedupeSeries pilih S01E01 sebagai cover. Klik poster → openFilm
+    // → episode picker muncul kayak biasa.
+    const dedupedFilms = _dedupeSeries(films);
     // Selalu urut berdasarkan tahun rilis (asc), terlepas dari urutan input admin.
     // Film tanpa tahun (null/0/NaN) ditaro paling belakang. Tie-breaker: judul A→Z
     // biar deterministic.
-    films.sort((a, b) => {
+    dedupedFilms.sort((a, b) => {
       const ya = Number(a && a.tahun) || 0;
       const yb = Number(b && b.tahun) || 0;
       if(ya && yb && ya !== yb) return ya - yb;
@@ -4037,7 +4321,9 @@ async function loadCollectionDetail(id){
       const tb = String(b && b.judul || '').toLowerCase();
       return ta.localeCompare(tb);
     });
-    grid.innerHTML = films.map(f => cardHTML(f)).join('');
+    // Update meta count to reflect deduped count, not raw episode count.
+    metaEl.textContent = (dedupedFilms.length === 1 ? '1 title' : `${dedupedFilms.length} titles`) + ' in this collection';
+    grid.innerHTML = dedupedFilms.map(f => cardHTML(f)).join('');
     grid.querySelectorAll('[data-film-id]').forEach(el=>{
       el.addEventListener('click', ()=>{
         const filmId = el.dataset.filmId;
