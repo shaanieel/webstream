@@ -1127,6 +1127,19 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .field label{display:block;font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
 .field input{width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:.9rem;outline:none;}
 .field input:focus{border-color:var(--accent-2);}
+.password-field{position:relative;}
+.password-field input{padding-right:44px;}
+.password-toggle{
+  position:absolute;top:50%;right:8px;transform:translateY(-50%);
+  width:34px;height:34px;border:0;border-radius:8px;background:transparent;
+  color:var(--muted);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:color .15s,background .15s;
+}
+.password-toggle:hover,.password-toggle:focus-visible{color:var(--text);background:rgba(255,255,255,.06);outline:none;}
+.password-toggle svg{width:17px;height:17px;}
+.password-toggle .icon-eye{display:none;}
+.password-toggle.is-visible .icon-eye{display:block;}
+.password-toggle.is-visible .icon-eye-off{display:none;}
 .btn-primary{
   width:100%;background:linear-gradient(135deg,#0ea5e9,#38bdf8);color:#fff;
   padding:12px;border-radius:8px;font-weight:700;letter-spacing:.5px;font-size:.9rem;
@@ -2333,6 +2346,29 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .player-wrap:-webkit-full-screen .player-overlay-tools{
   top:calc(12px + env(safe-area-inset-top, 0));
   right:calc(14px + env(safe-area-inset-right, 0));
+}
+
+/* Mobile fullscreen only: keep our Episode/Fullscreen controls below the
+   player host's native top-right settings area. Desktop/tablet stays as-is. */
+@media (hover:none) and (pointer:coarse) and (max-width:900px),
+       (hover:none) and (pointer:coarse) and (max-height:560px){
+  .player-wrap:fullscreen .player-overlay-tools,
+  .player-wrap:-webkit-full-screen .player-overlay-tools{
+    top:calc(58px + env(safe-area-inset-top, 0));
+    right:calc(10px + env(safe-area-inset-right, 0));
+  }
+  .player-wrap:fullscreen .player-ep-btn,
+  .player-wrap:-webkit-full-screen .player-ep-btn{
+    padding:8px 10px;
+  }
+  .player-wrap:fullscreen .player-ep-btn .label,
+  .player-wrap:-webkit-full-screen .player-ep-btn .label{
+    display:none;
+  }
+  .player-wrap:fullscreen .player-fs-btn,
+  .player-wrap:-webkit-full-screen .player-fs-btn{
+    width:34px;height:34px;
+  }
 }
 
 /* Drawer container — fixed to viewport. While open we let the root own

@@ -368,6 +368,16 @@ function switchAuthTab(name){
   document.getElementById('registerPanel').style.display = name==='register' ? 'block' : 'none';
 }
 
+function togglePasswordVisibility(inputId, button){
+  const input = document.getElementById(inputId);
+  if(!input || !button) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  button.classList.toggle('is-visible', show);
+  button.setAttribute('aria-pressed', show ? 'true' : 'false');
+  button.setAttribute('aria-label', show ? 'Sembunyikan password' : 'Tampilkan password');
+}
+
 async function doLogin(){
   const email = document.getElementById('loginEmail').value.trim();
   const pass = document.getElementById('loginPass').value;
