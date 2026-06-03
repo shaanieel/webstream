@@ -2342,6 +2342,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   background:#000;
 }
 /* Push the overlay tools below any system bars in mobile fullscreen. */
+.player-wrap.is-fullscreen .player-overlay-tools,
 .player-wrap:fullscreen .player-overlay-tools,
 .player-wrap:-webkit-full-screen .player-overlay-tools{
   top:calc(12px + env(safe-area-inset-top, 0));
@@ -2350,21 +2351,24 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 
 /* Mobile fullscreen only: keep our Episode/Fullscreen controls below the
    player host's native top-right settings area. Desktop/tablet stays as-is. */
-@media (hover:none) and (pointer:coarse) and (max-width:900px),
-       (hover:none) and (pointer:coarse) and (max-height:560px){
+@media (max-width:900px), (max-height:560px){
+  .player-wrap.is-fullscreen .player-overlay-tools,
   .player-wrap:fullscreen .player-overlay-tools,
   .player-wrap:-webkit-full-screen .player-overlay-tools{
-    top:calc(58px + env(safe-area-inset-top, 0));
+    top:calc(86px + env(safe-area-inset-top, 0));
     right:calc(10px + env(safe-area-inset-right, 0));
   }
+  .player-wrap.is-fullscreen .player-ep-btn,
   .player-wrap:fullscreen .player-ep-btn,
   .player-wrap:-webkit-full-screen .player-ep-btn{
     padding:8px 10px;
   }
+  .player-wrap.is-fullscreen .player-ep-btn .label,
   .player-wrap:fullscreen .player-ep-btn .label,
   .player-wrap:-webkit-full-screen .player-ep-btn .label{
     display:none;
   }
+  .player-wrap.is-fullscreen .player-fs-btn,
   .player-wrap:fullscreen .player-fs-btn,
   .player-wrap:-webkit-full-screen .player-fs-btn{
     width:34px;height:34px;
