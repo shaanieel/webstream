@@ -556,6 +556,34 @@ let _vipQuery = '';
 let _vipHeroTimer = null;
 let _vipHeroIndex = 0;
 
+function filmUploadTime(f){
+  const raw = f?.created_at || f?.uploaded_at || f?.updated_at || f?.modified_at || '';
+  const t = raw ? Date.parse(raw) : 0;
+  return Number.isFinite(t) ? t : 0;
+}
+
+function renderVipPosterStack(pool){
+  const stack = document.getElementById('vipPosterStack');
+  const dots = document.getElementById('vipHeroDots');
+  if(!stack) return;
+  if(!pool.length){
+    stack.innerHTML = '';
+    if(dots) dots.innerHTML = '';
+    return;
+  }
+  const visible = [];
+  const count = Math.min(5, pool.length);
+  for(let i=0;i<count;i++) visible.push(pool[(_vipHeroIndex + i) % pool.length]);
+  stack.innerHTML = visible.map((film, idx)=>{
+    const poster = film.poster_url || film.backdrop_url || '';
+    return `<div class="vip-stack-card pos-${idx}"><img src="${poster}" alt="${escapeHtml(film.judul || 'VIP poster')}" loading="lazy"></div>`;
+  }).join('');
+  if(dots){
+    const dotCount = Math.min(5, pool.length);
+    dots.innerHTML = Array.from({length:dotCount}, (_,i)=>`<span class="vip-hero-dot${i===0?' active':''}"></span>`).join('');
+  }
+}
+
 function renderVipPage(){
   // VIP Zone: tampilkan film tier 'vip' (VIP saja) + 'free' (Basic + VIP) — series di-dedupe
   const vipFilms = _dedupeSeries(allFilms.filter(f=>f.tier==='vip' || f.tier==='free' || !f.tier));
@@ -564,13 +592,16 @@ function renderVipPage(){
   const heroDesc = document.getElementById('vipHeroDesc');
   const heroFeatured = document.getElementById('vipHeroFeatured');
   const heroBg = document.getElementById('vipHeroBg');
+  const heroPosters = document.getElementById('vipHeroPosters');
 
   // Non-VIP: tampilkan modal langsung (gak boleh akses isi halaman)
   if(currentTier!=='vip'){
     showVipLocked({page:true});
     heroDesc.innerHTML = `<strong style="color:#facc15">Halaman ini hanya untuk member VIP.</strong>`;
     if(heroFeatured) heroFeatured.style.display = 'none';
+    if(heroPosters) heroPosters.style.display = 'none';
     if(heroBg){ heroBg.classList.remove('show'); heroBg.style.backgroundImage = ''; }
+    renderVipPosterStack([]);
     if(_vipHeroTimer){ clearInterval(_vipHeroTimer); _vipHeroTimer = null; }
     grid.innerHTML = '';
     empty.style.display = 'none';
@@ -579,25 +610,30 @@ function renderVipPage(){
 
   heroDesc.textContent = 'Selamat datang VIP — semua film premium sudah unlock.';
 
-  // ── Hero featured rotation: pick films with backdrops, prefer VIP-only ──
+  // Hero VIP: 20 film terakhir yang diupload, tampil 5 poster, muter tiap 4 detik.
   const heroPool = vipFilms
-    .filter(f => f.backdrop_url || f.poster_url)
+    .filter(f => f.poster_url || f.backdrop_url)
     .sort((a, b) => {
+      const byTime = filmUploadTime(b) - filmUploadTime(a);
+      if(byTime) return byTime;
       const av = a.tier === 'vip' ? 0 : 1;
       const bv = b.tier === 'vip' ? 0 : 1;
       if(av !== bv) return av - bv;
-      return (Number(b.rating) || 0) - (Number(a.rating) || 0);
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
     })
-    .slice(0, 6);
+    .slice(0, 20);
 
   const renderHeroSlot = ()=>{
     if(!heroPool.length){
       if(heroFeatured) heroFeatured.style.display = 'none';
+      if(heroPosters) heroPosters.style.display = 'none';
       if(heroBg){ heroBg.classList.remove('show'); heroBg.style.backgroundImage = ''; }
+      renderVipPosterStack([]);
       return;
     }
     const film = heroPool[_vipHeroIndex % heroPool.length];
     const bgUrl = film.backdrop_url || film.poster_url || '';
+    if(heroPosters) heroPosters.style.display = '';
     if(heroBg){
       heroBg.style.backgroundImage = bgUrl ? `url('${bgUrl}')` : '';
       heroBg.classList.toggle('show', !!bgUrl);
@@ -605,11 +641,18 @@ function renderVipPage(){
     if(heroFeatured){
       heroFeatured.style.display = 'flex';
       document.getElementById('vipHeroFeaturedTitle').textContent = film.judul || '';
+      const meta = document.getElementById('vipHeroMeta');
+      if(meta){
+        const type = film.tipe === 'series' ? 'TV Shows' : 'Movie';
+        const parts = [type, film.tahun || '', film.rating ? `★ ${film.rating}` : ''].filter(Boolean);
+        meta.textContent = parts.join(' · ');
+      }
       const cta = document.getElementById('vipHeroCta');
       if(cta){
         cta.onclick = ()=>openFilm(film, { vipMode: true });
       }
     }
+    renderVipPosterStack(heroPool);
   };
   renderHeroSlot();
   if(_vipHeroTimer){ clearInterval(_vipHeroTimer); _vipHeroTimer = null; }
@@ -617,7 +660,7 @@ function renderVipPage(){
     _vipHeroTimer = setInterval(()=>{
       _vipHeroIndex = (_vipHeroIndex + 1) % heroPool.length;
       renderHeroSlot();
-    }, 7000);
+    }, 4000);
   }
 
   // Cache full list for filter/search re-render without recomputing.
