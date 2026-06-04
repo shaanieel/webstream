@@ -1373,6 +1373,10 @@ function lucideStarIcon(low){
   return `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.12 2.12 0 0 0 1.595 1.16l5.166.751a.53.53 0 0 1 .294.904l-3.738 3.644a2.12 2.12 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.77.56l-4.62-2.428a2.12 2.12 0 0 0-1.973 0L6.39 21.01a.53.53 0 0 1-.77-.56l.882-5.14a2.12 2.12 0 0 0-.611-1.878L2.154 9.79a.53.53 0 0 1 .294-.904l5.166-.751a2.12 2.12 0 0 0 1.595-1.16z"/></svg>`;
 }
 
+function lucideTrashIcon(){
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`;
+}
+
 function cardHTML(f, vipStyle, opts){
   opts = opts || {};
   const poster = f.poster_url || '';
@@ -1387,7 +1391,7 @@ function cardHTML(f, vipStyle, opts){
     ? `<img src="${poster}" loading="lazy" alt="${escapeHtml(f.judul||'')}"/>`
     : '';
   const placeholder = poster ? '' : `<div class="card-poster-placeholder">${escapeHtml(f.judul||'No image')}</div>`;
-  const cwDelete = opts.cw ? `<button class="card-cw-delete show" data-cw-delete="${f.id}" aria-label="Hapus dari Continue Watching" onclick="event.stopPropagation();removeContinueWatching('${f.id}');">×</button>` : '';
+  const cwDelete = opts.cw ? `<button class="card-cw-delete show" data-cw-delete="${f.id}" aria-label="Hapus dari Continue Watching" onclick="event.stopPropagation();removeContinueWatching('${f.id}');">${lucideTrashIcon()}</button>` : '';
   const progressPct = (opts.cw && opts.cw.progress) ? Math.min(100, Math.max(2, opts.cw.progress*100)) : 0;
   const progress = progressPct ? `<div class="card-progress-bar"><span style="width:${progressPct}%"></span></div>` : '';
   const tmdbNote = opts.tmdb && !f.is_available ? '<div class="tmdb-locked-note">Belum ada di katalog</div>' : '';
@@ -1408,7 +1412,7 @@ function cardHTML(f, vipStyle, opts){
   return `
     <div class="${cls}" ${idAttr} tabindex="0">
       <div class="card-poster">
-        ${rating}${tier}${cwDelete}${wlBtn}
+        ${cwDelete}${rating}${tier}${wlBtn}
         <div class="type-badge">${type}</div>
         ${posterHTML}${placeholder}
         <div class="card-play-overlay"><div class="play-circle"></div></div>
@@ -4008,20 +4012,96 @@ function showToast(msg, type){
 /* Payments, cart, collections, and preview gate */
 let previewGateTimer = null;
 let previewCountdownTimer = null;
+let paySeasonSelection = { filmId: null, selected: new Set() };
 function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
 function filmEntitlementKey(f){ if(!f) return ''; if(f.tipe === 'series') return `series:${f.judul || f.tmdb_id || f.id}:season:${f.season || 1}`; return `movie:${f.id}`; }
 function userHasFilmAccess(f){ if(!f) return false; if(currentTier === 'vip') return true; const key = filmEntitlementKey(f); return currentEntitlements.some(e => e.entitlement_key === key); }
 function isSeriesLockedForFree(f){ return f && f.tipe === 'series' && Number(f.episode || 1) > 1 && !userHasFilmAccess(f); }
 function accessPrice(f){ return f && f.tipe === 'series' ? 10000 : 5000; }
 function accessLabel(f){ return f && f.tipe === 'series' ? `Season ${f.season || 1}` : 'Movie'; }
+function seriesIdentity(f){
+  if(!f) return '';
+  return f.tmdb_id ? `tmdb:${f.tmdb_id}` : `title:${String(f.judul || '').trim().toLowerCase()}`;
+}
+function seriesSeasonOptions(film){
+  if(!film || film.tipe !== 'series') return [];
+  const key = seriesIdentity(film);
+  const bySeason = new Map();
+  allFilms.forEach(item => {
+    if(!item || item.tipe !== 'series' || seriesIdentity(item) !== key) return;
+    const season = Number(item.season || 1);
+    const prev = bySeason.get(season);
+    if(!prev || Number(item.episode || 1) < Number(prev.episode || 1)) bySeason.set(season, item);
+  });
+  if(!bySeason.size) bySeason.set(Number(film.season || 1), film);
+  return Array.from(bySeason.entries())
+    .map(([season, item]) => ({ season, film: item, price: accessPrice(item) }))
+    .sort((a,b)=>a.season-b.season);
+}
+function selectedSeasonFilms(film){
+  if(!film || film.tipe !== 'series') return film ? [film] : [];
+  const selected = paySeasonSelection.selected || new Set();
+  const opts = seriesSeasonOptions(film).filter(opt => selected.has(opt.season));
+  return opts.length ? opts.map(opt => opt.film) : [film];
+}
+function renderPaySeasonSummary(film){
+  const selectedFilms = selectedSeasonFilms(film);
+  const total = selectedFilms.reduce((sum, item)=>sum+accessPrice(item), 0);
+  const count = selectedFilms.length;
+  const sub = document.getElementById('paySub');
+  const buyPrice = document.getElementById('payBuyPrice');
+  const seasonCount = document.getElementById('paySeasonCount');
+  const cartNote = document.getElementById('payCartNote');
+  if(sub) sub.textContent = `${film.judul || 'Series'} • ${count} season dipilih • ${rupiah(total)}`;
+  if(buyPrice) buyPrice.textContent = rupiah(total);
+  if(seasonCount) seasonCount.textContent = `${count} season`;
+  if(cartNote) cartNote.textContent = `Simpan ${count} season dulu, bayar nanti.`;
+}
+function togglePaySeason(filmId, season){
+  const film = allFilms.find(x=>String(x.id)===String(filmId));
+  if(!film) return;
+  const s = Number(season || 1);
+  if(paySeasonSelection.filmId !== String(filmId)) paySeasonSelection = { filmId: String(filmId), selected: new Set([Number(film.season || 1)]) };
+  if(paySeasonSelection.selected.has(s) && paySeasonSelection.selected.size > 1) paySeasonSelection.selected.delete(s);
+  else paySeasonSelection.selected.add(s);
+  document.querySelectorAll('[data-pay-season]').forEach(btn => {
+    const active = paySeasonSelection.selected.has(Number(btn.dataset.paySeason || 1));
+    btn.classList.toggle('selected', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  renderPaySeasonSummary(film);
+}
+function paySeasonPickerHtml(film){
+  if(!film || film.tipe !== 'series') return '';
+  const opts = seriesSeasonOptions(film);
+  if(opts.length <= 1) return '';
+  return `<div class="pay-season-panel">
+    <div class="pay-section-label">Pilih season yang mau dibuka</div>
+    <div class="pay-season-list">
+      ${opts.map(opt=>{
+        const selected = paySeasonSelection.selected.has(opt.season);
+        return `<button type="button" class="pay-season-chip${selected?' selected':''}" data-pay-season="${opt.season}" aria-pressed="${selected?'true':'false'}" onclick="togglePaySeason('${film.id}', ${opt.season})">
+          <b>Season ${opt.season}</b><span>${rupiah(opt.price)}</span>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
 function openAccessModal(film){
   if(!film) return;
   const modal = document.getElementById('payModal');
-  document.getElementById('payTitle').textContent = 'Nonton full selamanya';
-  document.getElementById('paySub').textContent = `${film.judul || 'Film'} • ${accessLabel(film)} • ${rupiah(accessPrice(film))}`;
+  paySeasonSelection = { filmId: String(film.id), selected: new Set([Number(film.season || 1)]) };
+  const selectedTotal = selectedSeasonFilms(film).reduce((sum, item)=>sum+accessPrice(item), 0);
+  document.getElementById('payTitle').textContent = 'Pilih akses nonton';
+  document.getElementById('paySub').textContent = film.tipe === 'series'
+    ? `${film.judul || 'Series'} • 1 season dipilih • ${rupiah(selectedTotal)}`
+    : `${film.judul || 'Film'} • ${accessLabel(film)} • ${rupiah(selectedTotal)}`;
   document.getElementById('payActions').innerHTML = `
-    <button class="pay-choice premium" onclick="checkoutFilm('${film.id}')"><b>Bayar sekarang</b><span class="pay-price">${rupiah(accessPrice(film))}</span></button>
-    <button class="pay-choice" onclick="addToCart('${film.id}')"><b>Masukkan keranjang</b><span>Simpan dulu, bayar nanti.</span></button>
+    <div class="pay-access-copy pay-access-copy-full">Akses Full per movie atau per series. Cocok kalau kamu ingin membuka judul pilihanmu selamanya.</div>
+    ${paySeasonPickerHtml(film)}
+    <button class="pay-choice premium" onclick="checkoutSelectedAccess('${film.id}')"><b>Bayar sekarang</b><span id="paySeasonCount">${film.tipe === 'series' ? '1 season' : '1 movie'}</span><span class="pay-price" id="payBuyPrice">${rupiah(selectedTotal)}</span></button>
+    <button class="pay-choice" onclick="addSelectedAccessToCart('${film.id}')"><b>Masukkan keranjang</b><span id="payCartNote">Simpan dulu, bayar nanti.</span></button>
+    <div class="pay-access-copy pay-access-copy-vip">Akses VIP membuka semua film dan series, tanpa iklan, semua unlock selama masa VIP aktif.</div>
     <button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button>
     <button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`;
   modal.classList.add('show');
@@ -4067,6 +4147,14 @@ async function startCheckout(payload){
   }
 }
 function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
+function checkoutSelectedAccess(id){
+  const film = allFilms.find(x=>String(x.id)===String(id));
+  if(!film) return;
+  const selected = selectedSeasonFilms(film);
+  closePayModal();
+  if(film.tipe === 'series' && selected.length > 1) startCheckout({ type:'cart', items:selected.map(item=>item.id) });
+  else startCheckout({ type:'film', film_id:selected[0].id });
+}
 function checkoutVip(type){ closePayModal(); startCheckout({ type }); }
 function ensurePaymentCheckoutStyles(){
   if(document.getElementById('paymentCheckoutStyles')) return;
@@ -4254,7 +4342,32 @@ async function renderPaymentCheckoutPage(){
     mount.innerHTML = `<div style="text-align:center;color:var(--red);font-weight:700;">Gagal memuat order: ${escapeHtml(e.message || 'Unknown error')}</div>`;
   }
 }
-function addToCart(id){ const f=allFilms.find(x=>String(x.id)===String(id)); if(!f) return; const key=filmEntitlementKey(f); if(!cart.some(i=>i.key===key)) cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f),selected:true}); localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); closePayModal(); showToast('Masuk keranjang','success'); }
+function addFilmToCartItem(f){
+  if(!f) return false;
+  const key=filmEntitlementKey(f);
+  if(cart.some(i=>i.key===key)) return false;
+  cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f),selected:true});
+  return true;
+}
+function addToCart(id){
+  const f=allFilms.find(x=>String(x.id)===String(id));
+  if(!f) return;
+  const added = addFilmToCartItem(f);
+  localStorage.setItem('zaein_cart',JSON.stringify(cart));
+  updateCartCount();
+  closePayModal();
+  showToast(added ? 'Masuk keranjang' : 'Sudah ada di keranjang', added ? 'success' : '');
+}
+function addSelectedAccessToCart(id){
+  const film=allFilms.find(x=>String(x.id)===String(id));
+  if(!film) return;
+  const selected = selectedSeasonFilms(film);
+  const addedCount = selected.reduce((count, item)=>count+(addFilmToCartItem(item)?1:0), 0);
+  localStorage.setItem('zaein_cart',JSON.stringify(cart));
+  updateCartCount();
+  closePayModal();
+  showToast(addedCount ? `${addedCount} item masuk keranjang` : 'Semua pilihan sudah ada di keranjang', addedCount ? 'success' : '');
+}
 function updateCartCount(){ const el=document.getElementById('cartCount'); if(!el) return; el.textContent=cart.length; el.style.display=cart.length?'inline-flex':'none'; }
 function saveCart(){ localStorage.setItem('zaein_cart',JSON.stringify(cart)); updateCartCount(); }
 function removeCartItem(key){ cart=cart.filter(i=>i.key!==key); saveCart(); renderCartPage(); }
