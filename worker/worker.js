@@ -2087,6 +2087,11 @@ function listVmpChannelsForAmount(amount) {
   });
 }
 
+function normalizeGatewayEmail(email) {
+  const value = String(email || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : 'customer@zaeinstream.my.id';
+}
+
 async function createVioletTransaction(env, order, userEmail, { channel: channelCode, nominal, fee } = {}) {
   const apiKey = env.VIOLET_API_KEY || '';
   const secret = env.VIOLET_SECRET_KEY || '';
@@ -2098,11 +2103,12 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
   const amountMerchant = Number(order.amount) || 0;
   const feeCharged = Number.isFinite(Number(fee)) ? Math.max(0, Math.floor(Number(fee))) : computeVmpFee(amountMerchant, channel);
   const grossNominal = Number.isFinite(Number(nominal)) ? Math.max(0, Math.floor(Number(nominal))) : amountMerchant + feeCharged;
-  const nominalToGateway = amountMerchant;
+  const nominalToGateway = grossNominal;
   const signature = await sha256HmacHex(secret, `${order.ref}${apiKey}${nominalToGateway}`);
   const origin = (env.PUBLIC_BASE_URL || new URL(env.WORKER_SELF_URL || 'https://webstream.zaeinstreamx.workers.dev').origin).replace(/\/$/, '');
   const callbackUrl = `${origin}/api/payments/violet/callback`;
-  const customerName = (userEmail || '').split('@')[0] || 'Pelanggan';
+  const customerEmail = normalizeGatewayEmail(userEmail);
+  const customerName = customerEmail.split('@')[0] || 'Pelanggan';
   // VMP `/create` paling konsisten kalau dikirim sebagai form-urlencoded
   // (sesuai contoh dokumentasi). Kirim juga beberapa alias callback supaya
   // VMP bisa route per-transaksi ke endpoint kita kalau memang support
@@ -2121,8 +2127,8 @@ async function createVioletTransaction(env, order, userEmail, { channel: channel
     fee: String(feeCharged),
     cus_nama: customerName,
     nama: customerName,
-    cus_email: String(userEmail || ''),
-    email: String(userEmail || ''),
+    cus_email: customerEmail,
+    email: customerEmail,
     cus_phone: env.VIOLET_DEFAULT_PHONE || '081234567890',
     phone: env.VIOLET_DEFAULT_PHONE || '081234567890',
     produk: String(order.product_name || ''),
