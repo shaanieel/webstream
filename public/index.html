@@ -138,6 +138,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           <span class="nav-item-label">Browse</span>
         </button>
+        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);" title="VIP Zone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
+          <span class="nav-item-label">VIP Zone</span>
+        </button>
       </div>
 
       <div class="nav-section">
@@ -169,10 +173,6 @@
         <button class="nav-item" data-page="faq" onclick="goPage('faq')" title="FAQ">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <span class="nav-item-label">FAQ</span>
-        </button>
-        <button class="nav-item" data-page="vip" onclick="goPage('vip')" style="color:var(--gold);" title="VIP Zone">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 4l3 13h14l3-13-6 5-4-7-4 7-6-5z"/></svg>
-          <span class="nav-item-label">VIP Zone</span>
         </button>
         <button class="nav-item" data-action="logout" onclick="confirmLogout()" title="Logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -572,13 +572,20 @@
         <div class="vip-hero-bg" id="vipHeroBg"></div>
         <div class="vip-hero-shade"></div>
         <div class="vip-hero-content">
-          <div class="vip-crown">👑</div>
-          <h1>VIP ZONE</h1>
-          <p id="vipHeroDesc">Akses eksklusif ke koleksi premium ZAEINSTREAM.</p>
-          <div class="vip-hero-featured" id="vipHeroFeatured" style="display:none;">
-            <div class="vip-hero-featured-label">Sedang Tayang</div>
-            <div class="vip-hero-featured-title" id="vipHeroFeaturedTitle"></div>
-            <button class="vip-hero-cta" id="vipHeroCta" type="button">▶ Tonton Sekarang</button>
+          <div class="vip-hero-copy">
+            <div class="vip-hero-badge"><span></span> Recommended VIP</div>
+            <h1><span id="vipHeroTitleAccent">VIP</span><br><span id="vipHeroTitleMain">Zone</span></h1>
+            <p id="vipHeroDesc">Akses eksklusif ke koleksi premium ZAEINSTREAM.</p>
+            <div class="vip-hero-featured" id="vipHeroFeatured" style="display:none;">
+              <div class="vip-hero-featured-label">Sedang Tayang</div>
+              <div class="vip-hero-featured-title" id="vipHeroFeaturedTitle"></div>
+              <div class="vip-hero-meta" id="vipHeroMeta"></div>
+              <button class="vip-hero-cta" id="vipHeroCta" type="button">▶ Tonton Sekarang</button>
+            </div>
+          </div>
+          <div class="vip-hero-posters" id="vipHeroPosters" aria-hidden="true">
+            <div class="vip-poster-stack" id="vipPosterStack"></div>
+            <div class="vip-hero-dots" id="vipHeroDots"></div>
           </div>
         </div>
       </div>
