@@ -679,12 +679,14 @@ body.sidebar-collapsed .main{ margin-left:var(--sidebar-w-collapsed); }
   margin-left:4px;
 }
 .card-cw-delete{
-  position:absolute;top:6px;right:6px;z-index:3;width:26px;height:26px;border-radius:50%;
+  position:absolute;top:6px;left:6px;z-index:4;width:28px;height:28px;border-radius:50%;
   background:rgba(0,0,0,.7);color:#fff;display:none;align-items:center;justify-content:center;
   border:1px solid rgba(255,255,255,.2);cursor:pointer;font-size:14px;line-height:1;
 }
 .card-cw-delete.show{display:flex;}
 .card-cw-delete:hover{background:rgba(239,68,68,.85);}
+.card-cw-delete svg{width:15px;height:15px;}
+.card-cw-delete + .card-wl-btn,.card-cw-delete ~ .rating-badge{top:40px;}
 .card-progress-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.15);z-index:2;}
 .card-progress-bar > span{display:block;height:100%;background:var(--accent);}
 .rating-badge{
@@ -1412,7 +1414,9 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 }
 
 .vip-main-crown{
-  font-size:54px;
+  width:46px;
+  height:46px;
+  color:#facc15;
   filter:drop-shadow(0 10px 18px rgba(250,204,21,.28));
   animation:vipFloat 2.6s ease-in-out infinite;
 }
@@ -1479,8 +1483,11 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   background:linear-gradient(90deg, rgba(250,204,21,.11), rgba(255,255,255,.025));
 }
 
-.vip-benefit iconify-icon{
-  font-size:25px;
+.vip-benefit iconify-icon,
+.vip-benefit-icon{
+  width:25px;
+  height:25px;
+  color:#facc15;
   margin-top:1px;
   filter:drop-shadow(0 6px 10px rgba(0,0,0,.25));
 }
@@ -1546,8 +1553,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     inset 0 1px 0 rgba(255,255,255,.7);
 }
 
-.vip-upgrade-btn iconify-icon{
-  font-size:22px;
+.vip-upgrade-btn iconify-icon,
+.vip-upgrade-icon{
+  width:22px;
+  height:22px;
 }
 
 @keyframes vipModalIn{
@@ -1659,8 +1668,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     padding:10px 12px;
   }
 
-  .vip-benefit iconify-icon{
-    font-size:22px;
+  .vip-benefit iconify-icon,
+  .vip-benefit-icon{
+    width:22px;
+    height:22px;
     margin-top:2px;
   }
 
@@ -1697,7 +1708,8 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   }
 
   .vip-main-crown{
-    font-size:44px;
+    width:40px;
+    height:40px;
   }
 
   .vip-locked-box h2{
@@ -1733,8 +1745,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
     padding:10px 14px;
   }
 
-  .vip-benefit iconify-icon{
-    font-size:24px;
+  .vip-benefit iconify-icon,
+  .vip-benefit-icon{
+    width:24px;
+    height:24px;
     justify-self:center;
   }
 
@@ -1984,6 +1998,17 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .pay-title{text-align:center;font-size:1.35rem;font-weight:900;margin-bottom:6px;}
 .pay-sub{text-align:center;color:var(--muted);margin-bottom:18px;}
 .pay-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.pay-access-copy{grid-column:1/-1;border:1px solid var(--border);border-radius:13px;padding:12px 14px;font-size:.86rem;line-height:1.45;color:var(--muted);}
+.pay-access-copy-full{background:linear-gradient(135deg,rgba(245,197,24,.14),rgba(245,197,24,.04));border-color:rgba(245,197,24,.38);color:#f5f5fa;}
+.pay-access-copy-vip{background:linear-gradient(135deg,rgba(14,165,233,.16),rgba(245,197,24,.07));border-color:rgba(14,165,233,.42);color:#edf7ff;}
+.pay-season-panel{grid-column:1/-1;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.035);padding:12px;}
+.pay-section-label{font-size:.78rem;font-weight:900;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px;}
+.pay-season-list{display:flex;flex-wrap:wrap;gap:8px;}
+.pay-season-chip{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:126px;border:1px solid var(--border);border-radius:999px;background:var(--surface-2);color:var(--muted);padding:9px 12px;transition:transform .15s ease,border-color .15s ease,background .15s ease,color .15s ease;}
+.pay-season-chip:hover{transform:translateY(-1px);border-color:rgba(245,197,24,.34);}
+.pay-season-chip b{font-size:.86rem;color:inherit;}
+.pay-season-chip span{font-size:.78rem;font-weight:800;color:inherit;}
+.pay-season-chip.selected{background:linear-gradient(135deg,#f5c518,#d99a00);border-color:#facc15;color:#17120a;box-shadow:0 10px 24px rgba(245,197,24,.22);}
 .pay-choice{position:relative;text-align:left;border:1px solid var(--border);border-radius:14px;background:var(--surface-2);padding:16px;transition:transform .15s,border-color .15s;}
 .pay-choice:hover{transform:translateY(-2px);border-color:var(--accent);}
 .pay-choice.premium{background:linear-gradient(135deg,rgba(245,197,24,.18),rgba(14,165,233,.06));border-color:rgba(245,197,24,.42);}
@@ -2146,8 +2171,10 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
   }
   .card-cw-delete{
     width:22px;height:22px;font-size:12px;
-    top:5px;right:5px;
+    top:5px;left:5px;right:auto;
   }
+  .card-cw-delete svg{width:12px;height:12px;}
+  .card-cw-delete ~ .rating-badge{top:32px;}
   .tmdb-locked-note{font-size:.6rem;}
 
   /* Browse page keeps 2 wider cards but still compact */
