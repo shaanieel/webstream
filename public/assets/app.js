@@ -403,12 +403,22 @@ async function doLogin(){
       return;
     }
     await onAuthSuccess(data.session);
+    notifyLoginEvent(data.session).catch(()=>{});
   }catch(e){
     msg.textContent='Error: '+e.message;
     msg.className='auth-msg error';
     msg.style.display='block';
     btn.disabled=false; btn.textContent='Masuk';
   }
+}
+
+async function notifyLoginEvent(authSession){
+  const token = authSession && authSession.access_token;
+  if(!token) return;
+  await fetch('/api/auth/login-event', {
+    method:'POST',
+    headers:{ Authorization:'Bearer '+token },
+  });
 }
 
 async function doRegister(){
@@ -4017,8 +4027,9 @@ function rupiah(n){ return 'Rp' + Number(n||0).toLocaleString('id-ID'); }
 function filmEntitlementKey(f){ if(!f) return ''; if(f.tipe === 'series') return `series:${f.judul || f.tmdb_id || f.id}:season:${f.season || 1}`; return `movie:${f.id}`; }
 function userHasFilmAccess(f){ if(!f) return false; if(currentTier === 'vip') return true; const key = filmEntitlementKey(f); return currentEntitlements.some(e => e.entitlement_key === key); }
 function isSeriesLockedForFree(f){ return f && f.tipe === 'series' && Number(f.episode || 1) > 1 && !userHasFilmAccess(f); }
-function accessPrice(f){ return f && f.tipe === 'series' ? 10000 : 5000; }
+function accessPrice(f){ return f && f.tipe === 'series' ? 5000 : 2500; }
 function accessLabel(f){ return f && f.tipe === 'series' ? `Season ${f.season || 1}` : 'Movie'; }
+function isVipOnlyFilm(f){ return f && f.tier === 'vip'; }
 function seriesIdentity(f){
   if(!f) return '';
   return f.tmdb_id ? `tmdb:${f.tmdb_id}` : `title:${String(f.judul || '').trim().toLowerCase()}`;
@@ -4029,11 +4040,12 @@ function seriesSeasonOptions(film){
   const bySeason = new Map();
   allFilms.forEach(item => {
     if(!item || item.tipe !== 'series' || seriesIdentity(item) !== key) return;
+    if(isVipOnlyFilm(item)) return;
     const season = Number(item.season || 1);
     const prev = bySeason.get(season);
     if(!prev || Number(item.episode || 1) < Number(prev.episode || 1)) bySeason.set(season, item);
   });
-  if(!bySeason.size) bySeason.set(Number(film.season || 1), film);
+  if(!bySeason.size && !isVipOnlyFilm(film)) bySeason.set(Number(film.season || 1), film);
   return Array.from(bySeason.entries())
     .map(([season, item]) => ({ season, film: item, price: accessPrice(item) }))
     .sort((a,b)=>a.season-b.season);
@@ -4090,6 +4102,16 @@ function paySeasonPickerHtml(film){
 function openAccessModal(film){
   if(!film) return;
   const modal = document.getElementById('payModal');
+  if(isVipOnlyFilm(film)){
+    document.getElementById('payTitle').textContent = 'Khusus Member VIP';
+    document.getElementById('paySub').textContent = `${film.judul || 'Judul ini'} hanya tersedia di paket VIP.`;
+    document.getElementById('payActions').innerHTML = `
+      <div class="pay-access-copy pay-access-copy-vip">Judul ini tidak tersedia untuk pembelian Full Access satuan. Gabung VIP untuk membuka semua koleksi premium, termasuk movie dan series VIP, tanpa iklan selama masa VIP aktif.</div>
+      <button class="pay-choice premium" onclick="checkoutVip('vip_month')"><b>VIP 1 bulan</b><span><span class="pay-strike">Rp99.000</span></span><span class="pay-price">Rp49.000</span></button>
+      <button class="pay-choice" onclick="checkoutVip('vip_week')"><b>VIP 1 minggu</b><span><span class="pay-strike">Rp25.000</span></span><span class="pay-price">Rp19.000</span></button>`;
+    modal.classList.add('show');
+    return;
+  }
   paySeasonSelection = { filmId: String(film.id), selected: new Set([Number(film.season || 1)]) };
   const selectedTotal = selectedSeasonFilms(film).reduce((sum, item)=>sum+accessPrice(item), 0);
   document.getElementById('payTitle').textContent = 'Pilih akses nonton';
@@ -4146,11 +4168,18 @@ async function startCheckout(payload){
     showToast(e.message,'error');
   }
 }
-function checkoutFilm(id){ closePayModal(); startCheckout({ type:'film', film_id:id }); }
+function checkoutFilm(id){
+  const film = allFilms.find(x=>String(x.id)===String(id));
+  if(isVipOnlyFilm(film)){ openAccessModal(film); return; }
+  closePayModal();
+  startCheckout({ type:'film', film_id:id });
+}
 function checkoutSelectedAccess(id){
   const film = allFilms.find(x=>String(x.id)===String(id));
   if(!film) return;
+  if(isVipOnlyFilm(film)){ openAccessModal(film); return; }
   const selected = selectedSeasonFilms(film);
+  if(!selected.length){ showToast('Season ini hanya tersedia untuk member VIP. Silakan gabung VIP untuk membukanya.', 'error'); return; }
   closePayModal();
   if(film.tipe === 'series' && selected.length > 1) startCheckout({ type:'cart', items:selected.map(item=>item.id) });
   else startCheckout({ type:'film', film_id:selected[0].id });
@@ -4344,6 +4373,7 @@ async function renderPaymentCheckoutPage(){
 }
 function addFilmToCartItem(f){
   if(!f) return false;
+  if(isVipOnlyFilm(f)) return false;
   const key=filmEntitlementKey(f);
   if(cart.some(i=>i.key===key)) return false;
   cart.push({id:String(f.id),key,title:f.judul||'Film',type:f.tipe||'movie',season:f.season||null,price:accessPrice(f),selected:true});
@@ -4352,6 +4382,7 @@ function addFilmToCartItem(f){
 function addToCart(id){
   const f=allFilms.find(x=>String(x.id)===String(id));
   if(!f) return;
+  if(isVipOnlyFilm(f)){ openAccessModal(f); return; }
   const added = addFilmToCartItem(f);
   localStorage.setItem('zaein_cart',JSON.stringify(cart));
   updateCartCount();
@@ -4361,6 +4392,7 @@ function addToCart(id){
 function addSelectedAccessToCart(id){
   const film=allFilms.find(x=>String(x.id)===String(id));
   if(!film) return;
+  if(isVipOnlyFilm(film)){ openAccessModal(film); return; }
   const selected = selectedSeasonFilms(film);
   const addedCount = selected.reduce((count, item)=>count+(addFilmToCartItem(item)?1:0), 0);
   localStorage.setItem('zaein_cart',JSON.stringify(cart));
