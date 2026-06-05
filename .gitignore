@@ -5,6 +5,10 @@
 node_modules/
 dist/
 
+# Local-only backups (jangan ikut di-push ke GitHub / di-deploy ke VPS)
+_backups/
+ownership-map-out/
+
 # Environment / secrets
 .env
 .env.*
