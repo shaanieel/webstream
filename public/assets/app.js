@@ -566,17 +566,20 @@ let _vipQuery = '';
 let _vipGenre = 'all';
 let _vipHeroTimer = null;
 let _vipHeroIndex = 0;
+let _vipGenreLoadRun = 0;
 const PAGE_ROWS = 10;
 const PAGE_NUMBERS = { browse: 1, movies: 1, tv: 1, vip: 1 };
 const VIP_GENRES = [
-  { label: 'All', slug: 'all', terms: [] },
-  { label: 'Action', slug: 'Action', terms: ['action', 'aksi', 'adventure', 'petualangan'] },
-  { label: 'Animasi', slug: 'Animasi', terms: ['animation', 'animasi', 'animated', 'cartoon'] },
-  { label: 'Indonesia', slug: 'Indonesia', terms: ['indonesia', 'indonesian', 'id', 'bahasa indonesia', 'film indonesia'] },
-  { label: 'Korea', slug: 'Korea', terms: ['korea', 'korean', 'south korea', 'drakor', 'k-drama'] },
-  { label: 'Horror & Thriller', slug: 'Horror-Thriller', terms: ['horror', 'horor', 'thriller', 'mystery', 'misteri', 'suspense'] },
-  { label: 'Drama', slug: 'Drama', terms: ['drama', 'romance', 'romansa', 'family'] },
+  { label: 'All', slug: 'all', genres: [], countries: [] },
+  { label: 'Action', slug: 'Action', genres: ['action', 'adventure'], countries: [] },
+  { label: 'Animasi', slug: 'Animasi', genres: ['animation', 'kids'], countries: [] },
+  { label: 'Indonesia', slug: 'Indonesia', genres: [], countries: ['ID'] },
+  { label: 'Korea', slug: 'Korea', genres: [], countries: ['KR', 'CN', 'TW'] },
+  { label: 'Horror & Thriller', slug: 'Horror-Thriller', genres: ['horror', 'mystery', 'thriller'], countries: [] },
+  { label: 'Drama', slug: 'Drama', genres: ['drama', 'romance'], countries: [] },
 ];
+const VIP_GENRE_META_KEY = Symbol('vipGenreMeta');
+const VIP_GENRE_META_PROMISE_KEY = Symbol('vipGenreMetaPromise');
 
 function vipGenreFromSlug(slug){
   const clean = decodeURIComponent(String(slug || 'all')).trim();
@@ -588,28 +591,84 @@ function vipGenrePathPart(){
   return g.slug === 'all' ? '' : '/' + encodeURIComponent(g.slug);
 }
 
-function filmGenreText(f){
-  const parts = [];
-  ['genre','genres','kategori','category','negara','country','countries','origin_country','original_language','bahasa','overview','judul'].forEach(k=>{
-    const v = f && f[k];
-    if(Array.isArray(v)) parts.push(v.join(' '));
-    else if(v && typeof v === 'object') parts.push(Object.values(v).join(' '));
-    else if(v != null) parts.push(String(v));
-  });
-  return parts.join(' ').toLowerCase();
-}
-
 function filmMatchesVipGenre(f, genre){
   const g = typeof genre === 'string' ? vipGenreFromSlug(genre) : genre;
   if(!g || g.slug === 'all') return true;
-  const text = filmGenreText(f);
-  if(g.slug === 'Indonesia'){
-    const lang = String(f?.original_language || f?.language || '').toLowerCase();
-    const country = f?.origin_country || f?.country || f?.negara || '';
-    const countryText = Array.isArray(country) ? country.join(' ').toLowerCase() : String(country).toLowerCase();
-    if(lang === 'id' || countryText.split(/[\s,|/]+/).includes('id')) return true;
+  const meta = f && f[VIP_GENRE_META_KEY];
+  if(!meta) return false;
+  if(g.countries && g.countries.length){
+    return g.countries.some(code => meta.countryCodes.has(code));
   }
-  return g.terms.some(term => text.includes(term.toLowerCase()));
+  if(g.genres && g.genres.length){
+    return g.genres.some(name => meta.genreNames.has(name));
+  }
+  return false;
+}
+
+function normalizeTmdbGenreMeta(tmdb){
+  const genreNames = new Set((tmdb?.genres || []).map(g => String(g?.name || '').trim().toLowerCase()).filter(Boolean));
+  const countryCodes = new Set();
+  (tmdb?.origin_country || []).forEach(c => countryCodes.add(String(c || '').toUpperCase()));
+  (tmdb?.production_countries || []).forEach(c => {
+    if(c?.iso_3166_1) countryCodes.add(String(c.iso_3166_1).toUpperCase());
+  });
+  return { genreNames, countryCodes };
+}
+
+async function fetchVipTmdbGenreMeta(film){
+  if(film[VIP_GENRE_META_KEY]) return film[VIP_GENRE_META_KEY];
+  if(film[VIP_GENRE_META_PROMISE_KEY]) return film[VIP_GENRE_META_PROMISE_KEY];
+  film[VIP_GENRE_META_PROMISE_KEY] = (async()=>{
+    if(!session) return null;
+    let tmdbId = film.tmdb_id;
+    const mediaType = film.tipe === 'series' ? 'tv' : 'movie';
+    try{
+      if(!tmdbId && film.judul){
+        const search = await fetch(`${apiBase()}/api/tmdb/search?type=${mediaType}&query=${encodeURIComponent(film.judul)}`, {
+          headers: { Authorization: 'Bearer '+session.access_token },
+        });
+        const sd = await search.json().catch(()=>({}));
+        if(sd.ok && sd.data && sd.data.results && sd.data.results.length) tmdbId = sd.data.results[0].id;
+      }
+      if(!tmdbId) return null;
+      const r = await fetch(`${apiBase()}/api/tmdb/${mediaType}/${tmdbId}`, {
+        headers: { Authorization: 'Bearer '+session.access_token },
+      });
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok || !d.ok || !d.data) return null;
+      const meta = normalizeTmdbGenreMeta(d.data);
+      film[VIP_GENRE_META_KEY] = meta;
+      film._vip_genre_meta_ready = true;
+      return meta;
+    }catch(e){
+      console.warn('[vip-genre-meta]', film.judul, e);
+      return null;
+    }
+  })();
+  return film[VIP_GENRE_META_PROMISE_KEY];
+}
+
+async function enrichVipGenreMetadata(items){
+  const films = _dedupeSeries((items || []).filter(Boolean));
+  const pending = films.filter(f => !f[VIP_GENRE_META_KEY]);
+  const CONCURRENCY = 6;
+  let index = 0;
+  async function worker(){
+    while(index < pending.length){
+      const film = pending[index++];
+      await fetchVipTmdbGenreMeta(film);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(CONCURRENCY, pending.length)}, worker));
+}
+
+function renderVipGenreLoading(){
+  const grid = document.getElementById('vipGrid');
+  const empty = document.getElementById('vipEmpty');
+  if(!grid) return;
+  renderPagination('vip', 'vipPagination', 0, 'vipGrid');
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="emoji">...</div><h3>Memuat genre VIP</h3><p>Sedang mencocokkan genre dan negara dari TMDB untuk semua koleksi VIP.</p></div>';
+  if(empty) empty.style.display = 'none';
 }
 
 function gridColumnCount(gridId){
@@ -810,22 +869,32 @@ function renderVipPage(){
   applyVipFilter();
 }
 
-function applyVipFilter(){
+async function applyVipFilter(){
   const grid = document.getElementById('vipGrid');
   const empty = document.getElementById('vipEmpty');
   if(!grid) return;
   const all = grid._vipFilms || [];
+  const selectedGenre = vipGenreFromSlug(_vipGenre);
+  const runId = ++_vipGenreLoadRun;
+  if(selectedGenre.slug !== 'all'){
+    const needsMeta = all.some(f => !f[VIP_GENRE_META_KEY]);
+    if(needsMeta){
+      renderVipGenreLoading();
+      await enrichVipGenreMetadata(all);
+      if(runId !== _vipGenreLoadRun) return;
+    }
+  }
   const q = (_vipQuery || '').toLowerCase().trim();
   let items = all;
   if(_vipFilter === 'movie') items = items.filter(f => f.tipe !== 'series');
   else if(_vipFilter === 'series') items = items.filter(f => f.tipe === 'series');
-  items = items.filter(f => filmMatchesVipGenre(f, _vipGenre));
+  items = items.filter(f => filmMatchesVipGenre(f, selectedGenre));
   if(q) items = items.filter(f => (f.judul || '').toLowerCase().includes(q));
   if(!items.length){
     grid.innerHTML = '';
     renderPagination('vip', 'vipPagination', 0, 'vipGrid');
     empty.style.display = 'block';
-    const genreLabel = vipGenreFromSlug(_vipGenre).label;
+    const genreLabel = selectedGenre.label;
     empty.querySelector('h3').textContent = q ? 'Tidak ada hasil' : (genreLabel === 'All' ? 'Belum ada film VIP' : `Belum ada koleksi ${genreLabel}`);
     empty.querySelector('p').textContent = q
       ? `Tidak ada judul yang cocok dengan "${q}".`
