@@ -2757,7 +2757,7 @@ async function adminUserEntitlements(request, env, userId) {
 
 function previewKeyForFilm(film) {
   if (!film) return null;
-  if (film.tipe === 'series') return `series:${film.judul || film.tmdb_id || film.id}:season:${film.season || 1}:episode:${film.episode || 1}`;
+  if (film.tipe === 'series') return `series:${film.judul || film.tmdb_id || film.id}:season:${film.season || 1}`;
   return `movie:${film.id}`;
 }
 
@@ -3039,6 +3039,14 @@ export default {
     // /payment/checkout?ref=... & /payment/success?ref=...
     // keduanya di-handle SPA index.html.
     if (pathname === '/payment/checkout' && request.method === 'GET') {
+      if (env.ASSETS) {
+        const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
+        return serveAsset(assetReq, env);
+      }
+    }
+    // Clean SPA routes: refresh/direct-open should serve the app shell,
+    // then the client router resolves pagination, genre, film, and account pages.
+    if (request.method === 'GET' && /^(\/vip(?:\/.*)?|\/movies(?:\/.*)?|\/tv(?:\/.*)?|\/browse(?:\/.*)?|\/film(?:\/.*)?|\/collection(?:\/.*)?|\/search|\/collections|\/my-collections|\/watchlist|\/cart|\/orders|\/faq|\/profile)$/.test(pathname)) {
       if (env.ASSETS) {
         const assetReq = new Request(new URL('/index.html', url.origin).toString(), request);
         return serveAsset(assetReq, env);
