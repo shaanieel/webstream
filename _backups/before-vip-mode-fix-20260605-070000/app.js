@@ -675,10 +675,7 @@ function renderPagedGrid(pageName, gridId, paginationId, items, opts){
       el.addEventListener('click', ()=>{
         const id = el.dataset.filmId;
         const film = allFilms.find(x=>String(x.id)===String(id));
-        // VIP page: every click is a VIP-context playback. VIP users get the
-        // ad-free domain even when the film row itself is `tier:'free'`,
-        // because the page already lists free titles for VIP convenience.
-        if(film) openFilm(film, { vipMode: true });
+        if(film) openFilm(film, { vipMode: film.tier === 'vip' });
       });
     });
   }else{
@@ -1044,10 +1041,9 @@ function applyRoute(opts){
   if(r.kind === 'film'){
   const f = findFilmByRouteId(r.id);
   if(f){
-    // Direct hit ke /film/vip/:id → tetap buka VIP page di belakang modal
-    // (jangan gate ke `f.tier === 'vip'`; VIP user juga buka film free
-    // dari halaman VIP via domain ad-free).
-    goPage(r.vipMode ? 'vip' : 'home', { fromPopState:true });
+    // Kalau direct ke /film/vip/:id, buka VIP page di belakang modal.
+    // Kalau /film/:id, tetap home.
+    goPage((r.vipMode && f.tier === 'vip') ? 'vip' : 'home', { fromPopState:true });
 
     openFilm(f, {
       fromPopState: true,
@@ -1844,11 +1840,7 @@ async function fetchPlayback(film) {
 }
 async function openFilm(film, opts){
   opts = opts || {};
-  // VIP playback context: kalau user-nya VIP active, ATAU caller minta
-  // vipMode (mis. dari grid VIP / hero VIP), gunakan domain VIP (ad-free).
-  // Sebelumnya kita gate di `film.tier === 'vip'`, tapi VIP page sengaja
-  // ikut nampilin film free supaya VIP-user tetap nonton ad-free juga.
-  const vipMode = !!opts.vipMode || currentTier === 'vip';
+  const vipMode = !!opts.vipMode && film.tier === 'vip';
   currentPlayerTier = vipMode ? 'vip' : 'basic';
   // Tier check — show fancy locked modal instead of toast
   if(film.tier === 'vip' && currentTier !== 'vip'){
