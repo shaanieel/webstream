@@ -55,8 +55,8 @@ const json = (data, status = 200, extraHeaders = {}) =>
 const err = (msg, status = 400) => json({ ok: false, error: msg }, status);
 const VIP_DOWNLOAD_LIMIT = 2;
 const VIP_DOWNLOAD_TTL_MS = 30 * 60 * 1000;
-const DEFAULT_MOVIE_PRICE = 5000;
-const DEFAULT_SERIES_SEASON_PRICE = 10000;
+const DEFAULT_MOVIE_PRICE = 2500;
+const DEFAULT_SERIES_SEASON_PRICE = 5000;
 const VIP_MONTH_PRICE = 49000;
 const VIP_WEEK_PRICE = 19000;
 
@@ -232,6 +232,79 @@ function isAdminEmail(env, email) {
   if (!email) return false;
   const list = (env.ADMIN_EMAILS || '').split(',').map(s => s.trim().toLowerCase());
   return list.includes(email.toLowerCase());
+}
+
+async function sendTelegramNotif(env, text) {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const chatId = env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+  } catch (e) {
+    console.error('telegram notif gagal:', e && e.message);
+  }
+}
+
+function telegramEsc(s) {
+  return String(s == null ? '-' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function telegramTime(d = new Date()) {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(d) + ' WIB';
+}
+
+function requestMeta(request) {
+  const cf = request.cf || {};
+  return {
+    ip: request.headers.get('CF-Connecting-IP') || '-',
+    country: cf.country || '-',
+    city: cf.city || '-',
+    ua: (request.headers.get('User-Agent') || '-').slice(0, 110),
+  };
+}
+
+function buildAuthTelegramMsg({ type, email, ip, country, city, ua }) {
+  const isRegister = type === 'register';
+  return [
+    `${isRegister ? 'USER BARU DAFTAR' : 'USER LOGIN'} <b>ZAEINSTREAM</b>`,
+    '━━━━━━━━━━━━━━━━━━━━',
+    `Email  : <code>${telegramEsc(email)}</code>`,
+    `IP     : <code>${telegramEsc(ip)}</code>`,
+    `Lokasi : ${telegramEsc(city)}, ${telegramEsc(country)}`,
+    `Device : ${telegramEsc(ua)}`,
+    `Waktu  : ${telegramTime()}`,
+    '━━━━━━━━━━━━━━━━━━━━',
+    '<i>zaeinstream.my.id</i>',
+  ].join('\n');
+}
+
+async function authLoginEventHandler(request, env, ctx) {
+  const user = await getUserFromAuth(request, env);
+  if (!user || !user.email) return err('Login dulu', 401);
+  const send = () => sendTelegramNotif(env, buildAuthTelegramMsg({
+    type: 'login',
+    email: user.email,
+    ...requestMeta(request),
+  }));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send());
+  else await send();
+  return json({ ok: true });
 }
 
 async function requireAdmin(request, env) {
@@ -1602,7 +1675,7 @@ async function adminFilmDelete(request, env, id) {
 // Creates the auth.users row with email_confirm=true (so the user can log in
 // immediately) and seeds the matching users_profile row including
 // `password_plain` so admins can still see/edit it later.
-async function authSignupHandler(request, env) {
+async function authSignupHandler(request, env, ctx) {
   let body;
   try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
   const email = (body && body.email || '').trim().toLowerCase();
@@ -1649,6 +1722,14 @@ async function authSignupHandler(request, env) {
     } catch { /* best-effort */ }
     return err('Gagal simpan profil: ' + JSON.stringify(pr.data).slice(0, 200), 500);
   }
+
+  const send = () => sendTelegramNotif(env, buildAuthTelegramMsg({
+    type: 'register',
+    email,
+    ...requestMeta(request),
+  }));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send());
+  else await send();
 
   return json({ ok: true, user: { id: userId, email } });
 }
@@ -2296,6 +2377,7 @@ async function paymentCheckout(request, env) {
   } else if (productType === 'film') {
     const film = await getFilmById(env, body.film_id);
     if (!film) return err('Film tidak ditemukan', 404);
+    if (film.tier === 'vip') return err('Judul ini hanya tersedia untuk member VIP dan tidak bisa dibeli sebagai akses satuan.', 403);
     const kind = normalizeFilmKind(film);
     amount = kind === 'series_season' ? settings.series_season_price : settings.movie_price;
     const seasonText = kind === 'series_season' ? ` Season ${film.season || 1}` : '';
@@ -2316,6 +2398,7 @@ async function paymentCheckout(request, env) {
     for (const fid of uniq) {
       const film = await getFilmById(env, fid);
       if (!film) continue;
+      if (film.tier === 'vip') return err(`${film.judul || 'Film ini'} hanya tersedia untuk member VIP dan tidak bisa dibeli sebagai akses satuan.`, 403);
       const kind = normalizeFilmKind(film);
       const price = kind === 'series_season' ? settings.series_season_price : settings.movie_price;
       total += price;
@@ -3038,7 +3121,10 @@ export default {
 
     // === Auth: signup (no email verification per spec) ===
     if (pathname === '/api/auth/signup' && request.method === 'POST') {
-      return authSignupHandler(request, env);
+      return authSignupHandler(request, env, ctx);
+    }
+    if (pathname === '/api/auth/login-event' && request.method === 'POST') {
+      return authLoginEventHandler(request, env, ctx);
     }
 
     // === Admin: films ===
