@@ -563,8 +563,137 @@ function renderProfilePage(){
    ════════════════════════════════════════════════════════════════════ */
 let _vipFilter = 'all';        // 'all' | 'movie' | 'series'
 let _vipQuery = '';
+let _vipGenre = 'all';
 let _vipHeroTimer = null;
 let _vipHeroIndex = 0;
+const PAGE_ROWS = 10;
+const PAGE_NUMBERS = { browse: 1, movies: 1, tv: 1, vip: 1 };
+const VIP_GENRES = [
+  { label: 'All', slug: 'all', terms: [] },
+  { label: 'Action', slug: 'Action', terms: ['action', 'aksi', 'adventure', 'petualangan'] },
+  { label: 'Animasi', slug: 'Animasi', terms: ['animation', 'animasi', 'animated', 'cartoon'] },
+  { label: 'Indonesia', slug: 'Indonesia', terms: ['indonesia', 'indonesian', 'id', 'bahasa indonesia', 'film indonesia'] },
+  { label: 'Korea', slug: 'Korea', terms: ['korea', 'korean', 'south korea', 'drakor', 'k-drama'] },
+  { label: 'Horror & Thriller', slug: 'Horror-Thriller', terms: ['horror', 'horor', 'thriller', 'mystery', 'misteri', 'suspense'] },
+  { label: 'Drama', slug: 'Drama', terms: ['drama', 'romance', 'romansa', 'family'] },
+];
+
+function vipGenreFromSlug(slug){
+  const clean = decodeURIComponent(String(slug || 'all')).trim();
+  return VIP_GENRES.find(g => g.slug.toLowerCase() === clean.toLowerCase()) || VIP_GENRES[0];
+}
+
+function vipGenrePathPart(){
+  const g = vipGenreFromSlug(_vipGenre);
+  return g.slug === 'all' ? '' : '/' + encodeURIComponent(g.slug);
+}
+
+function filmGenreText(f){
+  const parts = [];
+  ['genre','genres','kategori','category','negara','country','countries','origin_country','original_language','bahasa','overview','judul'].forEach(k=>{
+    const v = f && f[k];
+    if(Array.isArray(v)) parts.push(v.join(' '));
+    else if(v && typeof v === 'object') parts.push(Object.values(v).join(' '));
+    else if(v != null) parts.push(String(v));
+  });
+  return parts.join(' ').toLowerCase();
+}
+
+function filmMatchesVipGenre(f, genre){
+  const g = typeof genre === 'string' ? vipGenreFromSlug(genre) : genre;
+  if(!g || g.slug === 'all') return true;
+  const text = filmGenreText(f);
+  if(g.slug === 'Indonesia'){
+    const lang = String(f?.original_language || f?.language || '').toLowerCase();
+    const country = f?.origin_country || f?.country || f?.negara || '';
+    const countryText = Array.isArray(country) ? country.join(' ').toLowerCase() : String(country).toLowerCase();
+    if(lang === 'id' || countryText.split(/[\s,|/]+/).includes('id')) return true;
+  }
+  return g.terms.some(term => text.includes(term.toLowerCase()));
+}
+
+function gridColumnCount(gridId){
+  const el = document.getElementById(gridId);
+  if(!el) return window.innerWidth < 768 ? 2 : 6;
+  const template = getComputedStyle(el).gridTemplateColumns || '';
+  const cols = template.split(' ').filter(Boolean).length;
+  if(cols) return Math.max(1, cols);
+  return window.innerWidth < 560 ? 2 : (window.innerWidth < 1024 ? 3 : 6);
+}
+
+function pageSizeForGrid(gridId){
+  return Math.max(1, gridColumnCount(gridId) * PAGE_ROWS);
+}
+
+function renderPagination(pageName, paginationId, totalItems, gridId){
+  const el = document.getElementById(paginationId);
+  if(!el) return;
+  const pageSize = pageSizeForGrid(gridId);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  PAGE_NUMBERS[pageName] = Math.min(Math.max(1, PAGE_NUMBERS[pageName] || 1), totalPages);
+  if(totalPages <= 1){ el.innerHTML = ''; return; }
+  const current = PAGE_NUMBERS[pageName];
+  const nums = [];
+  const start = Math.max(1, current - 2);
+  const end = Math.min(totalPages, current + 2);
+  if(start > 1) nums.push(1);
+  if(start > 2) nums.push('gap-start');
+  for(let i=start;i<=end;i++) nums.push(i);
+  if(end < totalPages - 1) nums.push('gap-end');
+  if(end < totalPages) nums.push(totalPages);
+  el.innerHTML = [
+    `<button class="page-btn page-arrow" type="button" ${current===1?'disabled':''} data-page-num="${current-1}" aria-label="Halaman sebelumnya">&lsaquo;</button>`,
+    ...nums.map(n => typeof n === 'number'
+      ? `<button class="page-btn${n===current?' active':''}" type="button" data-page-num="${n}" aria-current="${n===current?'page':'false'}">${n}</button>`
+      : '<span class="page-gap">...</span>'),
+    `<button class="page-btn page-arrow" type="button" ${current===totalPages?'disabled':''} data-page-num="${current+1}" aria-label="Halaman berikutnya">&rsaquo;</button>`,
+  ].join('');
+  el.querySelectorAll('[data-page-num]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const n = Number(btn.dataset.pageNum) || 1;
+      PAGE_NUMBERS[pageName] = Math.min(Math.max(1, n), totalPages);
+      goPage(pageName, { page: PAGE_NUMBERS[pageName], vipGenre: _vipGenre });
+    });
+  });
+}
+
+function renderPagedGrid(pageName, gridId, paginationId, items, opts){
+  opts = opts || {};
+  const pageSize = pageSizeForGrid(gridId);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  PAGE_NUMBERS[pageName] = Math.min(Math.max(1, PAGE_NUMBERS[pageName] || 1), totalPages);
+  const start = (PAGE_NUMBERS[pageName] - 1) * pageSize;
+  const pageItems = items.slice(start, start + pageSize);
+  if(opts.vipStyle){
+    const grid = document.getElementById(gridId);
+    grid.innerHTML = pageItems.map(f=>cardHTML(f, true)).join('');
+    grid.querySelectorAll('[data-film-id]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const id = el.dataset.filmId;
+        const film = allFilms.find(x=>String(x.id)===String(id));
+        if(film) openFilm(film, { vipMode: film.tier === 'vip' });
+      });
+    });
+  }else{
+    renderGrid(gridId, pageItems);
+  }
+  renderPagination(pageName, paginationId, items.length, gridId);
+}
+
+function renderVipGenreRail(){
+  const track = document.getElementById('vipGenreTrack');
+  if(!track) return;
+  const activeSlug = vipGenreFromSlug(_vipGenre).slug;
+  track.innerHTML = VIP_GENRES.map(g=>`<button class="vip-genre-chip${g.slug===activeSlug?' active':''}" type="button" data-vip-genre="${escapeHtml(g.slug)}">${escapeHtml(g.label)}</button>`).join('');
+  track.querySelectorAll('[data-vip-genre]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      _vipGenre = btn.dataset.vipGenre || 'all';
+      PAGE_NUMBERS.vip = 1;
+      renderVipGenreRail();
+      goPage('vip', { page: 1, vipGenre: _vipGenre });
+    });
+  });
+}
 
 function filmUploadTime(f){
   const raw = f?.created_at || f?.uploaded_at || f?.updated_at || f?.modified_at || '';
@@ -614,6 +743,8 @@ function renderVipPage(){
     renderVipPosterStack([]);
     if(_vipHeroTimer){ clearInterval(_vipHeroTimer); _vipHeroTimer = null; }
     grid.innerHTML = '';
+    renderPagination('vip', 'vipPagination', 0, 'vipGrid');
+    renderVipGenreRail();
     empty.style.display = 'none';
     return;
   }
@@ -675,6 +806,7 @@ function renderVipPage(){
 
   // Cache full list for filter/search re-render without recomputing.
   document.getElementById('vipGrid')._vipFilms = vipFilms;
+  renderVipGenreRail();
   applyVipFilter();
 }
 
@@ -687,30 +819,27 @@ function applyVipFilter(){
   let items = all;
   if(_vipFilter === 'movie') items = items.filter(f => f.tipe !== 'series');
   else if(_vipFilter === 'series') items = items.filter(f => f.tipe === 'series');
+  items = items.filter(f => filmMatchesVipGenre(f, _vipGenre));
   if(q) items = items.filter(f => (f.judul || '').toLowerCase().includes(q));
   if(!items.length){
     grid.innerHTML = '';
+    renderPagination('vip', 'vipPagination', 0, 'vipGrid');
     empty.style.display = 'block';
-    empty.querySelector('h3').textContent = q ? 'Tidak ada hasil' : 'Belum ada film VIP';
+    const genreLabel = vipGenreFromSlug(_vipGenre).label;
+    empty.querySelector('h3').textContent = q ? 'Tidak ada hasil' : (genreLabel === 'All' ? 'Belum ada film VIP' : `Belum ada koleksi ${genreLabel}`);
     empty.querySelector('p').textContent = q
       ? `Tidak ada judul yang cocok dengan "${q}".`
       : 'Admin belum menambahkan koleksi VIP. Cek lagi nanti.';
     return;
   }
   empty.style.display = 'none';
-  grid.innerHTML = items.map(f=>cardHTML(f, /*vipStyle=*/true)).join('');
-  grid.querySelectorAll('[data-film-id]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const id = el.dataset.filmId;
-      const film = allFilms.find(x=>String(x.id)===String(id));
-      if(film) openFilm(film, { vipMode: true });
-    });
-  });
+  renderPagedGrid('vip', 'vipGrid', 'vipPagination', items, { vipStyle:true });
 }
 
 function setVipFilter(filter){
   if(filter !== 'all' && filter !== 'movie' && filter !== 'series') filter = 'all';
   _vipFilter = filter;
+  PAGE_NUMBERS.vip = 1;
   document.querySelectorAll('.vip-tab').forEach(btn=>{
     btn.classList.toggle('active', btn.dataset.vipFilter === filter);
   });
@@ -719,6 +848,7 @@ function setVipFilter(filter){
 
 function onVipSearchInput(){
   _vipQuery = document.getElementById('vipSearchInput').value || '';
+  PAGE_NUMBERS.vip = 1;
   applyVipFilter();
 }
 
@@ -762,9 +892,21 @@ document.addEventListener('keydown',(e)=>{
 const VALID_PAGES = ['home','search','browse','movies','tv','watchlist','cart','collections','my-collections','collection','orders','faq','vip','profile','payment'];
 let _currentPage = 'home';
 
-function pagePath(name){
+function pagePath(name, opts){
+  opts = opts || {};
   if(name === 'home') return '/';
   if(name === 'payment') return '/payment/checkout';
+  if(['browse','movies','tv'].includes(name)){
+    const page = Math.max(1, Number(opts.page || PAGE_NUMBERS[name] || 1));
+    return '/' + name + (page > 1 ? '/page/' + page : '');
+  }
+  if(name === 'vip'){
+    const page = Math.max(1, Number(opts.page || PAGE_NUMBERS.vip || 1));
+    const genre = opts.vipGenre || _vipGenre || 'all';
+    const g = vipGenreFromSlug(genre);
+    const base = '/vip' + (g.slug === 'all' ? '' : '/' + encodeURIComponent(g.slug));
+    return base + (page > 1 ? '/page/' + page : '');
+  }
   return '/' + name;
 }
 
@@ -772,6 +914,12 @@ function goPage(name, opts){
   opts = opts || {};
   if(!VALID_PAGES.includes(name)) name = 'home';
   _currentPage = name;
+  if(['browse','movies','tv','vip'].includes(name)){
+    PAGE_NUMBERS[name] = Math.max(1, Number(opts.page || PAGE_NUMBERS[name] || 1));
+  }
+  if(name === 'vip'){
+    _vipGenre = vipGenreFromSlug(opts.vipGenre || _vipGenre || 'all').slug;
+  }
   // If player modal is open, close it first so the user can see the page
   const pm = document.getElementById('playerModal');
   if(pm && pm.classList.contains('open') && !opts.fromPopState){
@@ -799,9 +947,9 @@ function goPage(name, opts){
 
   // Update URL via History API (clean path, no hash)
   if(!opts.fromPopState){
-    const target = pagePath(name);
+    const target = pagePath(name, opts);
     if(location.pathname !== target){
-      history.pushState({ kind:'page', name }, '', target);
+      history.pushState({ kind:'page', name, page: PAGE_NUMBERS[name], vipGenre: _vipGenre }, '', target);
     }
   }
   // The mobile topbar used to show the current page URL (breadcrumb);
@@ -857,6 +1005,23 @@ function parseRoute(){
     return { kind:'page', name:'home' };
   }
 
+  if(['browse','movies','tv'].includes(parts[0])){
+    const page = parts[1] === 'page' ? Math.max(1, Number(parts[2] || 1)) : 1;
+    return { kind:'page', name: parts[0], page };
+  }
+
+  if(parts[0] === 'vip'){
+    let page = 1;
+    let vipGenre = 'all';
+    if(parts[1] === 'page'){
+      page = Math.max(1, Number(parts[2] || 1));
+    }else if(parts[1]){
+      vipGenre = vipGenreFromSlug(parts[1]).slug;
+      if(parts[2] === 'page') page = Math.max(1, Number(parts[3] || 1));
+    }
+    return { kind:'page', name:'vip', page, vipGenre };
+  }
+
   if(VALID_PAGES.includes(parts[0])){
     return { kind:'page', name: parts[0] };
   }
@@ -873,7 +1038,7 @@ function applyRoute(opts){
   if(f){
     // Kalau direct ke /film/vip/:id, buka VIP page di belakang modal.
     // Kalau /film/:id, tetap home.
-    goPage(r.vipMode ? 'vip' : 'home', { fromPopState:true });
+    goPage((r.vipMode && f.tier === 'vip') ? 'vip' : 'home', { fromPopState:true });
 
     openFilm(f, {
       fromPopState: true,
@@ -889,7 +1054,7 @@ function applyRoute(opts){
     // Close player if open (e.g., back button from /film/X → /something)
     const pm = document.getElementById('playerModal');
     if(pm && pm.classList.contains('open')){ closePlayer({ fromPopState:true }); }
-    goPage(r.name, { fromPopState:true });
+    goPage(r.name, { fromPopState:true, page: r.page, vipGenre: r.vipGenre });
   }
 }
 
@@ -1449,17 +1614,17 @@ function renderMoviesPage(){
   const q=(document.getElementById('moviesSearchInput')?.value||'').toLowerCase().trim();
   let items = _dedupeSeries(allFilms.filter(f=>f.tipe!=='series' && _mainGridFilter(f)));
   if(q) items = items.filter(f=>(f.judul||'').toLowerCase().includes(q));
-  renderGrid('moviesPageGrid', items);
+  renderPagedGrid('movies', 'moviesPageGrid', 'moviesPagination', items);
 }
 function renderTvPage(){
   const q=(document.getElementById('tvSearchInput')?.value||'').toLowerCase().trim();
   let arr = _dedupeSeries(allFilms.filter(f=>f.tipe==='series' && _mainGridFilter(f)));
   if(q) arr = arr.filter(f=>(f.judul||'').toLowerCase().includes(q));
-  renderGrid('tvPageGrid', arr);
+  renderPagedGrid('tv', 'tvPageGrid', 'tvPagination', arr);
 }
 function renderBrowsePage(){
   // Browse tampilkan semua kecuali film VIP-only (yang khusus di VIP Zone)
-  renderGrid('browseGrid', _dedupeSeries(allFilms.filter(_mainGridFilter)));
+  renderPagedGrid('browse', 'browseGrid', 'browsePagination', _dedupeSeries(allFilms.filter(_mainGridFilter)));
 }
 function renderWatchlistPage(){
   // Read user-selected filters (defaults to "all"/"all")
@@ -1702,13 +1867,13 @@ async function fetchPlayback(film) {
 }
 async function openFilm(film, opts){
   opts = opts || {};
-     const vipMode = !!opts.vipMode;
-currentPlayerTier = vipMode ? 'vip' : 'basic';
+  const vipMode = !!opts.vipMode && film.tier === 'vip';
+  currentPlayerTier = vipMode ? 'vip' : 'basic';
   // Tier check — show fancy locked modal instead of toast
-  if((vipMode || film.tier === 'vip') && currentTier !== 'vip'){
-  showVipLocked(film);
-  return;
-}
+  if(film.tier === 'vip' && currentTier !== 'vip'){
+    showVipLocked(film);
+    return;
+  }
 
   currentFilm = film;
   let playback;
@@ -1738,18 +1903,18 @@ currentPlayerTier = vipMode ? 'vip' : 'basic';
 
   // Update URL to /film/{id} (clean, shareable)
   if(!opts.fromPopState){
-  const filmPath = vipMode
-    ? '/film/vip/' + encodeURIComponent(film.id)
-    : '/film/' + encodeURIComponent(film.id);
+    const filmPath = vipMode
+      ? '/film/vip/' + encodeURIComponent(film.id)
+      : '/film/' + encodeURIComponent(film.id);
 
-  if(location.pathname !== filmPath){
-    history.pushState(
-      { kind:'film', id: String(film.id), vipMode },
-      '',
-      filmPath
-    );
+    if(location.pathname !== filmPath){
+      history.pushState(
+        { kind:'film', id: String(film.id), vipMode },
+        '',
+        filmPath
+      );
+    }
   }
-}
   // Populate right panel with whatever we have from the local film record.
   // loadFilmExtras() will enrich with TMDB data (status, production, genres, cast, trailer).
   const poster = film.poster_url || '';

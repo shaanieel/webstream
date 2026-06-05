@@ -357,6 +357,7 @@
     <section class="page" id="page-browse">
       <div class="page-title">Browse</div>
       <div class="grid" id="browseGrid"></div>
+      <div class="page-pagination" id="browsePagination"></div>
     </section>
 
     <!-- ════ MOVIES ════ -->
@@ -365,10 +366,11 @@
       <div class="search-wrap">
         <div class="search-box">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
-          <input type="text" class="search-input" id="moviesSearchInput" placeholder="Search movies..." oninput="renderMoviesPage()" />
+          <input type="text" class="search-input" id="moviesSearchInput" placeholder="Search movies..." oninput="PAGE_NUMBERS.movies=1;renderMoviesPage()" />
         </div>
       </div>
       <div class="grid" id="moviesPageGrid"></div>
+      <div class="page-pagination" id="moviesPagination"></div>
     </section>
 
     <!-- ════ TV ════ -->
@@ -377,10 +379,11 @@
       <div class="search-wrap">
         <div class="search-box">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
-          <input type="text" class="search-input" id="tvSearchInput" placeholder="Search TV shows..." oninput="renderTvPage()" />
+          <input type="text" class="search-input" id="tvSearchInput" placeholder="Search TV shows..." oninput="PAGE_NUMBERS.tv=1;renderTvPage()" />
         </div>
       </div>
       <div class="grid" id="tvPageGrid"></div>
+      <div class="page-pagination" id="tvPagination"></div>
     </section>
 
     <!-- ════ WATCHLIST ════ -->
@@ -641,8 +644,14 @@
         </div>
       </div>
 
+      <div class="vip-genre-rail" aria-label="Genre VIP">
+        <div class="vip-genre-label">Genre:</div>
+        <div class="vip-genre-track" id="vipGenreTrack"></div>
+      </div>
+
       <div class="page-title vip-collection-title" style="color:var(--gold);">Koleksi VIP</div>
       <div class="grid" id="vipGrid"></div>
+      <div class="page-pagination" id="vipPagination"></div>
       <div id="vipEmpty" class="empty-state" style="display:none;">
         <div class="emoji">👑</div>
         <h3>Belum ada film VIP</h3>
