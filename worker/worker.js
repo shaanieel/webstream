@@ -779,6 +779,75 @@ function pickTmdbLogo(images) {
   return preferred && preferred.file_path ? tmdbImage(preferred.file_path, 'w500') : null;
 }
 
+function tmdbMediaTypeForFilm(film) {
+  return film && film.tipe === 'series' ? 'tv' : 'movie';
+}
+
+function tmdbLogoPath(images) {
+  const logos = images && Array.isArray(images.logos) ? images.logos : [];
+  if (!logos.length) return null;
+  const preferred = logos.find(x => x.iso_639_1 === 'en') || logos.find(x => x.iso_639_1 === null) || logos[0];
+  return preferred && preferred.file_path ? preferred.file_path : null;
+}
+
+function tmdbMetadataPatch(type, tmdb) {
+  const genres = Array.isArray(tmdb?.genres) ? tmdb.genres : [];
+  const countries = new Set();
+  if (type === 'tv' && Array.isArray(tmdb?.origin_country)) {
+    tmdb.origin_country.forEach(code => {
+      if (code) countries.add(String(code).toUpperCase());
+    });
+  }
+  if (Array.isArray(tmdb?.production_countries)) {
+    tmdb.production_countries.forEach(country => {
+      if (country && country.iso_3166_1) countries.add(String(country.iso_3166_1).toUpperCase());
+    });
+  }
+  return {
+    tmdb_media_type: type,
+    tmdb_genres: genres.map(g => g && g.name).filter(Boolean),
+    tmdb_genre_ids: genres.map(g => g && g.id).filter(Boolean),
+    tmdb_country_codes: Array.from(countries),
+    tmdb_original_language: tmdb?.original_language || null,
+    tmdb_poster_path: tmdb?.poster_path || null,
+    tmdb_backdrop_path: tmdb?.backdrop_path || null,
+    tmdb_logo_path: tmdbLogoPath(tmdb?.images),
+    tmdb_synced_at: new Date().toISOString(),
+  };
+}
+
+async function resolveTmdbDetailForFilm(env, film) {
+  const type = tmdbMediaTypeForFilm(film);
+  let tmdbId = film && film.tmdb_id;
+  if (!tmdbId && film && film.judul) {
+    const year = film.tahun ? `&year=${encodeURIComponent(film.tahun)}` : '';
+    const sr = await tmdbFetch(env, `/search/${type}?query=${encodeURIComponent(film.judul)}${year}&include_adult=false`);
+    const sd = await sr.json().catch(() => ({}));
+    if (!sr.ok) throw new Error(`TMDB search ${sr.status}: ${sd.status_message || ''}`);
+    tmdbId = sd && sd.results && sd.results[0] && sd.results[0].id;
+  }
+  if (!tmdbId) return null;
+  const dr = await tmdbFetch(env, `/${type}/${tmdbId}?append_to_response=images`);
+  const detail = await dr.json().catch(() => ({}));
+  if (!dr.ok) throw new Error(`TMDB detail ${dr.status}: ${detail.status_message || ''}`);
+  return { type, tmdbId, detail };
+}
+
+async function buildFilmTmdbMetadataPatch(env, film) {
+  const resolved = await resolveTmdbDetailForFilm(env, film);
+  if (!resolved || !resolved.detail) return {};
+  return {
+    tmdb_id: film.tmdb_id || resolved.tmdbId,
+    ...tmdbMetadataPatch(resolved.type, resolved.detail),
+  };
+}
+
+function filmNeedsTmdbMetadata(film, force = false) {
+  if (force) return true;
+  const genres = Array.isArray(film?.tmdb_genres) ? film.tmdb_genres : [];
+  return !film?.tmdb_synced_at || !genres.length;
+}
+
 // Normalize a title for fuzzy matching: lowercase, strip diacritics, drop
 // punctuation, collapse whitespace. "The Punisher: One Last Kill" and
 // "the punisher one last kill" become the same string.
@@ -1587,7 +1656,7 @@ async function adminFilmCreate(request, env) {
   const safeDriveLink = driveLink == null ? '' : driveLink;
   const safeDrivePath = drivePath == null ? '' : drivePath;
 
-  const row = {
+  let row = {
     judul: body.judul,
     tipe: body.tipe || 'movie',
     drive_link: safeDriveLink,
@@ -1606,12 +1675,18 @@ async function adminFilmCreate(request, env) {
     videos: Array.isArray(body.videos) ? body.videos : [],
     subtitles: Array.isArray(body.subtitles) ? body.subtitles : [],
   };
+  let tmdb_warning = null;
+  try {
+    row = { ...row, ...(await buildFilmTmdbMetadataPatch(env, row)) };
+  } catch (e) {
+    tmdb_warning = e.message;
+  }
   const r = await supabaseRest(env, '/films', {
     method: 'POST',
     body: JSON.stringify(row),
   });
   if (!r.ok) return err('Gagal simpan: ' + JSON.stringify(r.data), 500);
-  return json({ ok: true, film: Array.isArray(r.data) ? r.data[0] : r.data });
+  return json({ ok: true, film: Array.isArray(r.data) ? r.data[0] : r.data, tmdb_warning });
 }
 
 async function adminFilmUpdate(request, env, id) {
@@ -1642,12 +1717,93 @@ async function adminFilmUpdate(request, env, id) {
   if (typeof patch.video_url === 'string' && patch.video_url === '') {
     patch.video_url = null;
   }
+  let tmdb_warning = null;
+  if ('judul' in patch || 'tipe' in patch || 'tmdb_id' in patch || 'tahun' in patch) {
+    try {
+      const current = await getFilmById(env, id);
+      const merged = { ...(current || {}), ...patch };
+      Object.assign(patch, await buildFilmTmdbMetadataPatch(env, merged));
+    } catch (e) {
+      tmdb_warning = e.message;
+    }
+  }
   const r = await supabaseRest(env, `/films?id=eq.${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
   if (!r.ok) return err('Gagal update', 500);
-  return json({ ok: true });
+  return json({ ok: true, tmdb_warning });
+}
+
+async function adminFilmsTmdbSync(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return err('Forbidden', 403);
+  const u = new URL(request.url);
+  const force = u.searchParams.get('force') === '1' || u.searchParams.get('force') === 'true';
+  const limit = Math.min(500, Math.max(1, Number(u.searchParams.get('limit') || 100)));
+  const after = Number(u.searchParams.get('after') || 0);
+  const path = `/films?id=gt.${encodeURIComponent(after)}&select=*&order=id.asc&limit=${limit}`;
+  const r = await supabaseRest(env, path);
+  if (!r.ok) return err('Gagal load film untuk sync TMDB', 500);
+  const films = Array.isArray(r.data) ? r.data : [];
+  const results = [];
+  let synced = 0;
+  let skipped = 0;
+  let failed = 0;
+  let next_after = after;
+  let index = 0;
+  async function syncOne(film) {
+    next_after = Math.max(next_after, Number(film.id) || next_after);
+    if (!filmNeedsTmdbMetadata(film, force)) {
+      skipped++;
+      results.push({ id: film.id, title: film.judul, status: 'skipped' });
+      return;
+    }
+    try {
+      const patch = await buildFilmTmdbMetadataPatch(env, film);
+      if (!Object.keys(patch).length) {
+        failed++;
+        results.push({ id: film.id, title: film.judul, status: 'missing_tmdb' });
+        return;
+      }
+      const up = await supabaseRest(env, `/films?id=eq.${encodeURIComponent(film.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+      if (!up.ok) throw new Error(JSON.stringify(up.data));
+      synced++;
+      results.push({
+        id: film.id,
+        title: film.judul,
+        status: 'synced',
+        genres: patch.tmdb_genres || [],
+        countries: patch.tmdb_country_codes || [],
+      });
+    } catch (e) {
+      failed++;
+      results.push({ id: film.id, title: film.judul, status: 'error', error: e.message });
+    }
+  }
+  async function worker() {
+    while (index < films.length) {
+      const film = films[index++];
+      await syncOne(film);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(5, films.length) }, worker));
+  results.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  return json({
+    ok: true,
+    force,
+    limit,
+    after,
+    next_after,
+    has_more: films.length === limit,
+    synced,
+    skipped,
+    failed,
+    results,
+  });
 }
 
 async function adminFilmDelete(request, env, id) {
@@ -3138,6 +3294,9 @@ export default {
     // === Admin: films ===
     if (pathname === '/api/admin/films' && request.method === 'POST') {
       return adminFilmCreate(request, env);
+    }
+    if (pathname === '/api/admin/films/tmdb-sync' && (request.method === 'POST' || request.method === 'GET')) {
+      return adminFilmsTmdbSync(request, env);
     }
     {
       const m = pathname.match(/^\/api\/admin\/films\/([^/]+)$/);

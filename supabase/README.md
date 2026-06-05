@@ -45,6 +45,13 @@ already-migrated databases is safe.
    2 simultaneous active downloads per user. Slots auto-expire after the
    worker's stale window and are released by the frontend when the player
    closes.
+10. **`0010_payments_entitlements.sql`** through
+    **`0012_collections.sql`** — payment/order entitlement tables and public
+    collection curation tables.
+11. **`0013_films_tmdb_metadata.sql`** — adds cached TMDB genre, country,
+    media type, poster/backdrop/logo path, and sync timestamp columns on
+    `films`. VIP genre pages read these columns directly so visitors do not
+    wait for live TMDB requests.
 
 ## Required tables
 
@@ -73,6 +80,9 @@ create table if not exists films (
   poster_url text,
   overview text,
   genre text,
+  tmdb_genres jsonb default '[]'::jsonb,
+  tmdb_country_codes jsonb default '[]'::jsonb,
+  tmdb_synced_at timestamptz,
   audio_tracks jsonb default '[]'::jsonb,
   videos jsonb default '[]'::jsonb,
   subtitles jsonb default '[]'::jsonb,
