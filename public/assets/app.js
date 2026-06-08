@@ -400,6 +400,12 @@ async function doLogin(){
       msg.className='auth-msg error';
       msg.style.display='block';
       btn.disabled=false; btn.textContent='Masuk';
+      // Notify Telegram about failed login
+      fetch('/api/auth/login-notify', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ email, reason: error.message || 'Unknown' }),
+      }).catch(()=>{});
       return;
     }
     await onAuthSuccess(data.session);
