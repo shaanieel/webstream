@@ -279,16 +279,46 @@ function requestMeta(request) {
   };
 }
 
-function buildAuthTelegramMsg({ type, email, ip, country, city, ua }) {
-  const isRegister = type === 'register';
+function buildAuthTelegramMsg(opts) {
+  const { type, email, ip, country, city, ua, reason } = opts;
+  // REGISTER
+  if (type === 'register') {
+    return [
+      '🆕 <b>USER BARU DAFTAR — ZAEINSTREAM</b>',
+      '━━━━━━━━━━━━━━━━━━━━',
+      `📧 <b>Email</b>     <code>${telegramEsc(email)}</code>`,
+      `🌐 <b>IP</b>        <code>${telegramEsc(ip)}</code>`,
+      `📍 <b>Lokasi</b>    ${telegramEsc(city)}, ${telegramEsc(country)}`,
+      `🖥️ <b>Device</b>    ${telegramEsc(ua)}`,
+      `🕐 <b>Waktu</b>     ${telegramTime()}`,
+      '━━━━━━━━━━━━━━━━━━━━',
+      '<i>zaeinstream.my.id</i>',
+    ].join('\n');
+  }
+  // LOGIN SUCCESS
+  if (type === 'login') {
+    return [
+      '🔐 <b>USER LOGIN — ZAEINSTREAM</b>',
+      '━━━━━━━━━━━━━━━━━━━━',
+      `📧 <b>Email</b>     <code>${telegramEsc(email)}</code>`,
+      `🌐 <b>IP</b>        <code>${telegramEsc(ip)}</code>`,
+      `📍 <b>Lokasi</b>    ${telegramEsc(city)}, ${telegramEsc(country)}`,
+      `🖥️ <b>Device</b>    ${telegramEsc(ua)}`,
+      `🕐 <b>Waktu</b>     ${telegramTime()}`,
+      '━━━━━━━━━━━━━━━━━━━━',
+      '<i>zaeinstream.my.id</i>',
+    ].join('\n');
+  }
+  // LOGIN FAIL
   return [
-    `${isRegister ? 'USER BARU DAFTAR' : 'USER LOGIN'} <b>ZAEINSTREAM</b>`,
+    '⚠️ <b>LOGIN GAGAL — ZAEINSTREAM</b>',
     '━━━━━━━━━━━━━━━━━━━━',
-    `Email  : <code>${telegramEsc(email)}</code>`,
-    `IP     : <code>${telegramEsc(ip)}</code>`,
-    `Lokasi : ${telegramEsc(city)}, ${telegramEsc(country)}`,
-    `Device : ${telegramEsc(ua)}`,
-    `Waktu  : ${telegramTime()}`,
+    `📧 <b>Email</b>     <code>${telegramEsc(email)}</code>`,
+    `❗ <b>Alasan</b>    ${telegramEsc(reason || '-')}`,
+    `🌐 <b>IP</b>        <code>${telegramEsc(ip)}</code>`,
+    `📍 <b>Lokasi</b>    ${telegramEsc(city)}, ${telegramEsc(country)}`,
+    `🖥️ <b>Device</b>    ${telegramEsc(ua)}`,
+    `🕐 <b>Waktu</b>     ${telegramTime()}`,
     '━━━━━━━━━━━━━━━━━━━━',
     '<i>zaeinstream.my.id</i>',
   ].join('\n');
@@ -300,6 +330,25 @@ async function authLoginEventHandler(request, env, ctx) {
   const send = () => sendTelegramNotif(env, buildAuthTelegramMsg({
     type: 'login',
     email: user.email,
+    ...requestMeta(request),
+  }));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(send());
+  else await send();
+  return json({ ok: true });
+}
+
+// POST /api/auth/login-notify — kirim notif Telegram pas LOGIN GAGAL
+// No auth needed (user belum tentu login), tapi kasih rate-limit
+async function authLoginFailNotifyHandler(request, env, ctx) {
+  let body;
+  try { body = await request.json(); } catch { return err('Body harus JSON', 400); }
+  const email = (body && body.email || '').trim().toLowerCase();
+  const reason = (body && body.reason || 'Unknown error').slice(0, 100);
+  if (!email) return err('Email wajib', 400);
+  const send = () => sendTelegramNotif(env, buildAuthTelegramMsg({
+    type: 'loginfail',
+    email,
+    reason,
     ...requestMeta(request),
   }));
   if (ctx && ctx.waitUntil) ctx.waitUntil(send());
@@ -3289,6 +3338,9 @@ export default {
     }
     if (pathname === '/api/auth/login-event' && request.method === 'POST') {
       return authLoginEventHandler(request, env, ctx);
+    }
+    if (pathname === '/api/auth/login-notify' && request.method === 'POST') {
+      return authLoginFailNotifyHandler(request, env, ctx);
     }
 
     // === Admin: films ===
