@@ -2505,20 +2505,17 @@ async function loadNativeDrivePlayer(film){
 
   film._sources = sources;
 
-  // Pilih engine: R2 → Shaka (3), Drive → Vidstack (2), multi-track → Shaka
-  // Same fix as loadVideo(): catalog strips film.video_url for non-admin, so
-  // include _playback.video_url in the R2 detection.
+  // Pilih engine: Simple R2 (1 video) → Vidstack (2) for proper controls.
+  // Multi-video → Shaka (3) for DASH MPD quality switching.
   const isR2 = !!(film.video_url || film.r2_bucket || (film._playback && film._playback.video_url));
 
   try{ teardownEngine1(); }catch{}
   try{ teardownEngine2(); }catch{}
   try{ teardownEngine3(); }catch{}
 
-  // R2 files are progressive MP4s, NOT DASH-segmented — Shaka always fails
-  // with Error 4002. For simple R2 (1 video, 1+ audio), still use engine 3
-  // but it auto-detects and skips the MPD/Shaka path, going straight to
-  // native video + separate audio playback with RAF sync.
-  if(typeof shaka !== 'undefined' && (isR2 || sources.videos.length > 0)){
+  // Simple R2 (1 video, maybe multi-audio) → Engine 2 (Vidstack) for proper controls.
+  // Multi-video or DASH-manifest → Engine 3 (Shaka) for quality switching.
+  if(typeof shaka !== 'undefined' && !isR2 && sources.videos.length > 1){
     activeEngine = 3;
     await loadVideoEngine3(film, sources);
   }else{
