@@ -1867,16 +1867,24 @@ async function openFilm(film, opts){
   try{
     playback = await fetchPlayback(film);
   }catch(e){
-    showToast(e.message, 'error');
-    return;
+    // Guest user yang gak login masih bisa nonton film FREE yang punya R2 source
+    if(film.r2_bucket && film.tier === 'free'){
+      // Lanjut tanpa _playback — loadVideo pake r2_bucket + r2_path langsung
+      playback = null;
+    }else{
+      showToast(e.message, 'error');
+      return;
+    }
   }
-  if(playback.locked){
-    if(playback.reason === 'episode_locked' || playback.reason === 'preview_expired') openAccessModal(film);
-    else showVipLocked(film);
-    showToast(playback.message || 'Konten terkunci', 'error');
-    return;
+  if(playback){
+    if(playback.locked){
+      if(playback.reason === 'episode_locked' || playback.reason === 'preview_expired') openAccessModal(film);
+      else showVipLocked(film);
+      showToast(playback.message || 'Konten terkunci', 'error');
+      return;
+    }
+    currentFilm._playback = playback;
   }
-  currentFilm._playback = playback;
   currentResumeFrom = opts.resumeFrom || 0;
   // Kalau gak ada explicit resume, ambil dari Continue Watching kalau ada
   if(!opts.resumeFrom){
@@ -2386,11 +2394,24 @@ async function _resolveDrivePath(drivePath){
 }
 
 async function loadVideo(film){
-  // Prefer the native in-page player whenever we have a Drive source. Its
-  // controls live in this document, so right-click blocking works without
-  // sacrificing settings/subtitle interaction.
+  // ── HARD DEFENSE: R2 films ALWAYS use native player ──
+  // Any film with r2_bucket set is an R2-sourced film (not Player4Me iframe).
+  // This check runs before everything else to prevent ANY possible path
+  // reaching loadVideoHost for R2 films.
+  if(film && film.r2_bucket){
+    console.log('[loadVideo] FORCE r2_bucket=' + film.r2_bucket + ' → loadNativeDrivePlayer');
+    return loadNativeDrivePlayer(film);
+  }
+
+  // ── Drive-source detection ──
+  // NOTE: catalog strips film.video_url for non-admin users, so we check
+  // both film.video_url AND film._playback.video_url (resolved from /api/playback).
+  const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
+  const isR2VideoUrl = !!(r2VideoUrl && /r2\.dev|\/api\/r2-stream|\.mp4|\.m4a/i.test(String(r2VideoUrl)));
+  const hasR2Source = !!(film.r2_bucket || isR2VideoUrl);
   const hasDriveSource = !!(film && (film.drive_path || film.drive_link || (Array.isArray(film.videos) && film.videos.length)));
-  if(hasDriveSource){
+  console.log('[loadVideo] filmId=' + film.id, 'hasR2=' + hasR2Source, 'hasDrive=' + hasDriveSource, 'r2VideoUrl=' + (r2VideoUrl ? String(r2VideoUrl).slice(0,60) : 'NULL'), 'r2_bucket=' + (film.r2_bucket||'none'), 'playback=' + !!(film._playback));
+  if(hasR2Source || hasDriveSource){
     return loadNativeDrivePlayer(film);
   }
 
@@ -2429,6 +2450,8 @@ function _showLegacyPlayer(){
   if(mp) mp.style.display = '';
   const p2 = document.getElementById('player2Wrap');
   if(p2) p2.style.display = '';
+  const sw = document.getElementById('shakaPlayerWrap');
+  if(sw) sw.style.display = 'none';
   const sp = document.getElementById('subsPanel');
   if(sp) sp.style.display = '';
   const subBtn = document.getElementById('toolBtnSubs');
@@ -2451,7 +2474,9 @@ async function loadNativeDrivePlayer(film){
   const mp = document.getElementById('multitrackPlayer');
   if(mp) mp.style.display = 'none';
   const p2 = document.getElementById('player2Wrap');
-  if(p2) p2.style.display = '';
+  const shakaWrap = document.getElementById('shakaPlayerWrap');
+  if(p2) p2.style.display = 'none';
+  if(shakaWrap) shakaWrap.style.display = 'none';
 
   const subsPanel = document.getElementById('subsPanel');
   if(subsPanel){ subsPanel.classList.remove('open'); subsPanel.style.display = 'none'; }
@@ -2465,17 +2490,45 @@ async function loadNativeDrivePlayer(film){
 
   const sources = await _resolveFilmSources(film);
   if(!sources){
+    // ── HARD DEFENSE: R2 films NEVER fallback to loadVideoHost ──
+    // The old code redirected to loadVideoHost when _playback existed,
+    // which caused "URL video tidak valid" for R2 films because the
+    // host embed URL normalization always fails on R2 URLs.
+    if(film && film.r2_bucket){
+      console.error('[loadNativeDrivePlayer] _resolveFilmSources returned null for R2 film, but ignoring fallback to loadVideoHost');
+      showToast('Gagal memuat sumber video R2. Coba refresh.', 'error');
+      return;
+    }
     if(film && film._playback && film._playback.video_url) return loadVideoHost(film);
     return;
   }
 
   film._sources = sources;
-  activeEngine = 2;
+
+  // Pilih engine: R2 → Shaka (3), Drive → Vidstack (2), multi-track → Shaka
+  // Same fix as loadVideo(): catalog strips film.video_url for non-admin, so
+  // include _playback.video_url in the R2 detection.
+  const isR2 = !!(film.video_url || film.r2_bucket || (film._playback && film._playback.video_url));
+
   try{ teardownEngine1(); }catch{}
   try{ teardownEngine2(); }catch{}
-  await loadVideoEngine2(film, sources);
+  try{ teardownEngine3(); }catch{}
+
+  // R2 files are progressive MP4s, NOT DASH-segmented — Shaka always fails
+  // with Error 4002. For simple R2 (1 video, 1+ audio), still use engine 3
+  // but it auto-detects and skips the MPD/Shaka path, going straight to
+  // native video + separate audio playback with RAF sync.
+  if(typeof shaka !== 'undefined' && (isR2 || sources.videos.length > 0)){
+    activeEngine = 3;
+    await loadVideoEngine3(film, sources);
+  }else{
+    activeEngine = 2;
+    if(p2) p2.style.display = '';
+    await loadVideoEngine2(film, sources);
+  }
+
   if(sources.videos && sources.videos[0] && sources.videos[0].path){
-    setStreamActions(sources.videos[0].path, film.judul || film.title || '');
+    try{ setStreamActions(sources.videos[0].path, film.judul || film.title || ''); }catch(e){}
   }
   armPreviewGate(film);
 }
@@ -2554,7 +2607,17 @@ async function loadVideoHost(film){
   fr.dataset.currentSrc = '';
   fr.style.display = 'none';
   setHostContextShield(false);
-  showToast('URL video film ini tidak valid. Hubungi admin untuk memperbaiki.', 'error');
+  // DEBUG: trace why normalize failed
+  const _dbg = {
+    filmId: film.id,
+    hasVideoUrl: !!film.video_url,
+    hasPlayback: !!(film._playback),
+    playbackVideoUrl: film._playback ? film._playback.video_url : null,
+    rawVideoUrl: rawVideoUrl,
+    tier: currentPlayerTier,
+  };
+  console.error('[loadVideoHost] normalize failed', _dbg);
+  showToast('URL video tidak valid. [DEBUG] video_url=' + (film.video_url ? 'YES' : 'NO') + ' _playback=' + (film._playback ? 'YES' : 'NO') + ' pb_url=' + (film._playback && film._playback.video_url ? String(film._playback.video_url).slice(0, 50) : 'NULL'), 'error');
 }
   }
 
@@ -2631,23 +2694,65 @@ function _normalizeHostEmbedUrl(rawUrl, vipMode){
   const id = _extractHostId(rawUrl);
   if(!id) return '';
 
-  const rawDom = vipMode
+  // If rawUrl already has a full domain (https://custom-domain/#id),
+  // use it directly — no CONFIG lookup needed.
+  // CONFIG.video_host_domain was removed with player4me_domains table (migration 0014).
+  var _srcUrl = String(rawUrl).trim();
+  var _ifm = _srcUrl.match(/<\s*iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i);
+  if(_ifm) _srcUrl = _ifm[1].trim();
+  if(/^https?:\/\//i.test(_srcUrl)){
+    // Strip trailing /#id or /id from original URL, append our id
+    return _srcUrl.replace(/#\/?[A-Za-z0-9_-]+$/, '') + '/#' + id;
+  }
+
+  // Fallback for bare ids: use CONFIG lookup
+  var rawDom = vipMode
     ? ((CONFIG && CONFIG.player4me_vip_domain) || (CONFIG && CONFIG.video_host_domain) || '')
     : ((CONFIG && CONFIG.player4me_basic_domain) || (CONFIG && CONFIG.video_host_domain) || '');
-
-  const customDomain = String(rawDom)
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/\/$/, '');
-
+  var customDomain = String(rawDom).trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
   if(!customDomain) return '';
-
   return 'https://' + customDomain + '/#' + id;
 }
 
 async function _resolveFilmSources(film){
   // ── Build videos array (multi-resolution) ──
   const videos = [];
+  // ── R2 source: map video_url / r2_bucket+r2_path / audio_url / subtitle_urls ke arrays ──
+  // Catalog strips video_url for non-admin → fallback to playback response or r2_bucket+r2_path
+  const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
+  const r2RawPath = (film.r2_bucket && film.r2_path) ? ('/api/r2-stream/' + film.r2_bucket + '/' + film.r2_path + '/video/video.mp4') : null;
+  if((r2VideoUrl || r2RawPath) && !videos.length){
+    // R2 video (maybe muxed with audio tracks embedded)
+    // Proxy via /api/r2-stream/ to bypass CORS
+    // When r2_bucket is set, r2VideoUrl might be a Player4Me embed URL (admin),
+    // so prefer r2RawPath (built from r2_bucket+r2_path) which is always correct.
+    var r2ProxiedUrl = r2RawPath;
+    if(!r2ProxiedUrl && r2VideoUrl) r2ProxiedUrl = r2VideoUrl.replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
+    videos.push({ name: 'R2 Video', path: r2ProxiedUrl });
+    // Audio tracks: check film.audio_tracks first, or parse film.audio_url
+    if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length){
+      if(film.audio_url){
+        // legacy single audio URL, proxy via /media-proxy/
+        const ap = film.audio_url.replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
+        try{ film.audio_tracks = [{ name: 'Audio R2', url: ap, language: 'und' }]; }catch(e){}
+      }
+    }
+    // Subtitles: check film.subtitles first, or parse film.subtitle_urls (JSON string)
+    if(!Array.isArray(film.subtitles) || !film.subtitles.length){
+      if(film.subtitle_urls){
+        try{
+          let parsed = film.subtitle_urls;
+          if(typeof parsed === 'string') parsed = JSON.parse(parsed);
+          if(Array.isArray(parsed)){
+            film.subtitles = parsed.map(function(s,i){
+              const su = (s.url || '').replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
+              return { name: s.label || s.language || ('Sub '+(i+1)), url: su, language: s.language || '' };
+            });
+          }
+        }catch(e){}
+      }
+    }
+  }
   if(Array.isArray(film.videos)){
     for(const v of film.videos){
       if(!v) continue;
@@ -2677,11 +2782,11 @@ async function _resolveFilmSources(film){
     for(const t of film.audio_tracks){
       if(!t) continue;
       const url = t.url || t.stream_url || await _resolveDrivePath(t.drive_path);
-      if(url) audios.push({ name: t.name || t.language || 'Audio', path: url });
+      if(url) audios.push({ name: t.name || t.language || 'Audio', path: url, language: t.language || 'und' });
     }
   }
   if(!audios.length){
-    audios.push({ name: 'Original', path: videos[0].path });
+    audios.push({ name: 'Original', path: videos[0].path, language: 'und' });
   }
   // ── Build subtitles array ──
   // Merges manual subtitles (from admin upload) with auto-extracted subtitles
@@ -2769,6 +2874,8 @@ function teardownEngine2(){
     }
     if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
     if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+    const p2ov=document.getElementById('p2OverlayMenus');
+    if(p2ov) try{ p2ov.remove(); }catch{}
     if(p2State.mse){
       p2State.mse.teardown = true;
       try{ p2State.mse.ms.endOfStream(); }catch{}
@@ -2845,11 +2952,12 @@ async function loadVideoEngine1(film, sources){
 
 // ── Stream actions: download + external player URL schemes ──
 function setStreamActions(url, title, downloadToken){
+  const dl = document.getElementById('streamDlBtn');
+  if(!dl){ return; } // Stream actions HTML removed — skip gracefully
   if(!url){ document.getElementById('streamActions').style.display='none'; return; }
   const enc = encodeURIComponent(title || '');
   let b64 = '';
   try{ b64 = btoa(unescape(encodeURIComponent(url))); }catch{}
-  const dl = document.getElementById('streamDlBtn');
   dl.href = url;
   dl.dataset.downloadToken = downloadToken || '';
   // Hint filename agar browser pakai nama film, bukan "download.aspx"
@@ -3019,6 +3127,8 @@ async function loadVideoEngine2(film, sources){
     }
     if(p2State.qualityChip){ try{ p2State.qualityChip.remove(); }catch{} }
     if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} }
+    const p2ov=document.getElementById('p2OverlayMenus');
+    if(p2ov) try{ p2ov.remove(); }catch{}
     if(p2State.mse){
       p2State.mse.teardown = true;
       try{ p2State.mse.ms.endOfStream(); }catch{}
@@ -3091,13 +3201,34 @@ async function loadVideoEngine2(film, sources){
   const provider = player.querySelector('media-provider');
   if(provider){
     provider.querySelectorAll('track').forEach(t=>t.remove());
-    for(const t of trackEntries){
-      const tr = document.createElement('track');
-      tr.kind = 'subtitles';
-      tr.src = t.src;
-      tr.label = t.label;
-      if(t.language) tr.srclang = t.language;
-      provider.appendChild(tr);
+  }
+  // Also register subtitles via Vidstack API so hasCaptions()=true
+  // and the built-in captions menu appears in the settings gear.
+  // Clear old text tracks first.
+  try{
+    while(player.textTracks && player.textTracks.length){
+      player.textTracks.remove(0);
+    }
+  }catch(e){}
+  for(const t of trackEntries){
+    try{
+      player.textTracks.add({
+        src: t.src,
+        label: t.label,
+        language: t.language || 'und',
+        kind: 'subtitles',
+      });
+    }catch(e){
+      console.warn('[p2] textTracks.add failed:', e);
+      // Fallback: raw <track> element in provider
+      if(provider){
+        const tr = document.createElement('track');
+        tr.kind = 'subtitles';
+        tr.src = t.src;
+        tr.label = t.label;
+        if(t.language) tr.srclang = t.language;
+        provider.appendChild(tr);
+      }
     }
   }
 
@@ -3145,30 +3276,62 @@ async function loadVideoEngine2(film, sources){
   setStreamActions(videos[0].path, film.judul || film.title || '');
 }
 
+/* ─── P2 Overlay Menus — Audio & Quality buttons inside the player ─── */
+// Creates or updates overlay audio/quality buttons on the player.
+// These appear in the top-right area of the player (same zone as Vidstack's gear).
+function _p2InjectOverlays(){
+  const old = document.getElementById('p2OverlayMenus');
+  if(old) old.remove();
+  const wrap = document.getElementById('player2Wrap');
+  if(!wrap || !p2State) return;
+  const hasMultiAudio = p2State.audios && p2State.audios.length > 1 && p2State._useAux;
+  const hasMultiVideo = p2State.videos && p2State.videos.length > 1;
+  const hasMseAudio = p2State.mse && p2State.mse.audioTracks && p2State.mse.audioTracks.length > 1;
+  if(!hasMultiAudio && !hasMultiVideo && !hasMseAudio) return;
+  const div = document.createElement('div');
+  div.id = 'p2OverlayMenus';
+  // Audio button (aux multi-dub)
+  if(hasMultiAudio){
+    const label = p2State.audios[p2State.audioIdx]?.name || ('Audio '+(p2State.audioIdx+1));
+    const dd = _p2BuildOverlayDropdown(label, p2State.audios.map((a,i)=>({label:a.name||('Audio '+(i+1)),active:i===p2State.audioIdx,onSelect:()=>{_p2SwitchAudio(i);_p2InjectOverlays();}})));
+    div.appendChild(dd);
+  }
+  // Audio button (MSE embedded multi-audio)
+  if(hasMseAudio){
+    const mse=p2State.mse; const at=mse.audioTracks.find(t=>t.id===mse.activeAudioId);
+    const label=(at?.name||at?.language||'').replace(/und/i,'').trim()||'Audio1';
+    const dd=_p2BuildOverlayDropdown(label,mse.audioTracks.map((t,i)=>({label:(t.name||t.language||'A'+(i+1)).replace(/und/i,'').trim().toUpperCase()||'A'+(i+1),active:t.id===mse.activeAudioId,onSelect:()=>{_p2MseSwitchAudio(t.id).catch(console.error);}})));
+    div.appendChild(dd);
+  }
+  // Quality button
+  if(hasMultiVideo){
+    const label=p2State.videos[p2State.qualityIdx]?.name||('Q'+(p2State.qualityIdx+1));
+    const dd=_p2BuildOverlayDropdown(label,p2State.videos.map((v,i)=>({label:v.name||'Kualitas '+(i+1),active:i===p2State.qualityIdx,onSelect:()=>{_p2SwitchQuality(i);_p2InjectOverlays();}})));
+    div.appendChild(dd);
+  }
+  wrap.appendChild(div);
+}
+// Build a single dropdown button (label + chevron + dropdown menu)
+function _p2BuildOverlayDropdown(currentLabel, items){
+  const c=document.createElement('div'); c.className='p2-overlay-dropdown';
+  const btn=document.createElement('button'); btn.className='p2-overlay-btn';
+  btn.innerHTML='<span class="p2-overlay-label">'+currentLabel+'</span><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" class="p2-overlay-chevron"><path d="M7 10l5 5 5-5z"/></svg>';
+  const menu=document.createElement('div'); menu.className='p2-overlay-menu';
+  for(let i=0;i<items.length;i++){
+    const it=items[i],el=document.createElement('div'); el.className='p2-overlay-item'+(it.active?' active':'');
+    el.textContent=it.label; el.addEventListener('click',e=>{e.stopPropagation();c.classList.remove('open');it.onSelect();});
+    menu.appendChild(el);
+  }
+  btn.addEventListener('click',e=>{e.stopPropagation();c.classList.toggle('open');});
+  function ch(e){if(!c.contains(e.target))c.classList.remove('open');}
+  document.addEventListener('click',ch); c._p2CloseHandler=ch;
+  c.appendChild(btn); c.appendChild(menu); return c;
+}
+
 function _p2WireVidstack(player, aux, film){
-  // Build extra chips (Quality + Audio) inside the engine toolbar so users
-  // can switch even though Vidstack's built-in menu can't auto-detect them
-  // for native MP4 sources.
-  const bar = document.getElementById('playerEngineBar');
-  if(bar && p2State){
-    if(p2State.videos.length > 1){
-      const chip = _p2BuildChip('Kualitas', p2State.videos.map((q, i)=>({
-        label: q.name || ('Quality ' + (i+1)),
-        active: i === p2State.qualityIdx,
-        onSelect: ()=>{ _p2SwitchQuality(i); },
-      })));
-      bar.appendChild(chip);
-      p2State.qualityChip = chip;
-    }
-    if(p2State.audios.length > 1){
-      const chip = _p2BuildChip('Audio', p2State.audios.map((a, i)=>({
-        label: a.name || ('Audio ' + (i+1)),
-        active: i === p2State.audioIdx,
-        onSelect: ()=>{ _p2SwitchAudio(i); },
-      })));
-      bar.appendChild(chip);
-      p2State.audioChip = chip;
-    }
+  // Inject custom audio & quality overlays INTO the player (top-right area)
+  if(p2State){
+    _p2InjectOverlays();
   }
 
   // When aux audio is in use, mute provider so only <audio> drives sound.
@@ -3372,23 +3535,8 @@ async function _p2TryMseMode(player, url){
   };
   p2State.mse = mseState;
 
-  // Override the audio chip with track names from the demuxed MP4
-  if(p2State.audioChip){ try{ p2State.audioChip.remove(); }catch{} p2State.audioChip = null; }
-  const bar = document.getElementById('playerEngineBar');
-  if(bar){
-    const items = audioTracks.map((t, i)=>{
-      const lang = (t.language || '').replace(/und/i,'').trim();
-      const label = (t.name || lang || ('Audio '+(i+1))).toUpperCase();
-      return {
-        label,
-        active: t.id === mseState.activeAudioId,
-        onSelect: ()=>{ _p2MseSwitchAudio(t.id).catch(e=>console.error(e)); },
-      };
-    });
-    const chip = _p2BuildChip('Audio', items);
-    bar.appendChild(chip);
-    p2State.audioChip = chip;
-  }
+  // Refresh overlay buttons instead of building external chips
+  _p2InjectOverlays();
 
   await new Promise((resolve)=>{
     ms.addEventListener('sourceopen', ()=>{
@@ -3628,6 +3776,673 @@ function _p2AssToVtt(ass){
     }
   }
   return out.join('\n');
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// ENGINE 3 — Shaka Player (multi-track, multi-audio, multi-sub native)
+// ════════════════════════════════════════════════════════════════════
+let shakaPlayer = null;
+let shakaState = null;
+let shakaUi = null;
+const _manifestStore = {};
+
+// Escape XML special chars for MPD generation
+function escXml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;'); }
+
+// ── Probe MP4 init range (ftyp + moov) for correct DASH SegmentBase ──
+async function _probeMp4InitRange(url){
+  try{
+    const resp = await fetch(url, { headers: { Range: 'bytes=0-63' } });
+    const buf = await resp.arrayBuffer();
+    const dv = new DataView(buf);
+    // Parse ftyp box
+    const ftypSize = dv.getUint32(0);
+    if(ftypSize < 8 || ftypSize > 64) return null;
+    // Parse moov box (right after ftyp)
+    const moovOffset = ftypSize;
+    if(moovOffset + 8 > buf.byteLength) return null;
+    const moovSize = dv.getUint32(moovOffset);
+    const moovType = String.fromCharCode(
+      dv.getUint8(moovOffset+4), dv.getUint8(moovOffset+5),
+      dv.getUint8(moovOffset+6), dv.getUint8(moovOffset+7)
+    );
+    if(moovType !== 'moov') return null;
+    return '0-' + (ftypSize + moovSize - 1);
+  }catch(e){
+    console.warn('MP4 probe failed for', url, e);
+    return null;
+  }
+}
+
+// ── Convert SRT subtitle to VTT blob URL ──
+async function _srtToVttBlobUrl(srtUrl){
+  try{
+    const resp = await fetch(srtUrl);
+    const srt = await resp.text();
+    // SRT → VTT: add WEBVTT header, replace comma with dot in timestamps
+    const vtt = 'WEBVTT\n\n' + srt
+      .replace(/\r\n/g, '\n')
+      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+    const blob = new Blob([vtt], { type: 'text/vtt' });
+    return URL.createObjectURL(blob);
+  }catch(e){
+    console.warn('SRT→VTT conversion failed:', e);
+    return null;
+  }
+}
+
+// ── Language display name mapping ──
+function _langName(lang, fallback){
+  const M = { id:'Indonesia', en:'English', ja:'Japanese', ko:'Korean', zh:'Chinese', ar:'Arabic', und:'Original', hi:'Hindi', th:'Thai', vi:'Vietnamese', ms:'Melayu', fr:'French', es:'Spanish', de:'German', ru:'Russian', pt:'Portuguese', tr:'Turkish' };
+  return M[(lang||'').toLowerCase()] || fallback || 'Track';
+}
+
+// ── VTT time parser for fallback subtitle overlay ──
+function _parseVttTime(t){
+  var parts = t.split(':');
+  if(parts.length === 3){
+    return parseFloat(parts[0])*3600 + parseFloat(parts[1])*60 + parseFloat(parts[2].replace(',','.'));
+  }else if(parts.length === 2){
+    return parseFloat(parts[0])*60 + parseFloat(parts[1].replace(',','.'));
+  }
+  return parseFloat(t.replace(',','.')) || 0;
+}
+
+// ── Inject custom audio/subtitle track controls (always visible) ──
+// Shaka UI auto-hides audio_language/text_language buttons when ≤1 track.
+// This builds custom dropdowns that always show, with proper display names.
+function _injectTrackControls(wrap, player, audios, vttSubs, fallbackObj){
+  // Remove existing custom controls
+  const ex = wrap.querySelector('.ctc');
+  if(ex) ex.remove();
+  if(!audios.length && !vttSubs.length) return;
+
+  // Ensure wrap is positioned for absolute overlay
+  if(getComputedStyle(wrap).position === 'static'){
+    wrap.style.position = 'relative';
+  }
+
+  const div = document.createElement('div');
+  div.className = 'ctc';
+  div.innerHTML = '<style>' +
+    '.ctc { position:absolute; bottom:52px; right:12px; display:flex; gap:8px; z-index:25; }' +
+    '.ctc .tc { position:relative; }' +
+    '.ctc .tb { background:rgba(0,0,0,.7); color:#fff; border:1px solid rgba(255,255,255,.25); border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:5px; font-family:inherit; white-space:nowrap; }' +
+    '.ctc .tb:hover { background:rgba(0,0,0,.9); }' +
+    '.ctc .tm { display:none; position:absolute; bottom:100%; right:0; margin-bottom:4px; background:rgba(0,0,0,.95); border:1px solid rgba(255,255,255,.2); border-radius:6px; min-width:130px; max-height:220px; overflow-y:auto; z-index:26; }' +
+    '.ctc .tm.o { display:block; }' +
+    '.ctc .to { padding:8px 14px; color:#fff; font-size:12px; cursor:pointer; white-space:nowrap; }' +
+    '.ctc .to:hover { background:rgba(255,255,255,.15); }' +
+    '.ctc .to.a { background:rgba(100,149,237,.3); font-weight:600; }' +
+    '</style>';
+
+  function closeAllMenus(){
+    div.querySelectorAll('.tm').forEach(function(m){ m.classList.remove('o'); });
+  }
+
+  // Audio control
+  if(audios.length){
+    const tc = document.createElement('div');
+    tc.className = 'tc';
+    var audioBtn = document.createElement('button');
+    audioBtn.className = 'tb';
+    var a0 = audios[0];
+    var a0name = _langName(a0.language, a0.name);
+    audioBtn.innerHTML = '<span>🎤</span><span class="tn">' + a0name + '</span>';
+    var audioMenu = document.createElement('div');
+    audioMenu.className = 'tm';
+    audios.forEach(function(a, i){
+      var opt = document.createElement('div');
+      opt.className = 'to' + (i === 0 ? ' a' : '');
+      var dn = _langName(a.language, a.name);
+      opt.textContent = dn;
+      opt.addEventListener('click', function(e){
+        e.stopPropagation();
+        try{ player.selectAudioLanguage(a.language || 'und'); }catch(err){ console.warn('audio select failed', err); }
+        audioBtn.querySelector('.tn').textContent = dn;
+        audioMenu.querySelectorAll('.to').forEach(function(o){ o.classList.remove('a'); });
+        opt.classList.add('a');
+        closeAllMenus();
+      });
+      audioMenu.appendChild(opt);
+    });
+    audioBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var open = audioMenu.classList.contains('o');
+      closeAllMenus();
+      if(!open) audioMenu.classList.add('o');
+    });
+    tc.appendChild(audioBtn);
+    tc.appendChild(audioMenu);
+    div.appendChild(tc);
+  }
+
+  // Subtitle control
+  // ── Null-guard: player may be null (Engine3 fallback path) ──
+  var _playerHasTextTracks = player && typeof player.getTextTracks === 'function';
+  if(vttSubs.length && _playerHasTextTracks){
+    var textTracks = player.getTextTracks();
+    var subBtn = document.createElement('button');
+    subBtn.className = 'tb';
+    subBtn.innerHTML = '<span>💬</span><span class="tn">Off</span>';
+    var subMenu = document.createElement('div');
+    subMenu.className = 'tm';
+
+    var offOpt = document.createElement('div');
+    offOpt.className = 'to a';
+    offOpt.textContent = 'Off';
+    offOpt.addEventListener('click', function(e){
+      e.stopPropagation();
+      try{ player.setTextTrackVisibility(false); }catch(err){}
+      subBtn.querySelector('.tn').textContent = 'Off';
+      subMenu.querySelectorAll('.to').forEach(function(o){ o.classList.remove('a'); });
+      offOpt.classList.add('a');
+      closeAllMenus();
+    });
+    subMenu.appendChild(offOpt);
+
+    vttSubs.forEach(function(s, i){
+      var opt = document.createElement('div');
+      opt.className = 'to';
+      var dn = _langName(s.language, s.label);
+      opt.textContent = dn;
+      opt.addEventListener('click', function(e){
+        e.stopPropagation();
+        // Use selectTextTrack with track object (more reliable than selectTextLanguage)
+        var track = textTracks[i];
+        if(track){
+          try{ player.selectTextTrack(track); }catch(err){
+            // Fallback: selectTextLanguage
+            try{ player.selectTextLanguage(s.language || 'und'); }catch(err2){}
+          }
+        } else {
+          try{ player.selectTextLanguage(s.language || 'und'); }catch(err){}
+        }
+        try{ player.setTextTrackVisibility(true); }catch(err){}
+        subBtn.querySelector('.tn').textContent = dn;
+        subMenu.querySelectorAll('.to').forEach(function(o){ o.classList.remove('a'); });
+        opt.classList.add('a');
+        closeAllMenus();
+      });
+      subMenu.appendChild(opt);
+    });
+
+    // Check initial subtitle state (Shaka may auto-enable via preferredTextLanguage)
+    try{
+      if(player.isTextTrackVisible() && textTracks.length){
+        var activeT = textTracks.find(function(t){ return t.active === true; });
+        if(activeT){
+          var idx = textTracks.indexOf(activeT);
+          if(idx >= 0 && idx < vttSubs.length){
+            subBtn.querySelector('.tn').textContent = _langName(vttSubs[idx].language, vttSubs[idx].label);
+            subMenu.querySelectorAll('.to').forEach(function(o){ o.classList.remove('a'); });
+            subMenu.children[idx + 1].classList.add('a'); // +1 offset for "Off" option
+          }
+        }
+      }
+    }catch(e){}
+
+    subBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var open = subMenu.classList.contains('o');
+      closeAllMenus();
+      if(!open) subMenu.classList.add('o');
+    });
+
+    var stc = document.createElement('div');
+    stc.className = 'tc';
+    stc.appendChild(subBtn);
+    stc.appendChild(subMenu);
+    div.appendChild(stc);
+  }
+
+  // Close menus on outside click (auto-cleans when div removed)
+  document.addEventListener('click', function handler(){
+    if(!div.parentNode){
+      document.removeEventListener('click', handler);
+      return;
+    }
+    closeAllMenus();
+  });
+
+  wrap.appendChild(div);
+}
+
+// ── Native fallback for R2 files (play video + separate audio with RAF sync) ──
+var _fallbackAudioEl = null;
+var _fallbackAudioIdx = 0;
+var _fallbackRafId = null;
+var _fallbackSyncActive = false;
+
+function _startFallbackSync(audioEl, videoEl){
+  _fallbackAudioEl = audioEl;
+  function syncLoop(){
+    if(!_fallbackSyncActive || !videoEl || !audioEl || !audioEl.src){ _fallbackRafId = null; return; }
+    // Precise RAF-based sync: correct drift every frame
+    if(audioEl.readyState >= 2 && videoEl.readyState >= 2){
+      var diff = audioEl.currentTime - videoEl.currentTime;
+      if(Math.abs(diff) > 0.3){
+        audioEl.currentTime = videoEl.currentTime;
+      }
+    }
+    _fallbackRafId = requestAnimationFrame(syncLoop);
+  }
+  _fallbackSyncActive = true;
+  if(_fallbackRafId) cancelAnimationFrame(_fallbackRafId);
+  _fallbackRafId = requestAnimationFrame(syncLoop);
+}
+
+function _stopFallbackSync(){
+  _fallbackSyncActive = false;
+  if(_fallbackRafId){ cancelAnimationFrame(_fallbackRafId); _fallbackRafId = null; }
+}
+
+function _nativeFallback(video, videos, audios){
+  // Enable native HTML5 controls since Shaka UI overlay is not available
+  video.controls = true;
+  if(videos.length){
+    video.src = videos[0].path;
+    video.load();
+  }
+  if(audios.length && audios[0].path !== (videos[0] && videos[0].path)){
+    try{
+      const audioEl = document.getElementById('shakaAudio') || document.createElement('audio');
+      audioEl.id = 'shakaAudio';
+      audioEl.crossOrigin = 'anonymous';
+      audioEl.src = audios[0].path;
+      audioEl.preload = 'auto';
+      audioEl.loop = false;
+      _fallbackAudioEl = audioEl;
+      video.addEventListener('play', function(){ audioEl.play().catch(function(){}); });
+      video.addEventListener('pause', function(){ audioEl.pause(); });
+      video.addEventListener('seeking', function(){ audioEl.currentTime = video.currentTime; });
+      video.addEventListener('ended', function(){ audioEl.pause(); audioEl.currentTime = 0; });
+      audioEl.addEventListener('ended', function(){ video.pause(); });
+      _startFallbackSync(audioEl, video);
+      audioEl.play().catch(function(){});
+      video.addEventListener('volumechange', function(){
+        audioEl.volume = video.volume;
+        audioEl.muted = video.muted;
+      });
+      audioEl.volume = video.volume;
+      audioEl.muted = video.muted;
+    }catch(audioErr){
+      console.warn('Fallback audio failed:', audioErr);
+    }
+  }
+}
+
+async function loadVideoEngine3(film, sources){
+  const { videos, audios, subtitles } = sources;
+  const wrap = document.getElementById('shakaPlayerWrap');
+  const video = document.getElementById('shakaVideo');
+  if(!wrap || !video){ console.error('Shaka DOM missing'); return; }
+
+  // Hide other engines
+  const p2 = document.getElementById('player2Wrap');
+  const mp = document.getElementById('multitrackPlayer');
+  if(p2) p2.style.display = 'none';
+  if(mp) mp.style.display = 'none';
+  wrap.style.display = 'block';
+
+  // Cleanup previous instance
+  if(shakaPlayer){
+    try{ await shakaPlayer.destroy(); }catch(e){}
+    shakaPlayer = null;
+  }
+  if(shakaUi){
+    try{ shakaUi.destroy(); }catch(e){}
+    shakaUi = null;
+  }
+  // Cleanup old VTT blob URLs
+  if(_manifestStore.vttUrls){
+    for(const u of _manifestStore.vttUrls){ try{ URL.revokeObjectURL(u); }catch(e){} }
+  }
+  _manifestStore.vttUrls = [];
+
+  // Install shaka polyfills
+  shaka.polyfill.installAll();
+
+  shakaPlayer = new shaka.Player();
+
+  // Request filter: blob: URLs don't support HEAD → convert to GET
+  // Note: /api/r2-stream/ HEAD handled by worker (returns 200 + Content-Length)
+  const _netEngine = shakaPlayer.getNetworkingEngine();
+  if(_netEngine){
+    _netEngine.registerRequestFilter(function(type, request, context){
+      if(request.method === 'HEAD' && request.uris){
+        for(var i = 0; i < request.uris.length; i++){
+          if(request.uris[i].indexOf('blob:') === 0){
+            request.method = 'GET';
+            break;
+          }
+        }
+      }
+    });
+  }
+
+  // ═══ Probe MP4 init ranges for video & audio files ═══
+  const videoInits = [];
+  for(let i = 0; i < videos.length; i++){
+    const ir = await _probeMp4InitRange(videos[i].path);
+    videoInits.push(ir);
+    console.log('Video init range for', videos[i].name, ':', ir);
+  }
+  const audioInits = [];
+  for(let i = 0; i < audios.length; i++){
+    const ir = await _probeMp4InitRange(audios[i].path);
+    audioInits.push(ir);
+    console.log('Audio init range for', audios[i].name, ':', ir);
+  }
+
+  // ═══ Convert SRT subtitles to VTT blob URLs ═══
+  const vttSubs = [];
+  for(let i = 0; i < subtitles.length; i++){
+    const s = subtitles[i];
+    const vttUrl = await _srtToVttBlobUrl(s.path);
+    if(vttUrl){
+      vttSubs.push({ url: vttUrl, language: s.language || 'und', label: s.name || s.language || ('Sub ' + (i+1)) });
+      _manifestStore.vttUrls.push(vttUrl);
+    }
+  }
+
+  // ═══ Build DASH MPD ═══
+
+  // Profile: isoff-main (progressive MP4, no SIDX required).
+  // Previous bug: used isoff-on-demand + indexRange=initRange → Shaka tried
+  // to parse SIDX from moov box → audio/video failed to load → no sound.
+  // Fix: use <SegmentBase><Initialization range="X"/></SegmentBase> WITHOUT
+  // indexRange → Shaka treats as progressive single-segment download.
+
+  // ═══ Inject custom controls BEFORE Shaka (so they always show) ═══
+  var _fallbackCtrl = {
+    switchAudio: function(idx, track, displayName, btn, menu){
+      _fallbackAudioIdx = idx;
+      if(_fallbackAudioEl && _fallbackAudioEl.src !== track.path){
+        var wasPlaying = _fallbackAudioEl && !_fallbackAudioEl.paused;
+        var ct = video.currentTime;
+        _fallbackAudioEl.src = track.path;
+        _fallbackAudioEl.load();
+        _fallbackAudioEl.currentTime = ct;
+        if(wasPlaying) _fallbackAudioEl.play().catch(function(){});
+      }
+    },
+    setSubVisibility: function(show, btn, menu, idx, track){
+      // VTT subtitles via overlay
+      var existing = video.parentNode.querySelector('.fb-sub-overlay');
+      if(existing) existing.remove();
+      if(show && track){
+        var overlay = document.createElement('div');
+        overlay.className = 'fb-sub-overlay';
+        overlay.style.cssText = 'position:absolute;bottom:80px;left:0;right:0;text-align:center;z-index:24;pointer-events:none;color:#fff;font-size:18px;text-shadow:2px 2px 4px rgba(0,0,0,.8);';
+        video.parentNode.appendChild(overlay);
+        // Simple VTT parser for display
+        fetch(track.url).then(function(r){ return r.text(); }).then(function(vtt){
+          var cues = [];
+          var lines = vtt.split('\n');
+          var i = 0;
+          while(i < lines.length){
+            if(lines[i].indexOf('-->') >= 0){
+              var parts = lines[i].split('-->');
+              var start = _parseVttTime(parts[0].trim());
+              var end = _parseVttTime(parts[1].trim());
+              var text = '';
+              i++;
+              while(i < lines.length && lines[i].trim() !== '' && lines[i].indexOf('-->') < 0){
+                text += lines[i] + ' ';
+                i++;
+              }
+              if(text.trim()) cues.push({s: start, e: end, t: text.trim()});
+            }
+            i++;
+          }
+          var lastCue = '';
+          video.addEventListener('timeupdate', function(){
+            var ct = video.currentTime;
+            var found = null;
+            for(var j = 0; j < cues.length; j++){
+              if(ct >= cues[j].s && ct <= cues[j].e){ found = cues[j].t; break; }
+            }
+            if(found !== lastCue){
+              overlay.textContent = found || '';
+              lastCue = found;
+            }
+          });
+        }).catch(function(){});
+      }
+    }
+  };
+  _injectTrackControls(wrap, null, audios, vttSubs, _fallbackCtrl);
+  // For simple R2 (1 video + separate audio), skip Shaka entirely.
+  // Progressive MP4 can't form a valid DASH MPD — Shaka Error 4002 is inevitable.
+  if(film && film.r2_bucket && videos.length === 1 && audios.length >= 1){
+    console.log('[Engine3] Simple R2 detected — skipping Shaka MPD, using native fallback (subtitles via _fallbackCtrl)');
+    _nativeFallback(video, videos, audios);
+    shakaState = { film, videos, audios, subtitles, qualityIdx: 0, audioIdx: 0 };
+    return;
+  }
+
+  try{
+    var mpd = '<?xml version="1.0" encoding="utf-8"?>';
+    mpd += '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-main:2011" type="static" mediaPresentationDuration="PT3600S">';
+    mpd += '<Period id="1">';
+
+    // Video AdaptationSet
+    if(videos.length){
+      mpd += '<AdaptationSet contentType="video" mimeType="video/mp4" startWithSAP="1" segmentAlignment="true">';
+      for(let i = 0; i < videos.length; i++){
+        const v = videos[i];
+        let width = 1920, height = 1080;
+        const nm = (v.name || '').toLowerCase();
+        if(nm.includes('720')){ width = 1280; height = 720; }
+        else if(nm.includes('480')){ width = 854; height = 480; }
+        else if(nm.includes('360')){ width = 640; height = 360; }
+        const ir = videoInits[i] || '0-1000';
+        mpd += '<Representation id="v'+i+'" bandwidth="3000000" width="'+width+'" height="'+height+'" codecs="avc1.640028">';
+        mpd += '<BaseURL>'+escXml(v.path)+'</BaseURL>';
+        mpd += '<SegmentBase>';
+        mpd += '<Initialization range="'+ir+'"/>';
+        mpd += '</SegmentBase>';
+        mpd += '</Representation>';
+      }
+      mpd += '</AdaptationSet>';
+    }
+
+    // Audio AdaptationSet
+    if(audios.length){
+      mpd += '<AdaptationSet contentType="audio" mimeType="audio/mp4" startWithSAP="1" segmentAlignment="true">';
+      for(let i = 0; i < audios.length; i++){
+        const a = audios[i];
+        const lang = a.language || 'und';
+        const label = a.name || ('Audio ' + (i+1));
+        const ir = audioInits[i] || '0-500';
+        mpd += '<Representation id="a'+i+'" bandwidth="128000" codecs="mp4a.40.2" audioSamplingRate="44100" lang="'+escXml(lang)+'">';
+        mpd += '<Label>'+escXml(label)+'</Label>';
+        mpd += '<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration" value="2"/>';
+        mpd += '<BaseURL>'+escXml(a.path)+'</BaseURL>';
+        mpd += '<SegmentBase>';
+        mpd += '<Initialization range="'+ir+'"/>';
+        mpd += '</SegmentBase>';
+        mpd += '</Representation>';
+      }
+      mpd += '</AdaptationSet>';
+    }
+
+    // NOTE: Subtitles are NOT in the DASH MPD. Blob URLs don't work reliably
+    // in DASH text AdaptationSet context. Instead, add them via
+    // addTextTrackAsync() after Shaka load — more reliable, and the
+    // text_language UI button appears automatically when tracks exist.
+
+    mpd += '</Period></MPD>';
+
+    // Create blob URL for MPD
+    // ⚠️ BaseURL is relative (/api/r2-stream/...) — Shaka resolves it against the blob: URL
+    // which fails (blob: has no origin-based resolution). Fix: make BaseURL absolute.
+    if(_manifestStore.blobUrl){ try{ URL.revokeObjectURL(_manifestStore.blobUrl); }catch(e){} }
+    const origin = window.location.origin;
+    mpd = mpd.replace(/(<BaseURL>)(\/api\/r2-stream\/)/g, '$1' + origin + '$2');
+    const blob = new Blob([mpd], { type: 'application/dash+xml' });
+    _manifestStore.blobUrl = URL.createObjectURL(blob);
+
+    // Attach player to video
+    await shakaPlayer.attach(video);
+
+    // Configure player
+    shakaPlayer.configure({
+      preferredAudioLanguage: 'id',
+      preferredTextLanguage: 'id',
+      abr: { enabled: true },
+      streaming: {
+        retryParameters: {
+          timeout: 30000,
+          maxAttempts: 5,
+        },
+      },
+    });
+
+    // Initialize Shaka UI overlay (wrapped so UI failure doesn't block playback)
+    if(typeof shaka.ui !== 'undefined' && shaka.ui.Overlay){
+      try{
+        shakaUi = new shaka.ui.Overlay(shakaPlayer, wrap, video);
+        shakaUi.configure({
+          addSeekBar: true,
+          enableFullscreenOnRotation: true,
+          controlPanelElements: [
+            'play_pause', 'time_and_duration', 'spacer', 'mute', 'volume',
+            'quality', 'fullscreen', 'overflow_menu'
+          ],
+          overflowMenuButtons: [
+            'picture_in_picture'
+          ],
+        });
+      }catch(uiErr){
+        console.warn('Shaka UI init failed, continuing without UI:', uiErr);
+      }
+    }
+
+    // Load manifest
+    await shakaPlayer.load(_manifestStore.blobUrl);
+    console.log('Shaka loaded. Audio langs:', shakaPlayer.getAudioLanguages());
+    console.log('Shaka variant audio tracks:', shakaPlayer.getVariantTracks().filter(t => t.type === 'audio').length);
+
+    // ═══ Add subtitles via addTextTrackAsync (reliable, not DASH blob) ═══
+    for(let i = 0; i < vttSubs.length; i++){
+      const s = vttSubs[i];
+      try{
+        await shakaPlayer.addTextTrackAsync(s.url, s.language, 'subtitle', 'text/vtt', s.language, s.label);
+        console.log('Subtitle added:', s.label, s.language);
+      }catch(e){
+        console.warn('Failed to add subtitle', s.label, e);
+      }
+    }
+    console.log('Shaka text tracks:', shakaPlayer.getTextTracks().length);
+
+  }catch(e){
+    console.warn('Shaka MPD build failed, falling back. Error:', e, '| message:', e && e.message, '| code:', e && e.code, '| category:', e && e.category, '| stack:', e && e.stack);
+    // Fallback: play video with optional separate audio
+    if(videos.length){
+      video.src = videos[0].path;
+      video.load();
+    }
+    // Play audio separately if available (video.mp4 may not have embedded audio)
+    // Uses requestAnimationFrame sync for sub-100ms drift correction
+    if(audios.length && audios[0].path !== (videos[0] && videos[0].path)){
+      try{
+        const audioEl = document.getElementById('shakaAudio') || document.createElement('audio');
+        audioEl.id = 'shakaAudio';
+        audioEl.crossOrigin = 'anonymous';
+        audioEl.src = audios[0].path;
+        audioEl.preload = 'auto';
+        audioEl.loop = false;
+        _fallbackAudioEl = audioEl;
+        // Sync audio with video play/pause
+        video.addEventListener('play', function(){ audioEl.play().catch(function(){}); });
+        video.addEventListener('pause', function(){ audioEl.pause(); });
+        video.addEventListener('seeking', function(){ audioEl.currentTime = video.currentTime; });
+        video.addEventListener('ended', function(){ audioEl.pause(); audioEl.currentTime = 0; });
+        audioEl.addEventListener('ended', function(){ video.pause(); });
+        // RAF sync (precise per-frame, corrects drift every frame)
+        _startFallbackSync(audioEl, video);
+        audioEl.play().catch(function(){});
+        // Volume sync
+        video.addEventListener('volumechange', function(){
+          audioEl.volume = video.volume;
+          audioEl.muted = video.muted;
+        });
+        audioEl.volume = video.volume;
+        audioEl.muted = video.muted;
+      }catch(audioErr){
+        console.warn('Fallback audio failed:', audioErr);
+      }
+    }
+  }
+
+  // ═══ Save state ═══
+  shakaState = { film, videos, audios, subtitles, qualityIdx: 0, audioIdx: 0 };
+
+  // ═══ Compat shim ═══
+  videoPlayer = {
+    pause: function(){ try{ video.pause(); }catch{} },
+    play: function(){ try{ video.play(); }catch{} },
+    paused: function(){ return video.paused; },
+    currentTime: function(v){ if(v===undefined) return video.currentTime; video.currentTime = v; },
+    duration: function(){ return video.duration || 0; },
+    playbackRate: function(r){ if(r===undefined) return video.playbackRate; video.playbackRate = r; },
+    muted: function(m){ if(m===undefined) return video.muted; video.muted = m; },
+    volume: function(v){ if(v===undefined) return video.volume; video.volume = v; },
+    src: function(){}, load: function(){}, on: function(){},
+    audioTracks: function(){ return null; },
+    addRemoteTextTrack: function(){},
+    remoteTextTracks: function(){ return []; },
+    removeRemoteTextTrack: function(){},
+  };
+
+  // Resume position
+  if(currentResumeFrom && currentResumeFrom > 5){
+    video.addEventListener('loadedmetadata', function seek(){
+      video.currentTime = currentResumeFrom;
+    }, { once: true });
+  }
+
+  // Stream actions (now hidden, but keep for compat)
+  try{ setStreamActions(videos[0].path, film.judul || film.title || ''); }catch(e){}
+
+  // Hook continue watching
+  var lastSave = 0;
+  video.addEventListener('timeupdate', function(){
+    var now = Date.now();
+    if(now - lastSave < 8000) return;
+    lastSave = now;
+    if(!currentFilm || !video.duration) return;
+    upsertContinueWatching(currentFilm.id, video.currentTime, video.duration);
+  });
+  video.addEventListener('ended', function(){
+    if(currentFilm) removeContinueWatching(currentFilm.id);
+  });
+}
+
+
+
+function teardownEngine3(){
+  const wrap = document.getElementById('shakaPlayerWrap');
+  if(wrap){ wrap.style.display = 'none'; var ctc = wrap.querySelector('.ctc'); if(ctc) ctc.remove(); }
+  if(shakaUi){
+    try{ shakaUi.destroy(); }catch(e){}
+    shakaUi = null;
+  }
+  if(shakaPlayer){
+    try{ shakaPlayer.destroy(); }catch(e){}
+    shakaPlayer = null;
+  }
+  if(_manifestStore.blobUrl){ try{ URL.revokeObjectURL(_manifestStore.blobUrl); }catch(e){} _manifestStore.blobUrl = null; }
+  if(_manifestStore.vttUrls){
+    for(const u of _manifestStore.vttUrls){ try{ URL.revokeObjectURL(u); }catch(e){} }
+    _manifestStore.vttUrls = [];
+  }
+  const video = document.getElementById('shakaVideo');
+  if(video){ video.src = ''; video.load(); video.querySelectorAll('track').forEach(function(t){ t.remove(); }); }
+  shakaState = null;
 }
 
 function closePlayer(opts){
