@@ -3535,8 +3535,12 @@ async function _p2TryMseMode(player, url){
   // Refresh overlay buttons instead of building external chips
   _p2InjectOverlays();
 
-  await new Promise((resolve)=>{
+  // Race sourceopen against 3s timeout; abort MSE if sourceopen never fires
+  var srcOpend = false;
+  const srcOpen = new Promise((resolve)=>{
     ms.addEventListener('sourceopen', ()=>{
+      srcOpend = true;
+      if(!p2State || !p2State.mse){ resolve(); return; } // timeout already aborted
       try{
         const vMime = 'video/mp4; codecs="' + mseState.videoTrack.codec + '"';
         const aMime = 'audio/mp4; codecs="' + audioTracks.find(t=>t.id===mseState.activeAudioId).codec + '"';
@@ -3579,6 +3583,11 @@ async function _p2TryMseMode(player, url){
       }
     }, { once: true });
   });
+
+  // 3s timeout — if sourceopen doesn't fire, abort MSE and fall back to native src
+  const srcTimeout = new Promise(function(r){ setTimeout(r, 3000); });
+  await Promise.race([srcOpen, srcTimeout]);
+  if(!p2State.mse){ console.warn('[p2] MSE sourceopen timeout — falling back to direct src'); return false; }
 
   // If sourceopen failed and cleared mse, signal caller to fall back
   return !!p2State.mse;
