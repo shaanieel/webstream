@@ -1949,7 +1949,27 @@ async function adminUserList(request, env) {
   );
   if (!r.ok) return err('Gagal load users', 500);
   const users = Array.isArray(r.data) ? r.data : [];
+  // Batch: get ALL entitlements for ALL users in 1 query instead of N sequential
+  const userIds = users.map(u => u.user_id).filter(Boolean);
   const now = new Date();
+  const nowEnc = encodeURIComponent(now.toISOString());
+  const entCount = {};
+  if (userIds.length > 0) {
+    const chunkSize = 50; // Supabase URL length safety
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
+      const idsParam = chunk.map(id => encodeURIComponent(id)).join(',');
+      const e = await supabaseRest(
+        env,
+        `/film_entitlements?user_id=in.(${idsParam})&or=(expires_at.is.null,expires_at.gt.${nowEnc})&select=user_id,id&limit=5000`
+      );
+      if (e.ok && Array.isArray(e.data)) {
+        for (const ent of e.data) {
+          entCount[ent.user_id] = (entCount[ent.user_id] || 0) + 1;
+        }
+      }
+    }
+  }
   for (const u of users) {
     const exp = u.expired_at ? new Date(u.expired_at) : null;
     const vipActive = !!(u.is_vip && exp && exp > now);
@@ -1957,8 +1977,7 @@ async function adminUserList(request, env) {
       u.is_vip = false;
       u.expired_at = null;
     }
-    const ents = await userEntitlements(env, u.user_id);
-    u.entitlement_count = ents.length;
+    u.entitlement_count = entCount[u.user_id] || 0;
   }
   return json({ ok: true, users });
 }
@@ -3127,6 +3146,7 @@ async function playbackHandler(request, env, filmId) {
 
 export default {
   async fetch(request, env, ctx) {
+    try {
     const url = new URL(request.url);
     const { pathname } = url;
 
@@ -3441,6 +3461,9 @@ export default {
     if (env.ASSETS) return serveAsset(request, env);
 
     return err('Not Found', 404);
+    } catch (e) {
+      return json({ ok: false, error: 'Internal error: ' + e.message }, 500);
+    }
   },
 };
 
