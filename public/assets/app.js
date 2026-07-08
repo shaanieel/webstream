@@ -4038,6 +4038,62 @@ function _stopFallbackSync(){
   if(_fallbackRafId){ cancelAnimationFrame(_fallbackRafId); _fallbackRafId = null; }
 }
 
+// ── Engine 3 overlay buttons (inside player, same style as Engine 2) ──
+// Replaces _injectTrackControls external chips with overlay dropdowns.
+function _p3InjectOverlays(wrap, video, videoInits, audios, vttSubs, fbc){
+  // Clean old overlays
+  const old = document.getElementById('p3OverlayMenus');
+  if(old) old.remove();
+  if(!audios.length && !vttSubs.length) return;
+  const div = document.createElement('div');
+  div.id = 'p3OverlayMenus';
+  div.style.cssText = 'position:absolute; top:12px; right:60px; z-index:8; display:flex; gap:6px; align-items:center; pointer-events:none;';
+  // Audio button
+  if(audios.length > 1){
+    const label = _langName(audios[0].language, audios[0].name) || 'Audio';
+    const items = audios.map(function(a,i){
+      return {
+        label: _langName(a.language, a.name),
+        active: i === 0,
+        onSelect: function(){
+          fbc.switchAudio(i, a, _langName(a.language, a.name), null, null);
+          _p3RefreshAudioLabel(div, _langName(a.language, a.name));
+        }
+      };
+    });
+    const dd = _p2BuildOverlayDropdown(label, items);
+    div.appendChild(dd);
+  }
+  // Subtitle button
+  if(vttSubs.length){
+    var subLabel = 'Off';
+    var subItems = [{label:'Off', active:true, onSelect:function(){
+      fbc.setSubVisibility(false, null, null, -1, null);
+      _p3RefreshSubLabel(div, 'Off');
+    }}];
+    vttSubs.forEach(function(s,i){
+      var dn = _langName(s.language, s.label);
+      subItems.push({label:dn, active:false, onSelect:function(){
+        fbc.setSubVisibility(true, null, null, i, s);
+        _p3RefreshSubLabel(div, dn);
+      }});
+    });
+    var dd2 = _p2BuildOverlayDropdown('💬 '+subLabel, subItems);
+    div.appendChild(dd2);
+  }
+  wrap.appendChild(div);
+}
+function _p3RefreshAudioLabel(div, label){
+  var btn = div && div.querySelector('.p2-overlay-dropdown:first-child .p2-overlay-btn .p2-overlay-label');
+  if(btn) btn.textContent = label;
+}
+function _p3RefreshSubLabel(div, label){
+  var btns = div && div.querySelectorAll('.p2-overlay-dropdown .p2-overlay-btn .p2-overlay-label');
+  if(btns && btns.length){
+    btns[btns.length - 1].textContent = '💬 '+label;
+  }
+}
+
 function _nativeFallback(video, videos, audios){
   // Enable native HTML5 controls since Shaka UI overlay is not available
   video.controls = true;
@@ -4213,11 +4269,11 @@ async function loadVideoEngine3(film, sources){
       }
     }
   };
-  _injectTrackControls(wrap, null, audios, vttSubs, _fallbackCtrl);
   // For simple R2 (1 video + separate audio), skip Shaka entirely.
   // Progressive MP4 can't form a valid DASH MPD — Shaka Error 4002 is inevitable.
   if(film && film.r2_bucket && videos.length === 1 && audios.length >= 1){
     console.log('[Engine3] Simple R2 detected — skipping Shaka MPD, using native fallback (subtitles via _fallbackCtrl)');
+    _p3InjectOverlays(wrap, video, videoInits, audios, vttSubs, _fallbackCtrl);
     _nativeFallback(video, videos, audios);
     shakaState = { film, videos, audios, subtitles, qualityIdx: 0, audioIdx: 0 };
     return;
@@ -4427,6 +4483,9 @@ async function loadVideoEngine3(film, sources){
 function teardownEngine3(){
   const wrap = document.getElementById('shakaPlayerWrap');
   if(wrap){ wrap.style.display = 'none'; var ctc = wrap.querySelector('.ctc'); if(ctc) ctc.remove(); }
+  _stopFallbackSync();
+  const ov3 = document.getElementById('p3OverlayMenus');
+  if(ov3){ ov3.remove(); }
   if(shakaUi){
     try{ shakaUi.destroy(); }catch(e){}
     shakaUi = null;
