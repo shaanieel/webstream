@@ -3,59 +3,31 @@ main = "worker/worker.js"
 compatibility_date = "2025-01-15"
 
 # Static assets di folder public/ akan otomatis di-serve untuk path apapun
-# yang tidak match dengan rute di worker.js
 [assets]
 directory = "./public"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
+not_found_handling = "none"
 
 # === Secrets (HARUS pakai tipe Secret, BUKAN Variable!) ===
 # Cara set:
 #   - Via dashboard: Settings → Variables and Secrets → + Add → Type: SECRET (encrypted)
 #   - Via CLI: wrangler secret put NAMA
-#
-# CATATAN PENTING: Cloudflare AKAN MENGHAPUS plaintext variable yang tidak ada
-# di [vars] section ini setiap kali deploy. Tapi SECRET (encrypted) PERSISTEN.
-# Selalu pakai tipe Secret untuk: SUBSOURCE_API_KEY, TMDB_API_KEY,
-# SUPABASE_SERVICE_KEY, PLAYER4ME_API_TOKEN.
 
 [vars]
 SUPABASE_URL = "https://gmjudsbreuyyznxtfjve.supabase.co"
-# Anon key Supabase memang dirancang untuk publik (RLS yang melindungi).
 SUPABASE_ANON_KEY = "sb_publishable_sEx8JuiK0J0qlf8Dy5P3Pg_9iCVpRGn"
-# URL gdi-worker yang aktif (untuk display & build URL stream ke client).
-# CATATAN: untuk fetch internal Worker→Worker, kita pakai service binding GDI
-# (lihat [[services]] di bawah) untuk bypass error CF 1042 (cross-zone block).
-GDI_WORKER_URL = "https://gdriveindex.zaeinstreamx.workers.dev"
-# Email admin (boleh banyak, dipisah koma) — yang boleh akses panel admin.
+# Email admin — yang boleh akses panel admin
 ADMIN_EMAILS = "sholehhuddin21@gmail.com"
-# Domain custom Player4Me (white-label). Worker pakai ini untuk membentuk
-# URL embed untuk SEMUA tier (VIP & Basic): https://<domain>/#<id>
-#
-# Tidak ada fallback ke player4me.com/embed lagi — kalau env ini kosong,
-# worker akan return null + tampilkan error "PLAYER4ME_PUBLIC_DOMAIN
-# belum di-set" supaya admin tahu harus diisi. Player4Me public embed
-# (player4me.com/embed/<id>) tidak bisa kita pakai karena id space-nya
-# berbeda — yang ada di akun Player4Me kita HANYA reachable lewat custom
-# domain kita sendiri.
-PLAYER4ME_BASIC_DOMAIN = "zaeinstore.qzz.io"
-PLAYER4ME_VIP_DOMAIN = "zaeinvip.qzz.io"
 
-# sementara tetap simpan ini supaya kode lama/admin tidak pecah
-PLAYER4ME_PUBLIC_DOMAIN = "zaeinstore.qzz.io"
+# R2 streaming: frontend butuh tau domain publik R2
+# Contoh: https://pub-xxxxxxxxxxxxxxx.r2.dev (R2.dev subdomain)
+# Set sebagai Secret: wrangler secret put R2_PUBLIC_DOMAIN
+R2_PUBLIC_DOMAIN = "https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev"
 
-# === Player4Me ===
-# Service migration: video hosting & player pindah dari Drive Index → Player4Me.
-# PLAYER4ME_API_TOKEN harus di-set sebagai Secret di Cloudflare:
-#   wrangler secret put PLAYER4ME_API_TOKEN
-#
-# (External cross-project Supabase env vars sudah dihapus — semua auth
-# sekarang pakai SUPABASE_URL / SUPABASE_SERVICE_KEY langsung.)
+# Nama bucket R2 — dipake worker buat strip dari path
+R2_BUCKET_NAME = "zaeinstream-video"
 
-# === Service Binding ke gdi-worker ===
-# Cloudflare Workers TIDAK BISA fetch Worker lain di *.workers.dev via URL publik
-# (return error 1042). Solusi: pakai service binding — internal RPC, no network hop.
-# Worker `gdriveindex` HARUS sudah di-deploy duluan supaya binding bisa di-resolve.
-[[services]]
-binding = "GDI"
-service = "gdriveindex"
+# === Service Binding ke gdi-worker (untuk Drive Index) ===
+# [[services]]
+# binding = "GDI"
+# service = "gdriveindex"

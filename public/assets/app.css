@@ -949,6 +949,51 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 /* Hidden audio element for synced multi-dub track playback */
 #player2Wrap > audio.p2-aux-audio{ display:none; }
 
+/* P2 Overlay — audio & quality buttons inside the player (top-right, same area as settings gear) */
+#p2OverlayMenus{
+  position:absolute; top:12px; right:60px; z-index:8;
+  display:flex; gap:6px; align-items:center;
+  pointer-events:none;
+}
+#p2OverlayMenus > *{ pointer-events:auto; }
+.p2-overlay-btn{
+  background:rgba(0,0,0,.62);
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+  color:#fff; border:1px solid rgba(255,255,255,.18);
+  border-radius:10px; cursor:pointer;
+  padding:6px 10px; font-size:.78rem; font-weight:600;
+  display:inline-flex; align-items:center; gap:5px;
+  line-height:1; transition:background .15s, border-color .15s;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);
+  white-space:nowrap;
+}
+.p2-overlay-btn:hover{
+  background:rgba(0,0,0,.82);
+  border-color:rgba(255,255,255,.32);
+}
+.p2-overlay-icon{ font-size:15px; line-height:1; }
+.p2-overlay-label{ max-width:100px; overflow:hidden; text-overflow:ellipsis; }
+.p2-overlay-chevron{ margin-left:1px; opacity:.7; }
+.p2-overlay-dropdown{ position:relative; }
+.p2-overlay-menu{
+  display:none; position:absolute; top:100%; right:0; margin-top:6px;
+  min-width:140px;
+  background:rgba(15,15,25,.95);
+  -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:10px; padding:4px; z-index:99;
+  box-shadow:0 6px 24px rgba(0,0,0,.5);
+}
+.p2-overlay-dropdown.open .p2-overlay-menu{ display:block; }
+.p2-overlay-item{
+  padding:8px 12px; cursor:pointer; border-radius:6px;
+  color:rgba(255,255,255,.8); font-size:.82rem; font-weight:500;
+  transition:background .12s; white-space:nowrap;
+}
+.p2-overlay-item:hover{ background:rgba(255,255,255,.08); color:#fff; }
+.p2-overlay-item.active{ color:#fff; background:rgba(52,97,255,.3); font-weight:600; }
+.p2-overlay-item.active::before{ content:'✓ '; font-weight:700; }
+
 .player-info{margin-top:18px;}
 .player-info h2{font-size:1.5rem;font-weight:700;margin-bottom:6px;}
 .player-info-meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:.85rem;margin-bottom:12px;}
