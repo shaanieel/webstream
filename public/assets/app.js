@@ -3208,8 +3208,20 @@ async function loadVideoEngine2(film, sources){
       mseHandled = false;
     }
   }
+  // Force Vidstack video layout visible (remove responsive data-match that hides it)
+  const layout = player.querySelector('media-video-layout');
+  if(layout){
+    layout.removeAttribute('data-match');
+    layout.style.display = 'block';
+  }
+
+  player.autoplay = true;
   if(!mseHandled){
     player.src = { src: videos[0].path, type: _p2GuessVideoType(videos[0].path) };
+    // Kick play once metadata loaded
+    player.addEventListener('can-play', ()=>{
+      player.play().catch(()=>{});
+    }, { once: true });
   }
 
   // Build subtitle <track> children inside <media-provider>
