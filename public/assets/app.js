@@ -2873,12 +2873,14 @@ function teardownEngine2(){
   try{
     if(vsPlayer){
       vsPlayer.pause && vsPlayer.pause();
-      // Clear sources — null (not []) fully resets Vidstack provider state
-      vsPlayer.src = null;
-      // Wipe provider children (<track>, stale video element, etc.)
+      // Clear sources — Vidstack array format
+      vsPlayer.src = [];
+      // Remove only <track> children (do NOT wipe provider.innerHTML — breaks Vidstack web component)
       const provider = vsPlayer.querySelector('media-provider');
-      if(provider) provider.innerHTML = '';
-      // Allow event hooks to re-attach on next load
+      if(provider){
+        provider.querySelectorAll('track').forEach(t=>t.remove());
+      }
+      // Reset hook flag so event listeners re-attach on next load
       vsPlayer._p2VsHooked = false;
     }
   }catch{}
