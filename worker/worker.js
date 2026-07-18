@@ -3494,21 +3494,21 @@ async function r2StreamHandler(request, env, r2Path) {
     const firstSeg = r2Path.substring(0, firstSlash);
     if (knownBuckets.includes(firstSeg)) {
       bucketName = firstSeg;
-      // Keep full path (WITH bucket prefix) for objectKey — the MEDIA bucket
-      // stores objects at {bucket}/{r2_path}/{type}/{filename}
-      objectKey = r2Path;
+      // Strip bucket prefix — the actual R2 object key is just {r2_path}/{type}/{filename}
+      objectKey = r2Path.substring(firstSlash + 1);
     }
   }
 
   // R2 public domains
   const VIDEO_DOMAIN = env.R2_PUBLIC_DOMAIN || 'https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev';
+  const MEDIA_DOMAIN = env.R2_MEDIA_PUBLIC_DOMAIN || VIDEO_DOMAIN;
 
   // Route to correct domain:
-  // Try VIDEO bucket first (has public access), then MEDIA bucket.
+  // 'zaeinstream-video' content is in the MEDIA bucket (same as the bucket's r2.dev domain).
   // Strip trailing slash from domain to avoid double-slash in URL.
   let publicDomain, finalKey;
   if (bucketName === 'zaeinstream-video') {
-    publicDomain = VIDEO_DOMAIN.replace(/\/+$/, '');
+    publicDomain = MEDIA_DOMAIN.replace(/\/+$/, '');
     finalKey = objectKey;
   } else {
     // Fallback for unknown/other buckets

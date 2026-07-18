@@ -2737,11 +2737,14 @@ async function _resolveFilmSources(film){
   const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
   const r2RawPath = (film.r2_bucket && film.r2_path) ? ('/api/r2-stream/' + film.r2_bucket + '/' + film.r2_path + '/video/video.mp4') : null;
   if((r2VideoUrl || r2RawPath) && !videos.length){
-    // R2 video (maybe muxed with audio tracks embedded)
-    // Proxy via /api/r2-stream/ to bypass CORS
-    // When r2_bucket is set, r2VideoUrl might be a Player4Me embed URL (admin),
-    // so prefer r2RawPath (built from r2_bucket+r2_path) which is always correct.
-    var r2ProxiedUrl = r2RawPath;
+    // R2 video — use DIRECT public URL (worker proxy 401s cross-account)
+    // Extract R2 base domain from video_url, then build correct key w/o bucket prefix
+    var r2DirectUrl = null;
+    if(r2VideoUrl && film.r2_path){
+      var r2Base = r2VideoUrl.match(/^(https:\/\/pub-[^/]+\.r2\.dev)\//);
+      if(r2Base) r2DirectUrl = r2Base[1] + '/' + film.r2_path + '/video/video.mp4';
+    }
+    var r2ProxiedUrl = r2DirectUrl || r2RawPath;
     if(!r2ProxiedUrl && r2VideoUrl) r2ProxiedUrl = r2VideoUrl.replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
     videos.push({ name: 'R2 Video', path: r2ProxiedUrl });
     // Audio tracks: check film.audio_tracks first, or parse film.audio_url
