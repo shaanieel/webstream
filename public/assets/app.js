@@ -2873,13 +2873,13 @@ function teardownEngine2(){
   try{
     if(vsPlayer){
       vsPlayer.pause && vsPlayer.pause();
-      // Clear sources / tracks
-      vsPlayer.src = [];
-      // Remove dynamically added <track> children (they live on <media-provider>)
+      // Clear sources — null (not []) fully resets Vidstack provider state
+      vsPlayer.src = null;
+      // Wipe provider children (<track>, stale video element, etc.)
       const provider = vsPlayer.querySelector('media-provider');
-      if(provider){
-        provider.querySelectorAll('track').forEach(t=>t.remove());
-      }
+      if(provider) provider.innerHTML = '';
+      // Allow event hooks to re-attach on next load
+      vsPlayer._p2VsHooked = false;
     }
   }catch{}
   try{ if(aux){ aux.pause(); aux.removeAttribute('src'); aux.load(); } }catch{}
@@ -3127,7 +3127,10 @@ window.addEventListener('beforeunload', releaseVipDownloadSlot);
    toggle (since native MP4 sources don't expose those to Vidstack).
    ═══════════════════════════════════════════════════════════════════ */
 
+let _p2LoadGen = 0;   // incremented on each loadVideoEngine2 call; guards against stale async completions
+
 async function loadVideoEngine2(film, sources){
+  const gen = ++_p2LoadGen;
   const { videos, audios, subtitles } = sources;
   const wrap = document.getElementById('player2Wrap');
   const player = document.getElementById('p2VsPlayer');
@@ -3162,6 +3165,7 @@ async function loadVideoEngine2(film, sources){
     try{
       const r = await fetch(s.path);
       const raw = await r.text();
+      if(gen !== _p2LoadGen) return;   // superseded by newer load call
       const vtt = _p2ToVtt(raw, s.path);
       const blob = new Blob([vtt], { type: 'text/vtt' });
       const url = URL.createObjectURL(blob);
@@ -3203,6 +3207,7 @@ async function loadVideoEngine2(film, sources){
   if(canProbe){
     try{
       mseHandled = await _p2TryMseMode(player, videos[0].path);
+      if(gen !== _p2LoadGen) return;   // superseded
     }catch(e){
       console.warn('[p2] mp4box probe failed:', e);
       mseHandled = false;
