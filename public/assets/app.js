@@ -2868,23 +2868,33 @@ function teardownEngine2(){
   const wrap = document.getElementById('player2Wrap');
   if(!wrap) return;
   wrap.classList.remove('show');
-  const vsPlayer = document.getElementById('p2VsPlayer');
+  // ── Replace the entire <media-player> with a fresh copy ──
+  // Vidstack web components keep internal state that can't be fully
+  // reset via .src=[] or .innerHTML. A fresh element guarantees a
+  // clean slate for the next film, avoiding "Page Unresponsive" hangs.
+  const oldPlayer = document.getElementById('p2VsPlayer');
+  if(oldPlayer && oldPlayer.parentNode === wrap){
+    const fresh = document.createElement('media-player');
+    fresh.id = 'p2VsPlayer';
+    fresh.setAttribute('playsinline','');
+    fresh.setAttribute('crossorigin','');
+    fresh.setAttribute('keep-alive','');
+    fresh.setAttribute('load','visible');
+    fresh.setAttribute('posterload','visible');
+    // Inner children needed by Vidstack
+    const provider = document.createElement('media-provider');
+    fresh.appendChild(provider);
+    const layout = document.createElement('media-video-layout');
+    layout.className = 'vds-video-layout dark';
+    layout.setAttribute('data-lg','');
+    layout.setAttribute('data-size','lg');
+    fresh.appendChild(layout);
+    wrap.replaceChild(fresh, oldPlayer);
+  }
+  // Reset aux audio
   const aux = document.getElementById('p2AuxAudio');
-  try{
-    if(vsPlayer){
-      vsPlayer.pause && vsPlayer.pause();
-      // Clear sources — Vidstack array format
-      vsPlayer.src = [];
-      // Remove only <track> children (do NOT wipe provider.innerHTML — breaks Vidstack web component)
-      const provider = vsPlayer.querySelector('media-provider');
-      if(provider){
-        provider.querySelectorAll('track').forEach(t=>t.remove());
-      }
-      // Reset hook flag so event listeners re-attach on next load
-      vsPlayer._p2VsHooked = false;
-    }
-  }catch{}
   try{ if(aux){ aux.pause(); aux.removeAttribute('src'); aux.load(); } }catch{}
+  // Full p2State cleanup
   if(p2State){
     if(p2State.subBlobUrls){
       for(const u of p2State.subBlobUrls){ try{ URL.revokeObjectURL(u); }catch{} }
