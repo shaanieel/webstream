@@ -270,7 +270,20 @@ async function bootstrap(){
   }
 
   session = null;
-  try { session = (await sb.auth.getSession()).data.session; } catch {}
+  try {
+    // Race getSession against a 6s timeout. Supabase Auth occasionally hangs
+    // for 10+ seconds (transient). Without this, the boot splash stays up
+    // forever and the user thinks the site is broken.
+    const sessionPromise = sb.auth.getSession();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('auth_timeout')), 6000)
+    );
+    const result = await Promise.race([sessionPromise, timeoutPromise]);
+    session = result.data.session;
+  } catch(e) {
+    console.warn('[bootstrap] getSession failed/timeout:', e.message);
+    session = null;
+  }
   if(session){
     await onAuthSuccess(session);
   }else{
@@ -677,16 +690,16 @@ function renderPagedGrid(pageName, gridId, paginationId, items, opts){
   if(opts.vipStyle){
     const grid = document.getElementById(gridId);
     grid.innerHTML = pageItems.map(f=>cardHTML(f, true)).join('');
-    grid.querySelectorAll('[data-film-id]').forEach(el=>{
-      el.addEventListener('click', ()=>{
-        const id = el.dataset.filmId;
-        const film = allFilms.find(x=>String(x.id)===String(id));
-        // VIP page: every click is a VIP-context playback. VIP users get the
-        // ad-free domain even when the film row itself is `tier:'free'`,
-        // because the page already lists free titles for VIP convenience.
-        if(film) openFilm(film, { vipMode: true });
-      });
-    });
+    // Click handler — event delegation (robust against DOM re-creation)
+    if(grid._vipClickHandler) grid.removeEventListener('click', grid._vipClickHandler);
+    grid._vipClickHandler = function(e){
+      const card = e.target.closest('[data-film-id]');
+      if(!card) return;
+      const id = card.dataset.filmId;
+      const film = allFilms.find(x=>String(x.id)===String(id));
+      if(film) openFilm(film, { vipMode: true });
+    };
+    grid.addEventListener('click', grid._vipClickHandler);
   }else{
     renderGrid(gridId, pageItems);
   }
@@ -1477,14 +1490,17 @@ function renderContinueWatching(){
   if(!items.length){ row.style.display='none'; return; }
   row.style.display='block';
   grid.innerHTML = items.map(({film,cw})=>cardHTML(film, false, { cw })).join('');
-  grid.querySelectorAll('[data-film-id]').forEach(el=>{
-    el.addEventListener('click', ev=>{
-      if(ev.target.closest('[data-cw-delete]')) return;
-      const id=el.dataset.filmId;
-      const film=allFilms.find(x=>String(x.id)===String(id));
-      if(film) openFilm(film, { resumeFrom: list.find(x=>String(x.id)===String(id))?.position||0 });
-    });
-  });
+  // Click handler — event delegation (robust against DOM re-creation)
+  if(grid._cwClickHandler) grid.removeEventListener('click', grid._cwClickHandler);
+  grid._cwClickHandler = function(e){
+    if(e.target.closest('[data-cw-delete]')) return;
+    const card = e.target.closest('[data-film-id]');
+    if(!card) return;
+    const id = card.dataset.filmId;
+    const film = allFilms.find(x=>String(x.id)===String(id));
+    if(film) openFilm(film, { resumeFrom: list.find(x=>String(x.id)===String(id))?.position||0 });
+  };
+  grid.addEventListener('click', grid._cwClickHandler);
 }
 
 function renderGrid(id, items){
@@ -1495,14 +1511,16 @@ function renderGrid(id, items){
     return;
   }
   g.innerHTML = items.map(f=>cardHTML(f)).join('');
-  // Click handlers
-  g.querySelectorAll('[data-film-id]').forEach(el=>{
-    el.addEventListener('click',()=>{
-      const id=el.dataset.filmId;
-      const film = allFilms.find(x=>String(x.id)===String(id));
-      if(film) openFilm(film);
-    });
-  });
+  // Click handler — event delegation (robust against DOM re-creation)
+  if(g._filmClickHandler) g.removeEventListener('click', g._filmClickHandler);
+  g._filmClickHandler = function(e){
+    const card = e.target.closest('[data-film-id]');
+    if(!card) return;
+    const id=card.dataset.filmId;
+    const film = allFilms.find(x=>String(x.id)===String(id));
+    if(film) openFilm(film);
+  };
+  g.addEventListener('click', g._filmClickHandler);
 }
 
 function renderTmdbGrid(id, items){
@@ -1513,18 +1531,18 @@ function renderTmdbGrid(id, items){
     return;
   }
   g.innerHTML = items.slice(0,20).map(f=>cardHTML(f, false, { tmdb:true })).join('');
-  g.querySelectorAll('[data-film-id]').forEach(el=>{
-    el.addEventListener('click',()=>{
-      const localId = el.dataset.localId;
-      if(localId){
-        const film = allFilms.find(x=>String(x.id)===String(localId));
-        if(film) return openFilm(film);
-      }
-      // Card has no local catalog match — silently do nothing.
-      // The inline "Belum ada di katalog" badge under the card already
-      // tells the user the film isn't available; no toast required.
-    });
-  });
+  // Click handler — event delegation (robust against DOM re-creation)
+  if(g._tmdbClickHandler) g.removeEventListener('click', g._tmdbClickHandler);
+  g._tmdbClickHandler = function(e){
+    const card = e.target.closest('[data-film-id]');
+    if(!card) return;
+    const localId = card.dataset.localId;
+    if(localId){
+      const film = allFilms.find(x=>String(x.id)===String(localId));
+      if(film) return openFilm(film);
+    }
+  };
+  g.addEventListener('click', g._tmdbClickHandler);
 }
 
 function lucideStarIcon(low){
@@ -3167,7 +3185,7 @@ async function loadVideoEngine2(film, sources){
     audioChip: null,
     lastSavedAt: 0,
     _hookedTime: false,
-    _useAux: audios.length > 1,   // only sync aux audio when there are multiple dub tracks
+    _useAux: audios.length > 1 || (audios.length === 1 && audios[0].path !== videos[0].path),   // sync aux for separate audio tracks even when only 1
   };
 
   // Set Vidstack title + provider source. Pass an explicit type so URLs
