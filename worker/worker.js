@@ -3484,7 +3484,65 @@ export default {
 //   1. r2_bucket+r2_path:  /api/r2-stream/{bucket}/{objectKey}  → strip bucket name
 //   2. fallback (audio/sub): /api/r2-stream/{objectKey}          → use as-is
 // Forwarded to R2_PUBLIC_DOMAIN with Range header for video seeking.
+// ─── AWS V4 signing helpers for presigned R2 S3 URLs ───
+
+function bytesToHex(bytes) {
+  return Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function enc(s) { return encodeURIComponent(s); }
+
+async function hmacSha256(keyBytes, msg) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
+}
+
+async function presignR2Url(accountId, accessKey, secretKey, bucket, key, expiresIn) {
+  const region = 'auto', service = 's3';
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]/g, '').split('.')[0] + 'Z';
+  const dateStamp = amzDate.substring(0, 8);
+  const credential = accessKey + '/' + dateStamp + '/' + region + '/' + service + '/aws4_request';
+  const params = [
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', credential],
+    ['X-Amz-Date', amzDate],
+    ['X-Amz-Expires', String(expiresIn)],
+    ['X-Amz-SignedHeaders', 'host'],
+  ];
+  const canonQs = params.map(p => enc(p[0]) + '=' + enc(p[1])).join('&');
+  const canonUri = '/' + bucket + '/' + key;
+  const canonHeaders = 'host:' + accountId + '.r2.cloudflarestorage.com\n';
+  const signedHeaders = 'host';
+  const payloadHash = 'UNSIGNED-PAYLOAD';
+  const canonReq = 'GET\n' + canonUri + '\n' + canonQs + '\n' + canonHeaders + '\n' + signedHeaders + '\n' + payloadHash;
+  const crHash = bytesToHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonReq)));
+  const credScope = dateStamp + '/' + region + '/' + service + '/aws4_request';
+  const sts = 'AWS4-HMAC-SHA256\n' + amzDate + '\n' + credScope + '\n' + crHash;
+  // Derive signing key: AWS4(secret) → dateStamp → region → service → aws4_request
+  let k = await hmacSha256(new TextEncoder().encode('AWS4' + secretKey), dateStamp);
+  k = await hmacSha256(k, region);
+  k = await hmacSha256(k, service);
+  k = await hmacSha256(k, 'aws4_request');
+  const sig = bytesToHex(await hmacSha256(k, sts));
+  const host = accountId + '.r2.cloudflarestorage.com';
+  return 'https://' + host + '/' + bucket + '/' + key + '?' + canonQs + '&X-Amz-Signature=' + sig;
+}
+
 async function r2StreamHandler(request, env, r2Path) {
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': 'Range, Content-Type, Origin',
+        'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }
+
   // Known logical bucket names (from film.r2_bucket)
   const knownBuckets = ['zaeinstream-video', 'zaeinstream-zip', 'zaeinstream-music'];
   let bucketName = null;
@@ -3499,44 +3557,52 @@ async function r2StreamHandler(request, env, r2Path) {
     }
   }
 
-  // R2 public domains
+  // If we have S3 credentials and this is zaeinstream-video → presigned S3 URL + 302 redirect
+  // Browser streams directly from R2 S3 endpoint (bypasses worker response size limit)
+  if (bucketName === 'zaeinstream-video' && env.R2_S3_ACCESS_KEY && env.R2_S3_SECRET_KEY) {
+    const s3Account = env.R2_S3_ACCOUNT_ID || '0c3e24ee0059b5d7deaeee4bd9ace23f';
+    const s3AccessKey = env.R2_S3_ACCESS_KEY;
+    const s3SecretKey = env.R2_S3_SECRET_KEY;
+    const bucket = env.R2_BUCKET_NAME || 'zaeinstream-video';
+
+    const presignedUrl = await presignR2Url(s3Account, s3AccessKey, s3SecretKey, bucket, objectKey, 3600);
+
+    // 302 redirect → browser follows to R2 S3 with presigned auth
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': presignedUrl,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': 'Range, Content-Type, Origin',
+        'Vary': 'Origin',
+      },
+    });
+  }
+
+  // Fallback: proxy via public URL (original approach — for other buckets)
   const VIDEO_DOMAIN = env.R2_PUBLIC_DOMAIN || 'https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev';
   const MEDIA_DOMAIN = env.R2_MEDIA_PUBLIC_DOMAIN || VIDEO_DOMAIN;
-
-  // Route to correct domain:
-  // 'zaeinstream-video' content is in the MEDIA bucket (same as the bucket's r2.dev domain).
-  // Strip trailing slash from domain to avoid double-slash in URL.
   let publicDomain, finalKey;
   if (bucketName === 'zaeinstream-video') {
     publicDomain = MEDIA_DOMAIN.replace(/\/+$/, '');
     finalKey = objectKey;
   } else {
-    // Fallback for unknown/other buckets
     publicDomain = VIDEO_DOMAIN.replace(/\/+$/, '');
     finalKey = objectKey;
   }
-
   const publicUrl = publicDomain + '/' + finalKey;
-
   const upstreamHeaders = new Headers();
   const range = request.headers.get('Range');
   if (range) upstreamHeaders.set('Range', range);
-
-  const upstream = await fetch(publicUrl, {
-    method: request.method,
-    headers: upstreamHeaders,
-  });
-
-  // Forward all upstream headers. Add CORS for safety (Shaka + blob: URLs).
+  const upstream = await fetch(publicUrl, { method: request.method, headers: upstreamHeaders });
   const responseHeaders = new Headers(upstream.headers);
   responseHeaders.set('Access-Control-Allow-Origin', '*');
   responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
   responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-
   return new Response(request.method === 'HEAD' ? null : upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: responseHeaders,
+    status: upstream.status, statusText: upstream.statusText, headers: responseHeaders,
   });
 }
 
