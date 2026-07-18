@@ -3504,12 +3504,11 @@ async function r2StreamHandler(request, env, r2Path) {
   const VIDEO_DOMAIN = env.R2_PUBLIC_DOMAIN || 'https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev';
 
   // Route to correct domain:
-  // 'zaeinstream-video' content (video, audio, subtitle) is in the MEDIA bucket
-  // (R2_MEDIA_PUBLIC_DOMAIN). VIDEO_DOMAIN is a separate bucket for non-video.
+  // Try VIDEO bucket first (has public access), then MEDIA bucket.
   // Strip trailing slash from domain to avoid double-slash in URL.
   let publicDomain, finalKey;
   if (bucketName === 'zaeinstream-video') {
-    publicDomain = (env.R2_MEDIA_PUBLIC_DOMAIN || VIDEO_DOMAIN).replace(/\/+$/, '');
+    publicDomain = VIDEO_DOMAIN.replace(/\/+$/, '');
     finalKey = objectKey;
   } else {
     // Fallback for unknown/other buckets
