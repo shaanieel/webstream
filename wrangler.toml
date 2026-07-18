@@ -27,6 +27,9 @@ R2_PUBLIC_DOMAIN = "https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev"
 # Nama bucket R2 — dipake worker buat strip dari path
 R2_BUCKET_NAME = "zaeinstream-video"
 
+# R2 Media domain (audio + subtitle) — bucket terpisah dari video
+R2_MEDIA_PUBLIC_DOMAIN = "https://pub-0c3e24ee0059b5d7deaeee4bd9ace23f.r2.dev"
+
 # === Service Binding ke gdi-worker (untuk Drive Index) ===
 # [[services]]
 # binding = "GDI"

@@ -3197,6 +3197,14 @@ export default {
       return releaseVipDownloadSlot(request, env);
     }
 
+    // === R2 stream proxy (GET + HEAD, video seeking via Range) ===
+    {
+      const m = pathname.match(/^\/api\/r2-stream\/(.+)/);
+      if (m && (request.method === 'GET' || request.method === 'HEAD')) {
+        return r2StreamHandler(request, env, m[1]);
+      }
+    }
+
     // === Catalog (public read) ===
     if (pathname === '/api/catalog' && request.method === 'GET') {
       return catalogList(request, env);
@@ -3466,6 +3474,72 @@ export default {
     }
   },
 };
+
+// ───────────────────────────────────────────────────────────────────
+// R2 STREAM PROXY — proxying from R2 public domain with Range + CORS support
+// ───────────────────────────────────────────────────────────────────
+
+// GET|HEAD /api/r2-stream/:path
+// Two path formats:
+//   1. r2_bucket+r2_path:  /api/r2-stream/{bucket}/{objectKey}  → strip bucket name
+//   2. fallback (audio/sub): /api/r2-stream/{objectKey}          → use as-is
+// Forwarded to R2_PUBLIC_DOMAIN with Range header for video seeking.
+async function r2StreamHandler(request, env, r2Path) {
+  // Known logical bucket names (from film.r2_bucket)
+  const knownBuckets = ['zaeinstream-video', 'zaeinstream-zip', 'zaeinstream-music'];
+  let bucketName = null;
+  let objectKey = r2Path;
+  const firstSlash = r2Path.indexOf('/');
+  if (firstSlash > 0) {
+    const firstSeg = r2Path.substring(0, firstSlash);
+    if (knownBuckets.includes(firstSeg)) {
+      bucketName = firstSeg;
+      // Keep full path (WITH bucket prefix) for objectKey — the MEDIA bucket
+      // stores objects at {bucket}/{r2_path}/{type}/{filename}
+      objectKey = r2Path;
+    }
+  }
+
+  // R2 public domains
+  const VIDEO_DOMAIN = env.R2_PUBLIC_DOMAIN || 'https://pub-0c8b20c7691f40b8b024516868a0a2f7.r2.dev';
+
+  // Route to correct domain:
+  // 'zaeinstream-video' content (video, audio, subtitle) is in the MEDIA bucket
+  // (R2_MEDIA_PUBLIC_DOMAIN). VIDEO_DOMAIN is a separate bucket for non-video.
+  // Strip trailing slash from domain to avoid double-slash in URL.
+  let publicDomain, finalKey;
+  if (bucketName === 'zaeinstream-video') {
+    publicDomain = (env.R2_MEDIA_PUBLIC_DOMAIN || VIDEO_DOMAIN).replace(/\/+$/, '');
+    finalKey = objectKey;
+  } else {
+    // Fallback for unknown/other buckets
+    publicDomain = VIDEO_DOMAIN.replace(/\/+$/, '');
+    finalKey = objectKey;
+  }
+
+  const publicUrl = publicDomain + '/' + finalKey;
+
+  const upstreamHeaders = new Headers();
+  const range = request.headers.get('Range');
+  if (range) upstreamHeaders.set('Range', range);
+
+  const upstream = await fetch(publicUrl, {
+    method: request.method,
+    headers: upstreamHeaders,
+  });
+
+  // Forward all upstream headers. Add CORS for safety (Shaka + blob: URLs).
+  const responseHeaders = new Headers(upstream.headers);
+  responseHeaders.set('Access-Control-Allow-Origin', '*');
+  responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+  responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+
+  return new Response(request.method === 'HEAD' ? null : upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: responseHeaders,
+  });
+}
 
 // ───────────────────────────────────────────────────────────────────
 // COLLECTIONS — public list/detail + admin CRUD
