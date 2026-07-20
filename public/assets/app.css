@@ -1023,12 +1023,35 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   overflow:visible !important;
   z-index:2147483640;
 }
+#player2Wrap media-player:fullscreen,
+#player2Wrap media-player:-webkit-full-screen,
+#playerWrap:fullscreen #p2VsPlayer,
+#playerWrap:-webkit-full-screen #p2VsPlayer{
+  overflow:visible !important;
+  z-index:2147483640 !important;
+}
+#player2Wrap media-player:fullscreen media-menu,
+#player2Wrap media-player:fullscreen media-menu-items,
+#player2Wrap media-player:-webkit-full-screen media-menu,
+#player2Wrap media-player:-webkit-full-screen media-menu-items,
+#playerWrap:fullscreen #player2Wrap media-menu,
+#playerWrap:fullscreen #player2Wrap media-menu-items,
+#playerWrap:-webkit-full-screen #player2Wrap media-menu,
+#playerWrap:-webkit-full-screen #player2Wrap media-menu-items{
+  z-index:2147483647 !important;
+  pointer-events:auto !important;
+  opacity:1 !important;
+  visibility:visible !important;
+}
 #player2Wrap media-menu,
 #player2Wrap media-menu-items,
 #player2Wrap .vds-menu,
 #player2Wrap .vds-menu-items,
 #player2Wrap [data-media-menu],
-#player2Wrap [data-media-menu-items]{
+#player2Wrap [data-media-menu-items],
+#player2Wrap [data-part="menu"],
+#player2Wrap [data-part="menu-items"],
+#player2Wrap [role="menu"]{
   z-index:2147483647 !important;
   pointer-events:auto !important;
   visibility:visible;
@@ -1043,6 +1066,11 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   pointer-events:none;
 }
 #p2OverlayMenus > *{ pointer-events:auto; }
+.player-wrap.is-fullscreen #p2OverlayMenus,
+.player-wrap:fullscreen #p2OverlayMenus,
+.player-wrap:-webkit-full-screen #p2OverlayMenus{
+  display:none !important;
+}
 .p2-overlay-btn{
   background:rgba(0,0,0,.62);
   -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);

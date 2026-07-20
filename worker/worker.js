@@ -105,8 +105,8 @@ async function serveAsset(request, env) {
 
   let html = await res.text();
   html = html
-    .replace(/\/assets\/app\.css\?v=[^"']+/g, '/assets/app.css?v=20260720-secure-player')
-    .replace(/\/assets\/app\.js\?v=[^"']+/g, '/assets/app.js?v=20260720-secure-player');
+    .replace(/\/assets\/app\.css\?v=[^"']+/g, '/assets/app.css?v=20260720-native-settings')
+    .replace(/\/assets\/app\.js\?v=[^"']+/g, '/assets/app.js?v=20260720-native-settings');
   return new Response(minifyHtml(html), {
     status: res.status,
     statusText: res.statusText,

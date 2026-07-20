@@ -3783,11 +3783,6 @@ function _p2WireVidstack(player, aux, film){
   }
   if(wrap && !wrap._p2FsSettingsHooked){
     wrap._p2FsSettingsHooked = true;
-    wrap.addEventListener('click', e => {
-      if(!_isFullscreen()) return;
-      if(!_p2IsSettingsClick(e) && !_p2ClickLooksLikeFullscreenGear(e)) return;
-      setTimeout(() => _p2ToggleFullscreenSettingsMenu(), 80);
-    }, true);
     document.addEventListener('fullscreenchange', () => { if(!_isFullscreen()) _p2CloseFullscreenSettingsMenu(); });
   }
 }
