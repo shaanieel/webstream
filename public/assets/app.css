@@ -939,10 +939,12 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 #player2Wrap{
   position:absolute; inset:0; display:none;
   background:#000;
+  overflow:visible;
 }
 #player2Wrap.show{ display:block; }
 #player2Wrap media-player{
   width:100%; height:100%; aspect-ratio:auto;
+  overflow:visible;
   --video-font-family:sans-serif;
   --video-brand:#f5f5f5;
   --video-controls-color:#f5f5f5;
@@ -969,12 +971,74 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
   --media-resumable-reject-button:#f6af21;
   --media-focus-ring:0 0 0 3px rgba(255,255,255,.3);
 }
+#player2Wrap media-player,
+#player2Wrap media-provider,
+#player2Wrap media-video-layout{
+  display:block;
+  width:100%;
+  height:100%;
+}
+#player2Wrap media-player::part(controls),
+#player2Wrap media-player::part(bottom-controls),
+#player2Wrap media-player::part(top-controls),
+#player2Wrap media-player::part(play-button),
+#player2Wrap media-player::part(settings-button),
+#player2Wrap media-player::part(captions-button),
+#player2Wrap media-player::part(fullscreen-button){
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+}
+#player2Wrap media-controls,
+#player2Wrap .vds-controls,
+#player2Wrap .vds-controls-group,
+#player2Wrap media-control-bar,
+#player2Wrap media-play-button,
+#player2Wrap media-mute-button,
+#player2Wrap media-caption-button,
+#player2Wrap media-menu-button,
+#player2Wrap media-fullscreen-button,
+#player2Wrap media-time-slider,
+#player2Wrap media-volume-slider,
+#player2Wrap .vds-button,
+#player2Wrap .vds-slider{
+  opacity:1 !important;
+  visibility:visible !important;
+  pointer-events:auto !important;
+}
+#player2Wrap media-controls,
+#player2Wrap .vds-controls{
+  display:flex !important;
+}
+#player2Wrap:fullscreen,
+#player2Wrap:-webkit-full-screen,
+#playerWrap:fullscreen #player2Wrap,
+#playerWrap:-webkit-full-screen #player2Wrap{
+  overflow:visible !important;
+}
+#player2Wrap:fullscreen media-player,
+#player2Wrap:-webkit-full-screen media-player,
+#playerWrap:fullscreen #player2Wrap media-player,
+#playerWrap:-webkit-full-screen #player2Wrap media-player{
+  overflow:visible !important;
+  z-index:2147483640;
+}
+#player2Wrap media-menu,
+#player2Wrap media-menu-items,
+#player2Wrap .vds-menu,
+#player2Wrap .vds-menu-items,
+#player2Wrap [data-media-menu],
+#player2Wrap [data-media-menu-items]{
+  z-index:2147483647 !important;
+  pointer-events:auto !important;
+  visibility:visible;
+}
 /* Hidden audio element for synced multi-dub track playback */
 #player2Wrap > audio.p2-aux-audio{ display:none; }
 
 /* P2 Overlay — audio & quality buttons inside the player (top-right, same area as settings gear) */
 #p2OverlayMenus{
-  position:absolute; top:12px; right:60px; z-index:8;
+  position:absolute; top:12px; right:60px; z-index:2147483600;
   display:flex; gap:6px; align-items:center;
   pointer-events:none;
 }
@@ -1001,6 +1065,8 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .p2-overlay-menu{
   display:none; position:absolute; top:100%; right:0; margin-top:6px;
   min-width:140px;
+  z-index:81;
+  pointer-events:auto;
   background:rgba(15,15,25,.95);
   -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
   border:1px solid rgba(255,255,255,.12);
@@ -1016,6 +1082,42 @@ body.sidebar-collapsed .player-modal{ left:var(--sidebar-w-collapsed); }
 .p2-overlay-item:hover{ background:rgba(255,255,255,.08); color:#fff; }
 .p2-overlay-item.active{ color:#fff; background:rgba(52,97,255,.3); font-weight:600; }
 .p2-overlay-item.active::before{ content:'✓ '; font-weight:700; }
+#p2FsSettingsMenu{
+  position:absolute;
+  right:74px;
+  bottom:72px;
+  z-index:2147483647;
+  width:min(320px, calc(100vw - 28px));
+  max-height:min(70vh, 520px);
+  overflow:auto;
+  padding:10px;
+  border-radius:12px;
+  background:rgba(8,8,14,.96);
+  color:#fff;
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:0 16px 44px rgba(0,0,0,.55);
+  -webkit-backdrop-filter:blur(14px);
+  backdrop-filter:blur(14px);
+}
+.p2-fs-settings-section + .p2-fs-settings-section{ margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,.1); }
+.p2-fs-settings-title{ color:rgba(255,255,255,.55); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; margin:0 0 5px; }
+.p2-fs-settings-row{
+  width:100%;
+  border:0;
+  background:transparent;
+  color:rgba(255,255,255,.88);
+  display:block;
+  text-align:left;
+  padding:9px 10px;
+  border-radius:8px;
+  cursor:pointer;
+  font:600 .88rem/1.2 var(--font, system-ui, sans-serif);
+}
+.p2-fs-settings-row:hover{ background:rgba(255,255,255,.1); color:#fff; }
+.p2-fs-settings-row.active{ background:rgba(52,97,255,.36); color:#fff; }
+@media(max-width:720px){
+  #p2FsSettingsMenu{ right:12px; bottom:76px; }
+}
 
 .player-info{margin-top:18px;}
 .player-info h2{font-size:1.5rem;font-weight:700;margin-bottom:6px;}
@@ -2449,7 +2551,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
    Stays inside #playerWrap so the browser keeps it visible when the
    wrap is fullscreened. */
 .player-overlay-tools{
-  position:absolute; top:12px; right:14px; z-index:8;
+  position:absolute; top:12px; right:14px; z-index:120;
   display:flex; gap:8px; align-items:center;
   pointer-events:none; /* children opt back in so the gap doesn't eat clicks */
 }
@@ -2519,6 +2621,7 @@ html[data-theme="light"] .themeToggle{color:#f59e0b;}
 .player-wrap.is-fullscreen .player-overlay-tools,
 .player-wrap:fullscreen .player-overlay-tools,
 .player-wrap:-webkit-full-screen .player-overlay-tools{
+  z-index:2147483647;
   top:calc(12px + env(safe-area-inset-top, 0));
   right:calc(14px + env(safe-area-inset-right, 0));
 }
@@ -3030,3 +3133,26 @@ body.ep-drawer-open #playerWrap *{
   .faq-a{ padding:0 14px 14px; padding-top:12px; font-size:.85rem; }
 }
 
+
+
+/* fullscreen-overlay-top-layer-fix */
+.player-wrap.is-fullscreen .ep-drawer-root,
+.player-wrap:fullscreen .ep-drawer-root,
+.player-wrap:-webkit-full-screen .ep-drawer-root{
+  z-index:2147483647 !important;
+}
+.player-wrap.is-fullscreen .ep-drawer-panel,
+.player-wrap:fullscreen .ep-drawer-panel,
+.player-wrap:-webkit-full-screen .ep-drawer-panel{
+  z-index:2147483647 !important;
+}
+.player-wrap.is-fullscreen .ep-drawer-backdrop,
+.player-wrap:fullscreen .ep-drawer-backdrop,
+.player-wrap:-webkit-full-screen .ep-drawer-backdrop{
+  z-index:2147483646 !important;
+}
+.player-wrap.is-fullscreen #p2FsSettingsMenu,
+.player-wrap:fullscreen #p2FsSettingsMenu,
+.player-wrap:-webkit-full-screen #p2FsSettingsMenu{
+  z-index:2147483647 !important;
+}

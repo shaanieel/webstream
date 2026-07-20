@@ -2025,7 +2025,10 @@ async function renderEpisodeList(film){
   picker.style.display='flex';
   npb.style.display='flex';
   npc.style.display='block';
-  if(epBtn) epBtn.style.display='inline-flex';
+  if(epBtn){
+    epBtn.style.display='inline-flex';
+    updatePlayerEpisodeButton(film);
+  }
 
   epPickerState.seriesFilms = eps;
   epPickerState.currentSeason = film.season || 1;
@@ -2134,6 +2137,10 @@ function openEpDrawer(){
   const slot   = document.getElementById('epDrawerSlot');
   const picker = document.getElementById('epPicker');
   if(!root || !slot || !picker) return;
+  if(!root.hidden && root.classList.contains('open')){
+    closeEpDrawer();
+    return;
+  }
   // Cancel any pending close so quick toggles don't fight each other.
   if(_epDrawerCloseTimer){ clearTimeout(_epDrawerCloseTimer); _epDrawerCloseTimer = null; }
   // Remember where the picker normally lives so we can put it back.
@@ -2152,6 +2159,15 @@ function openEpDrawer(){
   root.classList.add('open');
   document.body.classList.add('ep-drawer-open');
   document.addEventListener('keydown', _epDrawerEscHandler);
+}
+
+function updatePlayerEpisodeButton(film){
+  const btn = document.getElementById('playerEpBtn');
+  if(!btn || !film || film.tipe !== 'series') return;
+  btn.title = `Season ${film.season || 1} Episode ${film.episode || '?'}`;
+  btn.setAttribute('aria-label', btn.title);
+  const label = btn.querySelector('.label');
+  if(label) label.textContent = `S${film.season || 1} E${film.episode || '?'}`;
 }
 
 function closeEpDrawer(){
@@ -2233,7 +2249,10 @@ function _onFullscreenChange(){
   }
   // Iframe took fullscreen by itself (user hit the player4me fullscreen
   // button). Try to upgrade to wrap fullscreen so the overlay survives.
-  if(fsEl && vh && fsEl === vh && wrap && !_fsRedirecting){
+  if(
+    fsEl && wrap && fsEl !== wrap && !_fsRedirecting &&
+    (fsEl === vh || wrap.contains(fsEl))
+  ){
     _fsRedirecting = true;
     const exit = _fsExit();
     if(!exit){ _fsRedirecting = false; return; }
@@ -2268,7 +2287,10 @@ function onEpNumGo(){
   const target = epPickerState.seriesFilms.find(e =>
     (e.season||1) === epPickerState.currentSeason && (e.episode||0) === epNum
   );
-  if(target) openFilm(target, { vipMode: currentPlayerTier === 'vip' });
+  if(target){
+    try{ closeEpDrawer(); }catch(_){}
+    openFilm(target, { vipMode: currentPlayerTier === 'vip', resumeFrom: 0 });
+  }
 }
 
 function onEpNumInput(){
@@ -2332,6 +2354,7 @@ function renderEpListForSeason(season, activeId){
     // Jangan reload kalau klik episode yang sama.
     if(currentFilm && String(currentFilm.id) === String(next.id)) return;
 
+    try{ closeEpDrawer(); }catch(_){}
     openFilm(next, {
       vipMode: currentPlayerTier === 'vip',
       resumeFrom: 0
@@ -2730,8 +2753,44 @@ function _normalizeHostEmbedUrl(rawUrl, vipMode){
 }
 
 async function _resolveFilmSources(film){
+  if(film && film._playback){
+    const pb = film._playback;
+    if(!Array.isArray(film.videos) || !film.videos.length) film.videos = pb.videos || [];
+    if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length) film.audio_tracks = pb.audio_tracks || [];
+    if(!Array.isArray(film.subtitles) || !film.subtitles.length) film.subtitles = pb.subtitles || [];
+    if(!film.subtitle_urls && pb.subtitle_urls) film.subtitle_urls = pb.subtitle_urls;
+    if(!film.audio_url && pb.audio_url) film.audio_url = pb.audio_url;
+    if(!film.r2_bucket && pb.r2_bucket) film.r2_bucket = pb.r2_bucket;
+    if(!film.r2_path && pb.r2_path) film.r2_path = pb.r2_path;
+  }
   // ── Build videos array (multi-resolution) ──
   const videos = [];
+  function _r2ProxyUrl(raw){
+    if(!raw) return '';
+    var u = String(raw);
+    if(u.indexOf('/api/r2-stream/') === 0) return u;
+    u = u.replace(
+      /^https:\/\/pub-([^.]+)\.r2\.dev\/([^/]+)\/(.+)/,
+      '/api/r2-stream/account/$1/$2/$3'
+    );
+    u = u.replace(
+      /^https:\/\/([^/.]+)\.r2\.cloudflarestorage\.com\/([^/]+)\/(.+)/,
+      '/api/r2-stream/account/$1/$2/$3'
+    );
+    u = u.replace(
+      /^https:\/\/zaeinstream-video\.[^.]+\.r2\.dev\/(.+)/,
+      '/api/r2-stream/zaeinstream-video/$1'
+    );
+    u = u.replace(
+      /^https:\/\/pub-[^.]+\.r2\.dev\/zaeinstream-video\/(.+)/,
+      '/api/r2-stream/zaeinstream-video/$1'
+    );
+    u = u.replace(
+      /^https:\/\/[^/]+\.r2\.dev\/zaeinstream-video\/(.+)/,
+      '/api/r2-stream/zaeinstream-video/$1'
+    );
+    return u;
+  }
   // ── R2 source: map video_url / r2_bucket+r2_path / audio_url / subtitle_urls ke arrays ──
   // Catalog strips video_url for non-admin → fallback to playback response or r2_bucket+r2_path
   const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
@@ -2742,20 +2801,13 @@ async function _resolveFilmSources(film){
     // Use r2RawPath (/api/r2-stream/) as primary — pub-*.r2.dev public domains
     // frequently timeout (ERR_CONNECTION_TIMED_OUT). The Worker generates
     // presigned S3 URLs which are reliable and cheap (server→server fetch).
-    var r2ProxiedUrl = r2RawPath;
-    if(!r2ProxiedUrl && r2VideoUrl){
-      // Fallback: pub domain (legacy, may timeout)
-      r2ProxiedUrl = r2VideoUrl.replace(
-        /^https:\/\/zaeinstream-video\.([^.]+)\.r2\.dev\/(.+)/,
-        'https://pub-$1.r2.dev/zaeinstream-video/$2'
-      );
-    }
+    var r2ProxiedUrl = r2VideoUrl ? _r2ProxyUrl(r2VideoUrl) : r2RawPath;
     videos.push({ name: 'R2 Video', path: r2ProxiedUrl });
     // Audio tracks: check film.audio_tracks first, or parse film.audio_url
     if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length){
       if(film.audio_url){
         // legacy single audio URL, proxy via /media-proxy/
-        const ap = film.audio_url.replace(/^https:\/\/[^/]+\.r2\.dev/, '/api/r2-stream');
+        const ap = _r2ProxyUrl(film.audio_url);
         try{ film.audio_tracks = [{ name: 'Audio R2', url: ap, language: 'und' }]; }catch(e){}
       }
     }
@@ -2769,10 +2821,7 @@ async function _resolveFilmSources(film){
             film.subtitles = parsed.map(function(s,i){
               const su = s.url || '';
               // Convert to /api/r2-stream/ proxy (pub-*.r2.dev frequently timeouts)
-              var subtitleUrl = su.replace(
-                /^https:\/\/[^/]+\.r2\.dev\/(.+)/,
-                '/api/r2-stream/$1'
-              );
+              var subtitleUrl = _r2ProxyUrl(su);
               // If source is external & language is id -> force label "Indonesia"
               var subLabel = s.label || '';
               if((s.source === 'external' || s.language === 'id') && s.language === 'id'){
@@ -2789,7 +2838,12 @@ async function _resolveFilmSources(film){
     for(const v of film.videos){
       if(!v) continue;
       const url = v.url || v.stream_url || await _resolveDrivePath(v.drive_path);
-      if(url) videos.push({ name: v.name || v.label || 'Default', path: url });
+      if(url){
+        const path = _r2ProxyUrl(url);
+        if(!videos.some(x => x && x.path === path)){
+          videos.push({ name: v.name || v.label || 'Default', path });
+        }
+      }
     }
   }
   if(!videos.length){
@@ -2814,7 +2868,7 @@ async function _resolveFilmSources(film){
     for(const t of film.audio_tracks){
       if(!t) continue;
       const url = t.url || t.stream_url || await _resolveDrivePath(t.drive_path);
-      if(url) audios.push({ name: t.name || t.language || 'Audio', path: url, language: t.language || 'und' });
+      if(url) audios.push({ name: t.name || t.language || 'Audio', path: _r2ProxyUrl(url), language: t.language || 'und' });
     }
   }
   if(!audios.length){
@@ -2830,7 +2884,7 @@ async function _resolveFilmSources(film){
       var subUrl = s.url || s.stream_url || await _resolveDrivePath(s.drive_path);
       // Convert direct R2 URLs to /api/r2-stream/ proxy
       if(subUrl && subUrl.match(/^https:\/\/[^/]+\.r2\.dev\//)){
-        subUrl = subUrl.replace(/^https:\/\/[^/]+\.r2\.dev\/(.+)/, '/api/r2-stream/$1');
+        subUrl = _r2ProxyUrl(subUrl);
       }
       if(subUrl){
         var subName = s.name || '';
@@ -2914,6 +2968,7 @@ function teardownEngine2(){
     fresh.appendChild(provider);
     const layout = document.createElement('media-video-layout');
     layout.className = 'vds-video-layout dark';
+    layout.setAttribute('data-match','');
     layout.setAttribute('data-lg','');
     layout.setAttribute('data-size','lg');
     fresh.appendChild(layout);
@@ -3176,6 +3231,8 @@ async function loadVideoEngine2(film, sources){
   const player = document.getElementById('p2VsPlayer');
   const aux = document.getElementById('p2AuxAudio');
   if(!wrap || !player || !aux){ console.error('Player 2 DOM missing'); return; }
+  const initialVideoPath = videos && videos[0] && videos[0].path ? String(videos[0].path) : '';
+  const initialIsR2ProxySource = initialVideoPath.indexOf('/api/r2-stream/') === 0;
 
   // Ensure no stale chips / blob URLs from a previous film when reloading on
   // the same engine (loadVideo path doesn't auto-teardown engine 2).
@@ -3195,6 +3252,13 @@ async function loadVideoEngine2(film, sources){
   }
 
   wrap.classList.add('show');
+  if(initialIsR2ProxySource){
+    player.autoplay = true;
+    player.src = { src: initialVideoPath, type: _p2GuessVideoType(initialVideoPath) };
+    player.addEventListener('can-play', ()=>{
+      player.play().catch(()=>{});
+    }, { once: true });
+  }
 
   // Convert any subtitle (SRT/VTT/ASS) to a VTT blob URL so Vidstack
   // can render it via the standard <track> element + native cues UI.
@@ -3224,6 +3288,7 @@ async function loadVideoEngine2(film, sources){
     subtitles,
     qualityIdx: 0,
     audioIdx: 0,
+    subtitleIdx: -1,
     subBlobUrls,
     qualityChip: null,
     audioChip: null,
@@ -3242,7 +3307,9 @@ async function loadVideoEngine2(film, sources){
   // If the file turns out to be a multi-audio MP4, _p2TryMseMode wires
   // MediaSource Extensions and exposes the embedded audio tracks. If it
   // fails or returns false, fall back to the normal Vidstack <video> src.
-  const canProbe = videos.length === 1 && audios.length <= 1 && typeof MP4Box !== 'undefined';
+  const firstVideoPath = videos[0] && videos[0].path ? String(videos[0].path) : '';
+  const isR2ProxySource = firstVideoPath.indexOf('/api/r2-stream/') === 0;
+  const canProbe = !isR2ProxySource && videos.length === 1 && audios.length <= 1 && typeof MP4Box !== 'undefined';
   let mseHandled = false;
   if(canProbe){
     try{
@@ -3253,15 +3320,15 @@ async function loadVideoEngine2(film, sources){
       mseHandled = false;
     }
   }
-  // Force Vidstack video layout visible (remove responsive data-match that hides it)
+  // Force Vidstack video layout visible while keeping the Vidstack match
+  // attributes intact so the default controls can mount.
   const layout = player.querySelector('media-video-layout');
   if(layout){
-    layout.removeAttribute('data-match');
     layout.style.display = 'block';
   }
 
   player.autoplay = true;
-  if(!mseHandled){
+  if(!mseHandled && !initialIsR2ProxySource){
     player.src = { src: videos[0].path, type: _p2GuessVideoType(videos[0].path) };
     // Kick play once metadata loaded
     player.addEventListener('can-play', ()=>{
@@ -3357,11 +3424,24 @@ function _p2InjectOverlays(){
   const wrap = document.getElementById('player2Wrap');
   if(!wrap || !p2State) return;
   const hasMultiAudio = p2State.audios && p2State.audios.length > 1 && p2State._useAux;
-  const hasMultiVideo = p2State.videos && p2State.videos.length > 1;
+  const hasMultiVideo = p2State.videos && p2State.videos.length > 1 && !p2State.videos.every(v => /^R2 Video$/i.test(String(v && v.name || '')));
   const hasMseAudio = p2State.mse && p2State.mse.audioTracks && p2State.mse.audioTracks.length > 1;
-  if(!hasMultiAudio && !hasMultiVideo && !hasMseAudio) return;
+  const hasSubtitles = p2State.subtitles && p2State.subtitles.length > 0;
+  if(!hasMultiAudio && !hasMultiVideo && !hasMseAudio && !hasSubtitles) return;
   const div = document.createElement('div');
   div.id = 'p2OverlayMenus';
+  // Subtitle button (explicit picker for R2/native Vidstack films).
+  if(hasSubtitles){
+    const activeSub = p2State.subtitleIdx >= 0 ? p2State.subtitles[p2State.subtitleIdx] : null;
+    const label = activeSub ? _langName(activeSub.language, activeSub.name || activeSub.label) : 'Subtitle';
+    const items = [{ label:'Off', active:p2State.subtitleIdx < 0, onSelect:()=>{ _p2SelectSubtitle(-1); _p2InjectOverlays(); } }]
+      .concat(p2State.subtitles.map((s,i)=>({
+        label:_langName(s.language, s.name || s.label || ('Subtitle ' + (i+1))),
+        active:i === p2State.subtitleIdx,
+        onSelect:()=>{ _p2SelectSubtitle(i); _p2InjectOverlays(); }
+      })));
+    div.appendChild(_p2BuildOverlayDropdown(label, items));
+  }
   // Audio button (aux multi-dub)
   if(hasMultiAudio){
     const label = p2State.audios[p2State.audioIdx]?.name || ('Audio '+(p2State.audioIdx+1));
@@ -3383,6 +3463,36 @@ function _p2InjectOverlays(){
   }
   wrap.appendChild(div);
 }
+function _p2SelectSubtitle(index){
+  if(!p2State) return;
+  p2State.subtitleIdx = index;
+  const player = document.getElementById('p2VsPlayer');
+  const video = document.querySelector('#player2Wrap media-provider video, #player2Wrap video');
+  const sub = index >= 0 ? p2State.subtitles[index] : null;
+  try{
+    const tracks = player && player.textTracks ? Array.from(player.textTracks) : [];
+    if(index < 0){
+      try{ player.setTextTrackVisibility(false); }catch{}
+      tracks.forEach(t => { try{ t.mode = 'disabled'; }catch{} });
+    }else{
+      const track = tracks[index];
+      if(track){
+        try{ player.selectTextTrack(track); }
+        catch(_){ try{ player.selectTextLanguage(sub && (sub.language || sub.lang) || 'und'); }catch{} }
+      }else{
+        try{ player.selectTextLanguage(sub && (sub.language || sub.lang) || 'und'); }catch{}
+      }
+      try{ player.setTextTrackVisibility(true); }catch{}
+    }
+  }catch(e){
+    console.warn('[p2] subtitle select failed:', e);
+  }
+  try{
+    if(video && video.textTracks){
+      Array.from(video.textTracks).forEach((t,i) => { t.mode = i === index ? 'showing' : 'disabled'; });
+    }
+  }catch(e){}
+}
 // Build a single dropdown button (label + chevron + dropdown menu)
 function _p2BuildOverlayDropdown(currentLabel, items){
   const c=document.createElement('div'); c.className='p2-overlay-dropdown';
@@ -3398,6 +3508,86 @@ function _p2BuildOverlayDropdown(currentLabel, items){
   function ch(e){if(!c.contains(e.target))c.classList.remove('open');}
   document.addEventListener('click',ch); c._p2CloseHandler=ch;
   c.appendChild(btn); c.appendChild(menu); return c;
+}
+
+function _p2IsSettingsClick(e){
+  try{
+    const path = e.composedPath ? e.composedPath() : [];
+    return path.some(el => {
+      if(!el) return false;
+      const tag = String(el.localName || '').toLowerCase();
+      const label = String(el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title') || '') || '').toLowerCase();
+      return tag === 'media-menu-button' || label.includes('settings') || label.includes('pengaturan');
+    });
+  }catch(_){ return false; }
+}
+function _p2CloseFullscreenSettingsMenu(){
+  const old = document.getElementById('p2FsSettingsMenu');
+  if(old) old.remove();
+}
+function _p2SetPlaybackRate(rate){
+  const player = document.getElementById('p2VsPlayer');
+  const aux = document.getElementById('p2AuxAudio');
+  try{ if(player) player.playbackRate = rate; }catch{}
+  try{ if(aux) aux.playbackRate = rate; }catch{}
+}
+function _isFullscreen(){
+  try { return !!(_fsCurrent && _fsCurrent()); } catch(_) {}
+  return !!(document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement || document.msFullscreenElement);
+}
+
+function _p2ClickLooksLikeFullscreenGear(e){
+  if(!e || !_isFullscreen()) return false;
+  const wrap = document.getElementById('playerWrap') || document.getElementById('player2Wrap');
+  const r = (wrap && wrap.getBoundingClientRect) ? wrap.getBoundingClientRect() : { left:0, top:0, width:window.innerWidth, height:window.innerHeight };
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+  const fromRight = r.width - x;
+  const fromBottom = r.height - y;
+  return fromRight >= 82 && fromRight <= 158 && fromBottom >= 18 && fromBottom <= 92;
+}
+
+function _p2ToggleFullscreenSettingsMenu(){
+  const wrap = document.getElementById('player2Wrap');
+  if(!wrap || !_isFullscreen()) return;
+  const old = document.getElementById('p2FsSettingsMenu');
+  if(old){ old.remove(); return; }
+  const menu = document.createElement('div');
+  menu.id = 'p2FsSettingsMenu';
+  const rate = (()=>{ try{return document.getElementById('p2VsPlayer').playbackRate || 1;}catch(_){return 1;} })();
+  const speeds = [0.5,0.75,1,1.25,1.5,2];
+  const audioItems = (p2State && p2State.audios || []).map((a,i)=>({
+    label:a.name || a.label || a.language || ('Audio ' + (i+1)),
+    active:i === (p2State.audioIdx || 0),
+    action:()=>{ _p2SwitchAudio(i); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); }
+  }));
+  const subItems = [{ label:'Off', active:!p2State || p2State.subtitleIdx < 0, action:()=>{ _p2SelectSubtitle(-1); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); } }]
+    .concat((p2State && p2State.subtitles || []).map((s,i)=>({
+      label:s.name || s.label || s.language || ('Subtitle ' + (i+1)),
+      active:i === p2State.subtitleIdx,
+      action:()=>{ _p2SelectSubtitle(i); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); }
+    })));
+  const section = (title, items) => {
+    const block = document.createElement('div');
+    block.className = 'p2-fs-settings-section';
+    const h = document.createElement('div');
+    h.className = 'p2-fs-settings-title';
+    h.textContent = title;
+    block.appendChild(h);
+    items.forEach(it => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'p2-fs-settings-row' + (it.active ? ' active' : '');
+      row.textContent = (it.active ? '✓ ' : '') + it.label;
+      row.addEventListener('click', ev => { ev.stopPropagation(); it.action(); });
+      block.appendChild(row);
+    });
+    return block;
+  };
+  menu.appendChild(section('Speed', speeds.map(s => ({ label:s === 1 ? 'Normal' : String(s) + 'x', active:Math.abs(rate-s)<0.01, action:()=>{ _p2SetPlaybackRate(s); _p2CloseFullscreenSettingsMenu(); } }))));
+  if(audioItems.length) menu.appendChild(section('Audio', audioItems));
+  if(subItems.length > 1) menu.appendChild(section('Subtitle', subItems));
+  wrap.appendChild(menu);
 }
 
 function _p2WireVidstack(player, aux, film){
@@ -3417,16 +3607,30 @@ function _p2WireVidstack(player, aux, film){
     if(!p2State || !p2State._useAux) return;
     try{
       const dt = aux.currentTime - player.currentTime;
-      if(Math.abs(dt) > 0.25) aux.currentTime = player.currentTime;
-      else if(Math.abs(dt) > 0.05) aux.playbackRate = (player.playbackRate || 1) * (dt > 0 ? 0.97 : 1.03);
-      else aux.playbackRate = (player.playbackRate || 1);
+      aux.playbackRate = player.playbackRate || 1;
+      if(Math.abs(dt) > 0.35) aux.currentTime = player.currentTime;
+    }catch{}
+  };
+  const ensureAuxPlaying = (forceSeek)=>{
+    if(!p2State || !p2State._useAux) return;
+    try{
+      if(forceSeek || Math.abs((aux.currentTime || 0) - (player.currentTime || 0)) > 0.35){
+        aux.currentTime = player.currentTime || 0;
+      }
+      aux.volume = typeof player.volume === 'number' ? player.volume : 1;
+      aux.muted = false;
+      aux.playbackRate = player.playbackRate || 1;
+      if(!player.paused && aux.paused) aux.play().catch(()=>{});
     }catch{}
   };
   player.addEventListener('play', ()=>{
-    if(p2State && p2State._useAux){
-      try{ aux.currentTime = player.currentTime; }catch{}
-      aux.play().catch(()=>{});
-    }
+    ensureAuxPlaying(true);
+  });
+  player.addEventListener('playing', ()=>{
+    ensureAuxPlaying();
+  });
+  player.addEventListener('can-play', ()=>{
+    ensureAuxPlaying();
   });
   player.addEventListener('pause', ()=>{
     if(p2State && p2State._useAux){ try{ aux.pause(); }catch{} }
@@ -3442,7 +3646,7 @@ function _p2WireVidstack(player, aux, film){
   });
   player.addEventListener('volume-change', ()=>{
     if(p2State && p2State._useAux){
-      try{ aux.volume = player.volume; aux.muted = player.muted ? false : aux.muted; }catch{}
+      try{ aux.volume = player.volume; aux.muted = false; }catch{}
     }
   });
 
@@ -3450,6 +3654,7 @@ function _p2WireVidstack(player, aux, film){
   player.addEventListener('time-update', ()=>{
     if(!p2State) return;
     sync();
+    ensureAuxPlaying();
     const now = Date.now();
     if(now - p2State.lastSavedAt < 8000) return;
     p2State.lastSavedAt = now;
@@ -3459,6 +3664,22 @@ function _p2WireVidstack(player, aux, film){
   player.addEventListener('ended', ()=>{
     if(currentFilm) removeContinueWatching(currentFilm.id);
   });
+  const wrap = document.getElementById('player2Wrap');
+  if(wrap && !wrap._p2AuxUnlockHooked){
+    wrap._p2AuxUnlockHooked = true;
+    ['pointerdown','touchstart','click'].forEach(type => {
+      wrap.addEventListener(type, ensureAuxPlaying, { passive:true });
+    });
+  }
+  if(wrap && !wrap._p2FsSettingsHooked){
+    wrap._p2FsSettingsHooked = true;
+    wrap.addEventListener('click', e => {
+      if(!_isFullscreen()) return;
+      if(!_p2IsSettingsClick(e) && !_p2ClickLooksLikeFullscreenGear(e)) return;
+      setTimeout(() => _p2ToggleFullscreenSettingsMenu(), 80);
+    }, true);
+    document.addEventListener('fullscreenchange', () => { if(!_isFullscreen()) _p2CloseFullscreenSettingsMenu(); });
+  }
 }
 
 function _p2BuildChip(label, items){
