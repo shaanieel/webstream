@@ -3681,6 +3681,8 @@ async function r2StreamHandler(request, env, r2Path) {
     responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
     responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     responseHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type, Origin, Accept');
+    responseHeaders.set('Cache-Control', 'no-store, max-age=0');
+    responseHeaders.set('Vary', 'Origin, Range');
 
     return new Response(request.method === 'HEAD' ? null : upstream.body, {
       status: upstream.status,
@@ -3714,6 +3716,8 @@ async function r2StreamHandler(request, env, r2Path) {
   responseHeaders.set('Access-Control-Allow-Origin', '*');
   responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
   responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  responseHeaders.set('Cache-Control', 'no-store, max-age=0');
+  responseHeaders.set('Vary', 'Origin, Range');
   return new Response(request.method === 'HEAD' ? null : upstream.body, {
     status: upstream.status, statusText: upstream.statusText, headers: responseHeaders,
   });

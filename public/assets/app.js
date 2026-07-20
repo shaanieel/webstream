@@ -2812,7 +2812,8 @@ async function _resolveFilmSources(film){
   function _r2ProxyUrl(raw){
     if(!raw) return '';
     var u = String(raw);
-    if(u.indexOf('/api/r2-stream/') === 0) return u;
+    const bust = (path) => /[?&]zs_stream_fix=/.test(path) ? path : path + (path.indexOf('?') >= 0 ? '&' : '?') + 'zs_stream_fix=20260720';
+    if(u.indexOf('/api/r2-stream/') === 0) return bust(u);
     u = u.replace(
       /^https:\/\/pub-([^.]+)\.r2\.dev\/([^/]+)\/(.+)/,
       '/api/r2-stream/account/$1/$2/$3'
@@ -2833,12 +2834,12 @@ async function _resolveFilmSources(film){
       /^https:\/\/[^/]+\.r2\.dev\/zaeinstream-video\/(.+)/,
       '/api/r2-stream/zaeinstream-video/$1'
     );
-    return u;
+    return u.indexOf('/api/r2-stream/') === 0 ? bust(u) : u;
   }
   // ── R2 source: map video_url / r2_bucket+r2_path / audio_url / subtitle_urls ke arrays ──
   // Catalog strips video_url for non-admin → fallback to playback response or r2_bucket+r2_path
   const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
-  const r2RawPath = (film.r2_bucket && film.r2_path) ? ('/api/r2-stream/' + film.r2_bucket + '/' + film.r2_path + '/video/video.mp4') : null;
+  const r2RawPath = (film.r2_bucket && film.r2_path) ? _r2ProxyUrl('/api/r2-stream/' + film.r2_bucket + '/' + film.r2_path + '/video/video.mp4') : null;
   if((r2VideoUrl || r2RawPath) && !videos.length){
     // R2 video — convert custom domain to pub domain (better SSL + CORS)
     // Custom domain: zaeinstream-video.{account}.r2.dev → pub-{account}.r2.dev/zaeinstream-video/
