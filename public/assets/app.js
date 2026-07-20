@@ -2737,18 +2737,25 @@ async function _resolveFilmSources(film){
   const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
   const r2RawPath = (film.r2_bucket && film.r2_path) ? ('/api/r2-stream/' + film.r2_bucket + '/' + film.r2_path + '/video/video.mp4') : null;
   if((r2VideoUrl || r2RawPath) && !videos.length){
-    // R2 video (maybe muxed with audio tracks embedded)
-    // Proxy via /api/r2-stream/ (worker generates presigned S3 URL + redirect)
-    // When r2_bucket is set, r2VideoUrl might be a Player4Me embed URL (admin),
-    // so prefer r2RawPath (built from r2_bucket+r2_path) which is always correct.
+    // R2 video — convert custom domain to pub domain (better SSL + CORS)
+    // Custom domain: zaeinstream-video.{account}.r2.dev → pub-{account}.r2.dev/zaeinstream-video/
+    // Use r2RawPath (/api/r2-stream/) as primary — pub-*.r2.dev public domains
+    // frequently timeout (ERR_CONNECTION_TIMED_OUT). The Worker generates
+    // presigned S3 URLs which are reliable and cheap (server→server fetch).
     var r2ProxiedUrl = r2RawPath;
-    if(!r2ProxiedUrl && r2VideoUrl) r2ProxiedUrl = r2VideoUrl.replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
+    if(!r2ProxiedUrl && r2VideoUrl){
+      // Fallback: pub domain (legacy, may timeout)
+      r2ProxiedUrl = r2VideoUrl.replace(
+        /^https:\/\/zaeinstream-video\.([^.]+)\.r2\.dev\/(.+)/,
+        'https://pub-$1.r2.dev/zaeinstream-video/$2'
+      );
+    }
     videos.push({ name: 'R2 Video', path: r2ProxiedUrl });
     // Audio tracks: check film.audio_tracks first, or parse film.audio_url
     if(!Array.isArray(film.audio_tracks) || !film.audio_tracks.length){
       if(film.audio_url){
         // legacy single audio URL, proxy via /media-proxy/
-        const ap = film.audio_url.replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
+        const ap = film.audio_url.replace(/^https:\/\/[^/]+\.r2\.dev/, '/api/r2-stream');
         try{ film.audio_tracks = [{ name: 'Audio R2', url: ap, language: 'und' }]; }catch(e){}
       }
     }
@@ -2760,8 +2767,18 @@ async function _resolveFilmSources(film){
           if(typeof parsed === 'string') parsed = JSON.parse(parsed);
           if(Array.isArray(parsed)){
             film.subtitles = parsed.map(function(s,i){
-              const su = (s.url || '').replace(/^https:\/\/pub-[^/]+\.r2\.dev/, '/api/r2-stream');
-              return { name: s.label || s.language || ('Sub '+(i+1)), url: su, language: s.language || '' };
+              const su = s.url || '';
+              // Convert to /api/r2-stream/ proxy (pub-*.r2.dev frequently timeouts)
+              var subtitleUrl = su.replace(
+                /^https:\/\/[^/]+\.r2\.dev\/(.+)/,
+                '/api/r2-stream/$1'
+              );
+              // If source is external & language is id -> force label "Indonesia"
+              var subLabel = s.label || '';
+              if((s.source === 'external' || s.language === 'id') && s.language === 'id'){
+                subLabel = 'Indonesia';
+              }
+              return { name: subLabel || s.language || ('Sub '+(i+1)), url: subtitleUrl, language: s.language || '' };
             });
           }
         }catch(e){}
@@ -2810,8 +2827,19 @@ async function _resolveFilmSources(film){
   if(Array.isArray(film.subtitles)){
     for(const s of film.subtitles){
       if(!s) continue;
-      const url = s.url || s.stream_url || await _resolveDrivePath(s.drive_path);
-      if(url) subtitles.push({ name: s.name || s.language || 'Subtitle', path: url, language: s.language || '' });
+      var subUrl = s.url || s.stream_url || await _resolveDrivePath(s.drive_path);
+      // Convert direct R2 URLs to /api/r2-stream/ proxy
+      if(subUrl && subUrl.match(/^https:\/\/[^/]+\.r2\.dev\//)){
+        subUrl = subUrl.replace(/^https:\/\/[^/]+\.r2\.dev\/(.+)/, '/api/r2-stream/$1');
+      }
+      if(subUrl){
+        var subName = s.name || '';
+        // force "Indonesia" label for id language
+        if((s.source === 'external' || s.language === 'id') && s.language === 'id'){
+          subName = 'Indonesia';
+        }
+        subtitles.push({ name: subName || s.language || 'Subtitle', path: subUrl, language: s.language || '' });
+      }
     }
   }
   if(Array.isArray(film.auto_subtitle_tracks)){
@@ -3277,7 +3305,7 @@ async function loadVideoEngine2(film, sources){
   }
 
   // Multi-dub auxiliary audio
-  if(p2State._useAux){
+  if(p2State && p2State._useAux){
     aux.src = audios[0].path;
     aux.muted = false;
     aux.volume = 1;
@@ -4251,7 +4279,8 @@ async function loadVideoEngine3(film, sources){
     const s = subtitles[i];
     const vttUrl = await _srtToVttBlobUrl(s.path);
     if(vttUrl){
-      vttSubs.push({ url: vttUrl, language: s.language || 'und', label: s.name || s.language || ('Sub ' + (i+1)) });
+      var subLabel = s.language === 'id' ? 'Indonesia' : (s.name || s.language || ('Sub ' + (i+1)));
+      vttSubs.push({ url: vttUrl, language: s.language || 'und', label: subLabel });
       _manifestStore.vttUrls.push(vttUrl);
     }
   }
@@ -4996,7 +5025,7 @@ function renderSubList(subs){
     el.addEventListener('click', ()=>{
       list.querySelectorAll('.subs-list-item').forEach(x=>x.classList.remove('active'));
       el.classList.add('active');
-      loadSubtitleById(el.dataset.id, el.dataset.name);
+      loadSubtitleById(el.dataset.id, 'Indonesia'); // subsource subtitle selalu Indonesia
     });
   });
 }
@@ -5050,7 +5079,7 @@ function applySubTrack(url, label){
       const blob = new Blob([text], {type:'text/vtt'});
       const turl = URL.createObjectURL(blob);
       const tr = document.createElement('track');
-      tr.kind='subtitles'; tr.label=label||'Subtitle'; tr.srclang='id';
+      tr.kind='subtitles'; tr.label=(label||'Indonesia'); tr.srclang='id';
       tr.src=turl; tr.default=true; tr.setAttribute('data-dynamic','1');
       v.appendChild(tr);
       try{ v.textTracks[v.textTracks.length-1].mode='showing'; }catch{}
@@ -5072,7 +5101,7 @@ function onSubFile(file){
     if(/\.srt$/i.test(file.name)) text = srtToVtt(text);
     if(_currentSubBlobUrl) URL.revokeObjectURL(_currentSubBlobUrl);
     _currentSubBlobUrl = URL.createObjectURL(new Blob([text], {type:'text/vtt'}));
-    applySubTrack(_currentSubBlobUrl, file.name.replace(/\.(srt|vtt)$/i,''));
+    applySubTrack(_currentSubBlobUrl, 'Indonesia'); // external file selalu subtitle Indonesia
     status.className='subs-status';
     status.textContent='✓ '+file.name;
   };
