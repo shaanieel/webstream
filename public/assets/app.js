@@ -2157,6 +2157,7 @@ function openEpDrawer(){
   // off-screen state instead of snapping straight to open.
   void root.offsetWidth;
   root.classList.add('open');
+  document.getElementById('playerWrap')?.classList.add('ep-drawer-active');
   document.body.classList.add('ep-drawer-open');
   document.addEventListener('keydown', _epDrawerEscHandler);
 }
@@ -2174,6 +2175,7 @@ function closeEpDrawer(){
   const root = document.getElementById('epDrawerRoot');
   if(!root || root.hidden) return;
   root.classList.remove('open');
+  document.getElementById('playerWrap')?.classList.remove('ep-drawer-active');
   document.body.classList.remove('ep-drawer-open');
   document.removeEventListener('keydown', _epDrawerEscHandler);
   // Wait for the slide-out transition before hiding the root and
@@ -2262,6 +2264,48 @@ function _onFullscreenChange(){
       .finally(() => { _fsRedirecting = false; });
   }
 }
+function initPlayerControlsAutoHide(){
+  const wrap = document.getElementById('playerWrap');
+  if(!wrap || wrap._controlsIdleBound) return;
+  wrap._controlsIdleBound = true;
+  let timer = null;
+  const clear = () => { if(timer){ clearTimeout(timer); timer = null; } };
+  const hasOpenUi = () => {
+    return !!(
+      document.getElementById('epDrawerRoot')?.classList.contains('open') ||
+      document.getElementById('p2FsSettingsMenu') ||
+      document.querySelector('#p2OverlayMenus .open') ||
+      document.querySelector('.player-engine-chip.open') ||
+      document.getElementById('subsPanel')?.classList.contains('open')
+    );
+  };
+  const show = () => {
+    clear();
+    wrap.classList.remove('player-controls-hidden');
+    wrap.classList.add('player-controls-visible');
+  };
+  const hide = () => {
+    if(hasOpenUi()) { schedule(); return; }
+    wrap.classList.remove('player-controls-visible');
+    wrap.classList.add('player-controls-hidden');
+  };
+  function schedule(){
+    clear();
+    timer = setTimeout(hide, 5000);
+  }
+  const wake = () => { show(); schedule(); };
+  ['mousemove','pointermove','pointerdown','touchstart','touchmove','click','keydown'].forEach(type => {
+    const target = type === 'keydown' ? document : wrap;
+    target.addEventListener(type, wake, { passive:true });
+  });
+  wrap.addEventListener('mouseleave', schedule, { passive:true });
+  document.addEventListener('fullscreenchange', wake);
+  document.addEventListener('webkitfullscreenchange', wake);
+  wake();
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initPlayerControlsAutoHide);
+else initPlayerControlsAutoHide();
+
 document.addEventListener('fullscreenchange',        _onFullscreenChange);
 document.addEventListener('webkitfullscreenchange',  _onFullscreenChange);
 document.addEventListener('mozfullscreenchange',     _onFullscreenChange);
@@ -3421,6 +3465,7 @@ async function loadVideoEngine2(film, sources){
 function _p2InjectOverlays(){
   const old = document.getElementById('p2OverlayMenus');
   if(old) old.remove();
+  document.getElementById('playerWrap')?.classList.remove('p2-settings-active');
   const wrap = document.getElementById('player2Wrap');
   if(!wrap || !p2State) return;
   const hasMultiAudio = p2State.audios && p2State.audios.length > 1 && p2State._useAux;
@@ -3524,6 +3569,7 @@ function _p2IsSettingsClick(e){
 function _p2CloseFullscreenSettingsMenu(){
   const old = document.getElementById('p2FsSettingsMenu');
   if(old) old.remove();
+  document.getElementById('playerWrap')?.classList.remove('p2-settings-active');
 }
 function _p2SetPlaybackRate(rate){
   const player = document.getElementById('p2VsPlayer');
@@ -3551,7 +3597,7 @@ function _p2ToggleFullscreenSettingsMenu(){
   const wrap = document.getElementById('player2Wrap');
   if(!wrap || !_isFullscreen()) return;
   const old = document.getElementById('p2FsSettingsMenu');
-  if(old){ old.remove(); return; }
+  if(old){ old.remove(); document.getElementById('playerWrap')?.classList.remove('p2-settings-active'); return; }
   const menu = document.createElement('div');
   menu.id = 'p2FsSettingsMenu';
   const rate = (()=>{ try{return document.getElementById('p2VsPlayer').playbackRate || 1;}catch(_){return 1;} })();
@@ -3588,7 +3634,9 @@ function _p2ToggleFullscreenSettingsMenu(){
   if(audioItems.length) menu.appendChild(section('Audio', audioItems));
   if(subItems.length > 1) menu.appendChild(section('Subtitle', subItems));
   wrap.appendChild(menu);
+  document.getElementById('playerWrap')?.classList.add('p2-settings-active');
 }
+
 
 function _p2WireVidstack(player, aux, film){
   // Inject custom audio & quality overlays INTO the player (top-right area)

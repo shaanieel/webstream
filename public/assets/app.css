@@ -3156,3 +3156,46 @@ body.ep-drawer-open #playerWrap *{
 .player-wrap:-webkit-full-screen #p2FsSettingsMenu{
   z-index:2147483647 !important;
 }
+
+
+/* player-controls-idle-hide */
+.player-wrap .player-toolbar,
+.player-wrap .player-overlay-tools,
+.player-wrap #p2OverlayMenus,
+.player-wrap media-controls,
+.player-wrap .vds-controls,
+.player-wrap .vds-controls-group,
+.player-wrap media-control-bar{
+  transition:opacity .24s ease, transform .28s cubic-bezier(.2,.8,.2,1), visibility .24s ease !important;
+}
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) .player-toolbar,
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) .player-overlay-tools,
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) #p2OverlayMenus{
+  opacity:0 !important;
+  visibility:hidden !important;
+  pointer-events:none !important;
+  transform:translateY(28px) !important;
+}
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) media-controls,
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) .vds-controls,
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) .vds-controls-group,
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) media-control-bar{
+  opacity:0 !important;
+  visibility:hidden !important;
+  pointer-events:none !important;
+  transform:translateY(34px) !important;
+}
+.player-wrap.player-controls-visible .player-toolbar,
+.player-wrap.player-controls-visible .player-overlay-tools,
+.player-wrap.player-controls-visible #p2OverlayMenus,
+.player-wrap.player-controls-visible media-controls,
+.player-wrap.player-controls-visible .vds-controls,
+.player-wrap.player-controls-visible .vds-controls-group,
+.player-wrap.player-controls-visible media-control-bar{
+  opacity:1 !important;
+  visibility:visible !important;
+  pointer-events:auto !important;
+  transform:translateY(0) !important;
+}
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active){ cursor:none; }
+.player-wrap.player-controls-hidden:not(.ep-drawer-active):not(.p2-settings-active) video{ cursor:none; }
