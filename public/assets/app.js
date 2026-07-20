@@ -2809,11 +2809,27 @@ async function _resolveFilmSources(film){
   }
   // ── Build videos array (multi-resolution) ──
   const videos = [];
+  function _appendStreamGrant(path){
+    const pb = (film && film._playback) || {};
+    if(!path || path.indexOf('/api/r2-stream/') !== 0) return path || '';
+    if(!pb.stream_token || !pb.stream_token_exp || !pb.stream_token_prefix) return path;
+    let out = path;
+    const add = (k, v) => {
+      if(new RegExp('[?&]' + k + '=').test(out)) return;
+      out += (out.indexOf('?') >= 0 ? '&' : '?') + k + '=' + encodeURIComponent(String(v));
+    };
+    add('st', pb.stream_token);
+    add('exp', pb.stream_token_exp);
+    add('sp', pb.stream_token_prefix);
+    return out;
+  }
   function _r2ProxyUrl(raw){
     if(!raw) return '';
     var u = String(raw);
     const bust = (path) => /[?&]zs_stream_fix=/.test(path) ? path : path + (path.indexOf('?') >= 0 ? '&' : '?') + 'zs_stream_fix=20260720';
-    if(u.indexOf('/api/r2-stream/') === 0) return bust(u);
+    u = u.replace(/^https:\/\/webstream\.zaeinstreamx\.workers\.dev\/api\/r2-stream\//, '/api/r2-stream/');
+    u = u.replace(/^https:\/\/zaeinstream\.my\.id\/api\/r2-stream\//, '/api/r2-stream/');
+    if(u.indexOf('/api/r2-stream/') === 0) return _appendStreamGrant(bust(u));
     u = u.replace(
       /^https:\/\/pub-([^.]+)\.r2\.dev\/([^/]+)\/(.+)/,
       '/api/r2-stream/account/$1/$2/$3'
@@ -2834,7 +2850,7 @@ async function _resolveFilmSources(film){
       /^https:\/\/[^/]+\.r2\.dev\/zaeinstream-video\/(.+)/,
       '/api/r2-stream/zaeinstream-video/$1'
     );
-    return u.indexOf('/api/r2-stream/') === 0 ? bust(u) : u;
+    return u.indexOf('/api/r2-stream/') === 0 ? _appendStreamGrant(bust(u)) : u;
   }
   // ── R2 source: map video_url / r2_bucket+r2_path / audio_url / subtitle_urls ke arrays ──
   // Catalog strips video_url for non-admin → fallback to playback response or r2_bucket+r2_path
@@ -3415,6 +3431,14 @@ async function loadVideoEngine2(film, sources){
       }
     }
   }
+  const preferredSubtitleIdx = _p2PreferredSubtitleIndex(subtitles);
+  if(preferredSubtitleIdx >= 0){
+    setTimeout(() => {
+      if(gen !== _p2LoadGen) return;
+      _p2SelectSubtitle(preferredSubtitleIdx);
+      _p2InjectOverlays();
+    }, 300);
+  }
 
   // Multi-dub auxiliary audio
   if(p2State && p2State._useAux){
@@ -3515,16 +3539,24 @@ function _p2SelectSubtitle(index){
   const player = document.getElementById('p2VsPlayer');
   const video = document.querySelector('#player2Wrap media-provider video, #player2Wrap video');
   const sub = index >= 0 ? p2State.subtitles[index] : null;
+  const wantedBlob = index >= 0 && p2State.subBlobUrls ? p2State.subBlobUrls[index] : '';
+  const wantedLang = String(sub && (sub.language || sub.lang) || '').toLowerCase();
+  const wantedLabel = String(sub && (sub.name || sub.label) || '').toLowerCase();
   try{
     const tracks = player && player.textTracks ? Array.from(player.textTracks) : [];
     if(index < 0){
       try{ player.setTextTrackVisibility(false); }catch{}
       tracks.forEach(t => { try{ t.mode = 'disabled'; }catch{} });
     }else{
-      const track = tracks[index];
+      const track = tracks.find(t =>
+        (wantedBlob && String(t.src || '') === wantedBlob) ||
+        (wantedLang && String(t.language || '').toLowerCase() === wantedLang) ||
+        (wantedLabel && String(t.label || '').toLowerCase() === wantedLabel)
+      ) || tracks[index];
       if(track){
         try{ player.selectTextTrack(track); }
         catch(_){ try{ player.selectTextLanguage(sub && (sub.language || sub.lang) || 'und'); }catch{} }
+        try{ track.mode = 'showing'; }catch{}
       }else{
         try{ player.selectTextLanguage(sub && (sub.language || sub.lang) || 'und'); }catch{}
       }
@@ -3535,9 +3567,38 @@ function _p2SelectSubtitle(index){
   }
   try{
     if(video && video.textTracks){
-      Array.from(video.textTracks).forEach((t,i) => { t.mode = i === index ? 'showing' : 'disabled'; });
+      const nativeTracks = Array.from(video.textTracks);
+      let selected = -1;
+      if(index >= 0){
+        selected = nativeTracks.findIndex(t =>
+          (wantedLang && String(t.language || '').toLowerCase() === wantedLang) ||
+          (wantedLabel && String(t.label || '').toLowerCase() === wantedLabel)
+        );
+        if(selected < 0) selected = index;
+      }
+      nativeTracks.forEach((t,i) => { t.mode = i === selected ? 'showing' : 'disabled'; });
     }
   }catch(e){}
+}
+function _p2PreferredSubtitleIndex(subtitles){
+  if(!Array.isArray(subtitles) || !subtitles.length) return -1;
+  const norm = s => String(s || '').toLowerCase();
+  const isIndo = s => {
+    const lang = norm(s.language || s.lang);
+    const name = norm(s.name || s.label);
+    return ['id','ind','ina','id-id','indonesia','indonesian','bahasa indonesia'].includes(lang) ||
+      name.includes('indonesia') || name.includes('indonesian') || name.includes('bahasa indonesia') || /\bindo\b/.test(name);
+  };
+  const isEng = s => {
+    const lang = norm(s.language || s.lang);
+    const name = norm(s.name || s.label);
+    return ['en','eng','en-us','en-gb','english','inggris'].includes(lang) ||
+      name.includes('english') || name.includes('inggris');
+  };
+  let idx = subtitles.findIndex(isIndo);
+  if(idx >= 0) return idx;
+  idx = subtitles.findIndex(isEng);
+  return idx >= 0 ? idx : -1;
 }
 // Build a single dropdown button (label + chevron + dropdown menu)
 function _p2BuildOverlayDropdown(currentLabel, items){

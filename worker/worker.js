@@ -12,6 +12,11 @@
 
 const SUBSOURCE_BASE = 'https://api.subsource.net/api/v1';
 const PLAYER4ME_BASE = 'https://player4me.com/api/v1';
+const STREAM_ALLOWED_ORIGINS = new Set([
+  'https://webstream.zaeinstreamx.workers.dev',
+  'https://zaeinstream.my.id',
+]);
+const STREAM_TOKEN_TTL_SECONDS = 3 * 60 * 60;
 
 // Build the public player URL for a Player4Me video id. Always uses the
 // admin's branded custom domain (PLAYER4ME_PUBLIC_DOMAIN, e.g.
@@ -100,8 +105,8 @@ async function serveAsset(request, env) {
 
   let html = await res.text();
   html = html
-    .replace(/\/assets\/app\.css\?v=[^"']+/g, '/assets/app.css?v=20260720-r2-inventory-fs2')
-    .replace(/\/assets\/app\.js\?v=[^"']+/g, '/assets/app.js?v=20260720-r2-inventory-fs2');
+    .replace(/\/assets\/app\.css\?v=[^"']+/g, '/assets/app.css?v=20260720-secure-player')
+    .replace(/\/assets\/app\.js\?v=[^"']+/g, '/assets/app.js?v=20260720-secure-player');
   return new Response(minifyHtml(html), {
     status: res.status,
     statusText: res.statusText,
@@ -3130,6 +3135,9 @@ async function playbackHandler(request, env, filmId) {
       }, 403);
     }
   }
+  const streamGrant = film.r2_path
+    ? await makeStreamGrant(env, film.r2_bucket || env.R2_BUCKET_NAME || 'zaeinstream-video', film.r2_path)
+    : null;
 
   return json({
     ok: true,
@@ -3148,6 +3156,9 @@ async function playbackHandler(request, env, filmId) {
     subtitle_urls: film.subtitle_urls || [],
     r2_bucket: film.r2_bucket || '',
     r2_path: film.r2_path || '',
+    stream_token: streamGrant ? streamGrant.token : '',
+    stream_token_exp: streamGrant ? streamGrant.exp : 0,
+    stream_token_prefix: streamGrant ? streamGrant.prefix : '',
   });
 }
 // ───────────────────────────────────────────────────────────────────
@@ -3501,6 +3512,63 @@ function bytesToHex(bytes) {
 }
 
 function enc(s) { return encodeURIComponent(s); }
+function base64UrlEncode(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+function streamTokenSecret(env) {
+  return env.STREAM_TOKEN_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY || 'zaeinstream-stream-token';
+}
+function normalizeStreamPrefix(bucket, r2Path) {
+  const b = String(bucket || 'zaeinstream-video').replace(/^\/+|\/+$/g, '');
+  const p = String(r2Path || '').replace(/^\/+|\/+$/g, '');
+  return p ? `${b}/${p}` : b;
+}
+async function signStreamToken(env, prefix, exp) {
+  const key = new TextEncoder().encode(streamTokenSecret(env));
+  return base64UrlEncode(await hmacSha256(key, `${prefix}\n${exp}`));
+}
+async function makeStreamGrant(env, bucket, r2Path) {
+  const prefix = normalizeStreamPrefix(bucket, r2Path);
+  const exp = Math.floor(Date.now() / 1000) + STREAM_TOKEN_TTL_SECONDS;
+  const token = await signStreamToken(env, prefix, exp);
+  return { prefix, exp, token };
+}
+function streamRequestOrigin(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (STREAM_ALLOWED_ORIGINS.has(origin)) return origin;
+  const ref = request.headers.get('Referer') || '';
+  try {
+    const refOrigin = new URL(ref).origin;
+    if (STREAM_ALLOWED_ORIGINS.has(refOrigin)) return refOrigin;
+  } catch (_) {}
+  return '';
+}
+function streamCorsHeaders(request) {
+  const origin = streamRequestOrigin(request) || 'https://webstream.zaeinstreamx.workers.dev';
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Range, Content-Type, Origin, Accept',
+    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin, Referer, Range',
+  };
+}
+async function verifyStreamAccess(request, env, streamPath) {
+  if (!streamRequestOrigin(request)) return { ok: false, status: 403, error: 'Forbidden stream origin' };
+  const url = new URL(request.url);
+  const exp = Number(url.searchParams.get('exp') || 0);
+  const token = String(url.searchParams.get('st') || '');
+  const prefix = String(url.searchParams.get('sp') || '').replace(/^\/+|\/+$/g, '');
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return { ok: false, status: 403, error: 'Stream token expired' };
+  if (!token) return { ok: false, status: 403, error: 'Stream token missing' };
+  if (!prefix || !(streamPath === prefix || streamPath.startsWith(prefix + '/'))) return { ok: false, status: 403, error: 'Stream token scope invalid' };
+  const expected = await signStreamToken(env, prefix, exp);
+  if (token !== expected) return { ok: false, status: 403, error: 'Stream token invalid' };
+  return { ok: true };
+}
 function encPath(s) {
   return String(s || '').split('/').map(part => encodeURIComponent(part)).join('/');
 }
@@ -3610,14 +3678,12 @@ function guessR2ContentType(key) {
 async function r2StreamHandler(request, env, r2Path) {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
+    if (!streamRequestOrigin(request)) {
+      return new Response(null, { status: 403, headers: streamCorsHeaders(request) });
+    }
     return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-        'Access-Control-Allow-Headers': 'Range, Content-Type, Origin',
-        'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
-        'Access-Control-Max-Age': '86400',
-      },
+      status: 204,
+      headers: streamCorsHeaders(request),
     });
   }
 
@@ -3642,6 +3708,11 @@ async function r2StreamHandler(request, env, r2Path) {
       objectKey = r2Path.substring(firstSlash + 1);
     }
   }
+  const streamPath = bucketName ? `${bucketName}/${objectKey}` : objectKey;
+  const access = await verifyStreamAccess(request, env, streamPath);
+  if (!access.ok) {
+    return new Response(access.error, { status: access.status || 403, headers: streamCorsHeaders(request) });
+  }
 
   // If we have S3 credentials and this is zaeinstream-video → proxy via presigned S3 URL
   // Server-to-server fetch (no CORS issues), then return with CORS headers to browser.
@@ -3661,8 +3732,7 @@ async function r2StreamHandler(request, env, r2Path) {
     const s3SecretKey = accountCfg.secretKey;
     const bucket = accountCfg.bucket || bucketName;
 
-    // Presigned URL valid 12 hours — one landing page visit is enough
-    const presignedUrl = await presignR2Url(s3Account, s3AccessKey, s3SecretKey, bucket, objectKey, 43200, request.method);
+    const presignedUrl = await presignR2Url(s3Account, s3AccessKey, s3SecretKey, bucket, objectKey, 600, request.method);
 
     // Forward Range header for seeking
     const upstreamHeaders = new Headers();
@@ -3677,12 +3747,8 @@ async function r2StreamHandler(request, env, r2Path) {
       const guessed = guessR2ContentType(objectKey);
       if (guessed) responseHeaders.set('Content-Type', guessed);
     }
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    responseHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type, Origin, Accept');
+    for (const [k, v] of Object.entries(streamCorsHeaders(request))) responseHeaders.set(k, v);
     responseHeaders.set('Cache-Control', 'no-store, max-age=0');
-    responseHeaders.set('Vary', 'Origin, Range');
 
     return new Response(request.method === 'HEAD' ? null : upstream.body, {
       status: upstream.status,
@@ -3713,11 +3779,8 @@ async function r2StreamHandler(request, env, r2Path) {
     const guessed = guessR2ContentType(finalKey);
     if (guessed) responseHeaders.set('Content-Type', guessed);
   }
-  responseHeaders.set('Access-Control-Allow-Origin', '*');
-  responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
-  responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  for (const [k, v] of Object.entries(streamCorsHeaders(request))) responseHeaders.set(k, v);
   responseHeaders.set('Cache-Control', 'no-store, max-age=0');
-  responseHeaders.set('Vary', 'Origin, Range');
   return new Response(request.method === 'HEAD' ? null : upstream.body, {
     status: upstream.status, statusText: upstream.statusText, headers: responseHeaders,
   });
