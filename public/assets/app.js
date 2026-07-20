@@ -3698,10 +3698,48 @@ function _p2ToggleFullscreenSettingsMenu(){
   menu.appendChild(section('Speed', speeds.map(s => ({ label:s === 1 ? 'Normal' : String(s) + 'x', active:Math.abs(rate-s)<0.01, action:()=>{ _p2SetPlaybackRate(s); _p2CloseFullscreenSettingsMenu(); } }))));
   if(audioItems.length) menu.appendChild(section('Audio', audioItems));
   if(subItems.length > 1) menu.appendChild(section('Subtitle', subItems));
-  wrap.appendChild(menu);
+  const fsRoot = _fsCurrent();
+  const p2Player = document.getElementById('p2VsPlayer');
+  const host = (fsRoot && p2Player && (fsRoot === p2Player || p2Player.contains(fsRoot))) ? p2Player : wrap;
+  host.appendChild(menu);
   document.getElementById('playerWrap')?.classList.add('p2-settings-active');
 }
 
+function _p2HasVisibleNativeSettingsMenu(){
+  try{
+    const sels = [
+      '#player2Wrap media-menu-items',
+      '#player2Wrap .vds-menu-items',
+      '#player2Wrap [role="menu"]',
+      '#player2Wrap [data-part="menu-items"]',
+      '#player2Wrap [data-media-menu-items]'
+    ].join(',');
+    return Array.from(document.querySelectorAll(sels)).some(el => {
+      const visible = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+      if(!visible) return false;
+      const txt = String(el.textContent || '').toLowerCase();
+      return txt.includes('speed') || txt.includes('audio') || txt.includes('caption') || txt.includes('subtitle') || txt.includes('normal');
+    });
+  }catch(_){ return false; }
+}
+function _p2ArmFullscreenSettingsFallback(wrap){
+  if(!wrap || wrap._p2SettingsFallbackHooked) return;
+  wrap._p2SettingsFallbackHooked = true;
+  wrap.addEventListener('click', ev => {
+    if(!_isFullscreen() || !_p2IsSettingsClick(ev)) return;
+    if(document.getElementById('p2FsSettingsMenu')){
+      ev.preventDefault();
+      ev.stopPropagation();
+      _p2CloseFullscreenSettingsMenu();
+      return;
+    }
+    setTimeout(() => {
+      if(!_isFullscreen()) return;
+      if(_p2HasVisibleNativeSettingsMenu()) return;
+      _p2ToggleFullscreenSettingsMenu();
+    }, 180);
+  }, true);
+}
 
 function _p2WireVidstack(player, aux, film){
   // Inject custom audio & quality overlays INTO the player (top-right area)
@@ -3783,6 +3821,9 @@ function _p2WireVidstack(player, aux, film){
     ['pointerdown','touchstart','click'].forEach(type => {
       wrap.addEventListener(type, ensureAuxPlaying, { passive:true });
     });
+  }
+  if(wrap){
+    _p2ArmFullscreenSettingsFallback(wrap);
   }
   if(wrap && !wrap._p2FsSettingsHooked){
     wrap._p2FsSettingsHooked = true;
