@@ -2233,7 +2233,10 @@ function toggleWrapFullscreen(){
   if(!wrap) return;
   const cur = _fsCurrent();
   if(!cur){
-    const p = _fsRequest(wrap);
+    const p2 = document.getElementById('player2Wrap');
+    const p2Player = document.getElementById('p2VsPlayer');
+    const target = (p2 && p2.classList.contains('show') && p2Player) ? p2Player : wrap;
+    const p = _fsRequest(target);
     if(p && p.catch) p.catch(err => console.warn('[fs] request failed', err));
   } else {
     const p = _fsExit();
@@ -2247,13 +2250,13 @@ function _onFullscreenChange(){
   const wrap = document.getElementById('playerWrap');
   const vh   = document.getElementById('vhFrame');
   if(wrap){
-    wrap.classList.toggle('is-fullscreen', fsEl === wrap);
+    wrap.classList.toggle('is-fullscreen', !!(fsEl && (fsEl === wrap || wrap.contains(fsEl))));
   }
   // Iframe took fullscreen by itself (user hit the player4me fullscreen
   // button). Try to upgrade to wrap fullscreen so the overlay survives.
   if(
     fsEl && wrap && fsEl !== wrap && !_fsRedirecting &&
-    (fsEl === vh || wrap.contains(fsEl))
+    fsEl === vh
   ){
     _fsRedirecting = true;
     const exit = _fsExit();
