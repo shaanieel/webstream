@@ -98,7 +98,10 @@ async function serveAsset(request, env) {
   for (const [key, value] of Object.entries(securityHeaders())) headers.set(key, value);
   headers.delete('Content-Length');
 
-  const html = await res.text();
+  let html = await res.text();
+  html = html
+    .replace(/\/assets\/app\.css\?v=[^"']+/g, '/assets/app.css?v=20260720-r2-inventory-fs2')
+    .replace(/\/assets\/app\.js\?v=[^"']+/g, '/assets/app.js?v=20260720-r2-inventory-fs2');
   return new Response(minifyHtml(html), {
     status: res.status,
     statusText: res.statusText,
@@ -3138,6 +3141,13 @@ async function playbackHandler(request, env, filmId) {
     preview_expires_at: previewSession ? previewSession.expires_at : null,
     has_real_preview: !hasFullAccess && !!previewUrl,
     video_url: videoUrl,
+    videos: film.videos || [],
+    audio_url: film.audio_url || null,
+    audio_tracks: film.audio_tracks || [],
+    subtitles: film.subtitles || [],
+    subtitle_urls: film.subtitle_urls || [],
+    r2_bucket: film.r2_bucket || '',
+    r2_path: film.r2_path || '',
   });
 }
 // ───────────────────────────────────────────────────────────────────
@@ -3491,13 +3501,58 @@ function bytesToHex(bytes) {
 }
 
 function enc(s) { return encodeURIComponent(s); }
+function encPath(s) {
+  return String(s || '').split('/').map(part => encodeURIComponent(part)).join('/');
+}
+
+function decodeR2Token(token) {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  try {
+    const bin = atob(raw);
+    const decoded = new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+    return decoded.includes(':') ? decoded : raw;
+  } catch (_) {
+    return raw;
+  }
+}
+
+async function getR2AccountConfig(env, accountId) {
+  const wanted = String(accountId || '').trim();
+  if (!wanted) return null;
+  const defaultAccount = env.R2_S3_ACCOUNT_ID || '0c3e24ee0059b5d7deaeee4bd9ace23f';
+  if (wanted === defaultAccount && env.R2_S3_ACCESS_KEY && env.R2_S3_SECRET_KEY) {
+    return {
+      accountId: defaultAccount,
+      accessKey: env.R2_S3_ACCESS_KEY,
+      secretKey: env.R2_S3_SECRET_KEY,
+      bucket: env.R2_BUCKET_NAME || 'zaeinstream-video',
+    };
+  }
+  const r = await supabaseRest(
+    env,
+    `/cf_r2_accounts?account_id=eq.${encodeURIComponent(wanted)}&select=account_id,bucket_name,token_encrypted,status&limit=1`
+  );
+  if (!r.ok || !Array.isArray(r.data) || !r.data.length) return null;
+  const account = r.data[0];
+  if (account.status && String(account.status).toLowerCase() !== 'active') return null;
+  const token = decodeR2Token(account.token_encrypted || '');
+  const parts = token.split(':');
+  if (!parts[0] || !parts[1]) return null;
+  return {
+    accountId: account.account_id,
+    accessKey: parts[0],
+    secretKey: parts.slice(1).join(':'),
+    bucket: account.bucket_name || 'zaeinstream-video',
+  };
+}
 
 async function hmacSha256(keyBytes, msg) {
   const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
 }
 
-async function presignR2Url(accountId, accessKey, secretKey, bucket, key, expiresIn) {
+async function presignR2Url(accountId, accessKey, secretKey, bucket, key, expiresIn, method = 'GET') {
   const region = 'auto', service = 's3';
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]/g, '').split('.')[0] + 'Z';
@@ -3511,11 +3566,11 @@ async function presignR2Url(accountId, accessKey, secretKey, bucket, key, expire
     ['X-Amz-SignedHeaders', 'host'],
   ];
   const canonQs = params.map(p => enc(p[0]) + '=' + enc(p[1])).join('&');
-  const canonUri = '/' + bucket + '/' + key;
+  const canonUri = '/' + encPath(bucket) + '/' + encPath(key);
   const canonHeaders = 'host:' + accountId + '.r2.cloudflarestorage.com\n';
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';
-  const canonReq = 'GET\n' + canonUri + '\n' + canonQs + '\n' + canonHeaders + '\n' + signedHeaders + '\n' + payloadHash;
+  const canonReq = method + '\n' + canonUri + '\n' + canonQs + '\n' + canonHeaders + '\n' + signedHeaders + '\n' + payloadHash;
   const crHash = bytesToHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonReq)));
   const credScope = dateStamp + '/' + region + '/' + service + '/aws4_request';
   const sts = 'AWS4-HMAC-SHA256\n' + amzDate + '\n' + credScope + '\n' + crHash;
@@ -3526,7 +3581,30 @@ async function presignR2Url(accountId, accessKey, secretKey, bucket, key, expire
   k = await hmacSha256(k, 'aws4_request');
   const sig = bytesToHex(await hmacSha256(k, sts));
   const host = accountId + '.r2.cloudflarestorage.com';
-  return 'https://' + host + '/' + bucket + '/' + key + '?' + canonQs + '&X-Amz-Signature=' + sig;
+  return 'https://' + host + '/' + encPath(bucket) + '/' + encPath(key) + '?' + canonQs + '&X-Amz-Signature=' + sig;
+}
+
+async function fetchR2FollowingRedirects(url, init, maxRedirects = 5) {
+  let current = url;
+  for (let i = 0; i <= maxRedirects; i++) {
+    const upstream = await fetch(current, Object.assign({}, init, { redirect: 'manual' }));
+    if (![301, 302, 303, 307, 308].includes(upstream.status)) return upstream;
+    const loc = upstream.headers.get('Location');
+    if (!loc) return upstream;
+    current = new URL(loc, current).toString();
+  }
+  return fetch(current, Object.assign({}, init, { redirect: 'follow' }));
+}
+
+function guessR2ContentType(key) {
+  const lower = String(key || '').toLowerCase();
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.m4a')) return 'audio/mp4';
+  if (lower.endsWith('.mp3')) return 'audio/mpeg';
+  if (lower.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
+  if (lower.endsWith('.srt')) return 'text/plain; charset=utf-8';
+  if (lower.endsWith('.ass') || lower.endsWith('.ssa')) return 'text/plain; charset=utf-8';
+  return '';
 }
 
 async function r2StreamHandler(request, env, r2Path) {
@@ -3545,6 +3623,14 @@ async function r2StreamHandler(request, env, r2Path) {
 
   // Known logical bucket names (from film.r2_bucket)
   const knownBuckets = ['zaeinstream-video', 'zaeinstream-zip', 'zaeinstream-music'];
+  let accountOverride = null;
+  if (r2Path.startsWith('account/')) {
+    const parts = r2Path.split('/');
+    if (parts.length >= 4) {
+      accountOverride = decodeURIComponent(parts[1] || '');
+      r2Path = parts.slice(2).join('/');
+    }
+  }
   let bucketName = null;
   let objectKey = r2Path;
   const firstSlash = r2Path.indexOf('/');
@@ -3557,27 +3643,49 @@ async function r2StreamHandler(request, env, r2Path) {
     }
   }
 
-  // If we have S3 credentials and this is zaeinstream-video → presigned S3 URL + 302 redirect
-  // Browser streams directly from R2 S3 endpoint (bypasses worker response size limit)
-  if (bucketName === 'zaeinstream-video' && env.R2_S3_ACCESS_KEY && env.R2_S3_SECRET_KEY) {
-    const s3Account = env.R2_S3_ACCOUNT_ID || '0c3e24ee0059b5d7deaeee4bd9ace23f';
-    const s3AccessKey = env.R2_S3_ACCESS_KEY;
-    const s3SecretKey = env.R2_S3_SECRET_KEY;
-    const bucket = env.R2_BUCKET_NAME || 'zaeinstream-video';
+  // If we have S3 credentials and this is zaeinstream-video → proxy via presigned S3 URL
+  // Server-to-server fetch (no CORS issues), then return with CORS headers to browser.
+  // Worker streams response body directly — no 100MB buffer limit for streaming bodies.
+  if (bucketName === 'zaeinstream-video' && (accountOverride || (env.R2_S3_ACCESS_KEY && env.R2_S3_SECRET_KEY))) {
+    const accountCfg = accountOverride
+      ? await getR2AccountConfig(env, accountOverride)
+      : {
+          accountId: env.R2_S3_ACCOUNT_ID || '0c3e24ee0059b5d7deaeee4bd9ace23f',
+          accessKey: env.R2_S3_ACCESS_KEY,
+          secretKey: env.R2_S3_SECRET_KEY,
+          bucket: env.R2_BUCKET_NAME || 'zaeinstream-video',
+        };
+    if (!accountCfg) return err('R2 account tidak ditemukan', 404);
+    const s3Account = accountCfg.accountId;
+    const s3AccessKey = accountCfg.accessKey;
+    const s3SecretKey = accountCfg.secretKey;
+    const bucket = accountCfg.bucket || bucketName;
 
-    const presignedUrl = await presignR2Url(s3Account, s3AccessKey, s3SecretKey, bucket, objectKey, 3600);
+    // Presigned URL valid 12 hours — one landing page visit is enough
+    const presignedUrl = await presignR2Url(s3Account, s3AccessKey, s3SecretKey, bucket, objectKey, 43200, request.method);
 
-    // 302 redirect → browser follows to R2 S3 with presigned auth
-    return new Response(null, {
-      status: 302,
-      headers: {
-        'Location': presignedUrl,
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-        'Access-Control-Allow-Headers': 'Range, Content-Type, Origin',
-        'Vary': 'Origin',
-      },
+    // Forward Range header for seeking
+    const upstreamHeaders = new Headers();
+    const range = request.headers.get('Range');
+    if (range) upstreamHeaders.set('Range', range);
+
+    const upstream = await fetchR2FollowingRedirects(presignedUrl, { method: request.method, headers: upstreamHeaders });
+
+    // Forward upstream response with CORS headers added
+    const responseHeaders = new Headers(upstream.headers);
+    if (!responseHeaders.get('Content-Type')) {
+      const guessed = guessR2ContentType(objectKey);
+      if (guessed) responseHeaders.set('Content-Type', guessed);
+    }
+    responseHeaders.set('Access-Control-Allow-Origin', '*');
+    responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
+    responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    responseHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type, Origin, Accept');
+
+    return new Response(request.method === 'HEAD' ? null : upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: responseHeaders,
     });
   }
 
@@ -3586,7 +3694,8 @@ async function r2StreamHandler(request, env, r2Path) {
   const MEDIA_DOMAIN = env.R2_MEDIA_PUBLIC_DOMAIN || VIDEO_DOMAIN;
   let publicDomain, finalKey;
   if (bucketName === 'zaeinstream-video') {
-    publicDomain = MEDIA_DOMAIN.replace(/\/+$/, '');
+    // Use custom domain (not pub-xxx) — path does NOT need bucket prefix
+    publicDomain = 'https://zaeinstream-video.0c3e24ee0059b5d7deaeee4bd9ace23f.r2.dev';
     finalKey = objectKey;
   } else {
     publicDomain = VIDEO_DOMAIN.replace(/\/+$/, '');
@@ -3596,8 +3705,12 @@ async function r2StreamHandler(request, env, r2Path) {
   const upstreamHeaders = new Headers();
   const range = request.headers.get('Range');
   if (range) upstreamHeaders.set('Range', range);
-  const upstream = await fetch(publicUrl, { method: request.method, headers: upstreamHeaders });
+  const upstream = await fetchR2FollowingRedirects(publicUrl, { method: request.method, headers: upstreamHeaders });
   const responseHeaders = new Headers(upstream.headers);
+  if (!responseHeaders.get('Content-Type')) {
+    const guessed = guessR2ContentType(finalKey);
+    if (guessed) responseHeaders.set('Content-Type', guessed);
+  }
   responseHeaders.set('Access-Control-Allow-Origin', '*');
   responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
   responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
