@@ -610,13 +610,18 @@ function vipGenrePathPart(){
 function filmMatchesVipGenre(f, genre){
   const g = typeof genre === 'string' ? vipGenreFromSlug(genre) : genre;
   if(!g || g.slug === 'all') return true;
-  const genreNames = new Set(normalizeListField(f?.tmdb_genres).map(x => x.toLowerCase()));
+  const genreNames = normalizeListField(f?.tmdb_genres).map(x => x.toLowerCase());
+  const fallbackGenres = normalizeListField(f?.genre).map(x => x.toLowerCase());
+  const allGenres = genreNames.concat(fallbackGenres);
   const countryCodes = new Set(normalizeListField(f?.tmdb_country_codes).map(x => x.toUpperCase()));
+  const originalLanguage = String(f?.tmdb_original_language || '').toLowerCase();
   if(g.countries && g.countries.length){
-    return g.countries.some(code => countryCodes.has(code));
+    return g.countries.some(code => countryCodes.has(code))
+      || (g.slug === 'Indonesia' && originalLanguage === 'id')
+      || (g.slug === 'Korea' && originalLanguage === 'ko');
   }
   if(g.genres && g.genres.length){
-    return g.genres.some(name => genreNames.has(name));
+    return g.genres.some(name => allGenres.some(item => item === name || item.includes(name)));
   }
   return false;
 }
@@ -1473,10 +1478,13 @@ function markFilmOpenedForCw(filmId){
   saveContinueWatching(list);
 }
 function removeContinueWatching(filmId){
+  _removeContinueWatchingSilent(filmId);
+  showToast('Dihapus dari Continue Watching');
+}
+function _removeContinueWatchingSilent(filmId){
   const list = getContinueWatching().filter(x=>String(x.id)!==String(filmId));
   localStorage.setItem(CW_KEY, JSON.stringify(list));
   renderContinueWatching();
-  showToast('Dihapus dari Continue Watching');
 }
 function renderContinueWatching(){
   const row = document.getElementById('continueWatchingRow');
@@ -2233,10 +2241,7 @@ function toggleWrapFullscreen(){
   if(!wrap) return;
   const cur = _fsCurrent();
   if(!cur){
-    const p2 = document.getElementById('player2Wrap');
-    const p2Player = document.getElementById('p2VsPlayer');
-    const target = (p2 && p2.classList.contains('show') && p2Player) ? p2Player : wrap;
-    const p = _fsRequest(target);
+    const p = _fsRequest(wrap);
     if(p && p.catch) p.catch(err => console.warn('[fs] request failed', err));
   } else {
     const p = _fsExit();
@@ -2256,7 +2261,7 @@ function _onFullscreenChange(){
   // button). Try to upgrade to wrap fullscreen so the overlay survives.
   if(
     fsEl && wrap && fsEl !== wrap && !_fsRedirecting &&
-    fsEl === vh
+    (fsEl === vh || (fsEl.id === 'p2VsPlayer') || (fsEl.closest && fsEl.closest('#player2Wrap')))
   ){
     _fsRedirecting = true;
     const exit = _fsExit();
@@ -2601,8 +2606,7 @@ async function loadNativeDrivePlayer(film){
   try{ teardownEngine2(); }catch{}
   try{ teardownEngine3(); }catch{}
 
-  // Simple R2 (1 video, maybe multi-audio) → Engine 2 (Vidstack) for proper controls.
-  // Multi-video or DASH-manifest → Engine 3 (Shaka) for quality switching.
+  // Keep R2 on Vidstack. Shaka is only for the old non-R2 multi-video path.
   if(typeof shaka !== 'undefined' && !isR2 && sources.videos.length > 1){
     activeEngine = 3;
     await loadVideoEngine3(film, sources);
@@ -2855,6 +2859,38 @@ async function _resolveFilmSources(film){
     );
     return u.indexOf('/api/r2-stream/') === 0 ? _appendStreamGrant(bust(u)) : u;
   }
+  async function _discoverR2AudioTracks(bucket, basePath){
+    if(!bucket || !basePath) return [];
+    const base = String(basePath).replace(/^\/+|\/+$/g, '');
+    const candidates = [
+      ['id', 'Bahasa Indonesia', 'audio/audio_id.m4a'],
+      ['id', 'Bahasa Indonesia', 'audio/audio_indo.m4a'],
+      ['id', 'Bahasa Indonesia', 'audio/audio_indonesia.m4a'],
+      ['en', 'English', 'audio/audio_en.m4a'],
+      ['en', 'English', 'audio/audio_eng.m4a'],
+      ['zh', 'Chinese', 'audio/audio_zh.m4a'],
+      ['zh', 'Chinese', 'audio/audio_chi.m4a'],
+      ['ko', 'Korean', 'audio/audio_ko.m4a'],
+      ['ja', 'Japanese', 'audio/audio_ja.m4a'],
+      ['ms', 'Malay', 'audio/audio_ms.m4a'],
+      ['th', 'Thai', 'audio/audio_th.m4a'],
+      ['und', 'Audio', 'audio/audio.m4a'],
+    ];
+    const found = [];
+    const seenLang = new Set();
+    for(const [language, name, rel] of candidates){
+      if(seenLang.has(language) && language !== 'und') continue;
+      const raw = '/api/r2-stream/' + bucket + '/' + base + '/' + rel;
+      const url = _r2ProxyUrl(raw);
+      try{
+        const res = await fetch(url, { method:'HEAD', cache:'no-store' });
+        if(!res.ok) continue;
+        found.push({ name, url, language });
+        if(language !== 'und') seenLang.add(language);
+      }catch(_){}
+    }
+    return found;
+  }
   // ── R2 source: map video_url / r2_bucket+r2_path / audio_url / subtitle_urls ke arrays ──
   // Catalog strips video_url for non-admin → fallback to playback response or r2_bucket+r2_path
   const r2VideoUrl = film.video_url || (film._playback && film._playback.video_url);
@@ -2873,6 +2909,10 @@ async function _resolveFilmSources(film){
         // legacy single audio URL, proxy via /media-proxy/
         const ap = _r2ProxyUrl(film.audio_url);
         try{ film.audio_tracks = [{ name: 'Audio R2', url: ap, language: 'und' }]; }catch(e){}
+      }
+      if((!Array.isArray(film.audio_tracks) || !film.audio_tracks.length) && film.r2_bucket && film.r2_path){
+        const discovered = await _discoverR2AudioTracks(film.r2_bucket, film.r2_path);
+        if(discovered.length) film.audio_tracks = discovered;
       }
     }
     // Subtitles: check film.subtitles first, or parse film.subtitle_urls (JSON string)
@@ -3290,7 +3330,7 @@ let _p2LoadGen = 0;   // incremented on each loadVideoEngine2 call; guards again
 
 async function loadVideoEngine2(film, sources){
   const gen = ++_p2LoadGen;
-  const { videos, audios, subtitles } = sources;
+  const { videos, audios, subtitles } = _p2NormalizeSourcesForUi(sources || {});
   const wrap = document.getElementById('player2Wrap');
   const player = document.getElementById('p2VsPlayer');
   const aux = document.getElementById('p2AuxAudio');
@@ -3338,7 +3378,7 @@ async function loadVideoEngine2(film, sources){
       const blob = new Blob([vtt], { type: 'text/vtt' });
       const url = URL.createObjectURL(blob);
       subBlobUrls.push(url);
-      trackEntries.push({ src: url, label: s.name || ('Subtitle ' + (i+1)), language: s.language || '' });
+      trackEntries.push({ src: url, label: _p2SubtitleLabel(s, i), language: _p2NormalizeLang(s.language || '') });
     }catch(e){
       console.warn('subtitle load failed', s.path, e);
     }
@@ -3351,7 +3391,7 @@ async function loadVideoEngine2(film, sources){
     audios,
     subtitles,
     qualityIdx: 0,
-    audioIdx: 0,
+    audioIdx: _p2PreferredAudioIndex(audios),
     subtitleIdx: -1,
     subBlobUrls,
     qualityChip: null,
@@ -3373,7 +3413,7 @@ async function loadVideoEngine2(film, sources){
   // fails or returns false, fall back to the normal Vidstack <video> src.
   const firstVideoPath = videos[0] && videos[0].path ? String(videos[0].path) : '';
   const isR2ProxySource = firstVideoPath.indexOf('/api/r2-stream/') === 0;
-  const canProbe = !isR2ProxySource && videos.length === 1 && audios.length <= 1 && typeof MP4Box !== 'undefined';
+  const canProbe = videos.length === 1 && audios.length <= 1 && typeof MP4Box !== 'undefined';
   let mseHandled = false;
   if(canProbe){
     try{
@@ -3445,7 +3485,7 @@ async function loadVideoEngine2(film, sources){
 
   // Multi-dub auxiliary audio
   if(p2State && p2State._useAux){
-    aux.src = audios[0].path;
+    aux.src = audios[p2State.audioIdx]?.path || audios[0].path;
     aux.muted = false;
     aux.volume = 1;
     aux.load();
@@ -3478,10 +3518,11 @@ async function loadVideoEngine2(film, sources){
     addRemoteTextTrack: ()=>{}, remoteTextTracks: ()=>[], removeRemoteTextTrack: ()=>{},
   };
 
-  // Resume position once metadata is loaded
+  // Resume prompt once metadata is loaded
   if(currentResumeFrom && currentResumeFrom > 5){
-    const seek = ()=>{ try{ player.currentTime = currentResumeFrom; }catch{} };
-    player.addEventListener('loaded-metadata', seek, { once: true });
+    const askResume = ()=>_p2PromptResume(player, film, currentResumeFrom);
+    player.addEventListener('loaded-metadata', askResume, { once: true });
+    player.addEventListener('can-play', askResume, { once: true });
   }
 
   setStreamActions(videos[0].path, film.judul || film.title || '');
@@ -3494,47 +3535,78 @@ function _p2InjectOverlays(){
   const old = document.getElementById('p2OverlayMenus');
   if(old) old.remove();
   document.getElementById('playerWrap')?.classList.remove('p2-settings-active');
-  const wrap = document.getElementById('player2Wrap');
-  if(!wrap || !p2State) return;
-  const hasMultiAudio = p2State.audios && p2State.audios.length > 1 && p2State._useAux;
-  const hasMultiVideo = p2State.videos && p2State.videos.length > 1 && !p2State.videos.every(v => /^R2 Video$/i.test(String(v && v.name || '')));
-  const hasMseAudio = p2State.mse && p2State.mse.audioTracks && p2State.mse.audioTracks.length > 1;
-  const hasSubtitles = p2State.subtitles && p2State.subtitles.length > 0;
-  if(!hasMultiAudio && !hasMultiVideo && !hasMseAudio && !hasSubtitles) return;
-  const div = document.createElement('div');
-  div.id = 'p2OverlayMenus';
-  // Subtitle button (explicit picker for R2/native Vidstack films).
-  if(hasSubtitles){
-    const activeSub = p2State.subtitleIdx >= 0 ? p2State.subtitles[p2State.subtitleIdx] : null;
-    const label = activeSub ? _langName(activeSub.language, activeSub.name || activeSub.label) : 'Subtitle';
-    const items = [{ label:'Off', active:p2State.subtitleIdx < 0, onSelect:()=>{ _p2SelectSubtitle(-1); _p2InjectOverlays(); } }]
-      .concat(p2State.subtitles.map((s,i)=>({
-        label:_langName(s.language, s.name || s.label || ('Subtitle ' + (i+1))),
-        active:i === p2State.subtitleIdx,
-        onSelect:()=>{ _p2SelectSubtitle(i); _p2InjectOverlays(); }
-      })));
-    div.appendChild(_p2BuildOverlayDropdown(label, items));
+  _p2SyncNativeSettingsEnhancements();
+  _p2RefreshTopTrackControls();
+}
+function closePlayerTrackMenus(){
+  document.getElementById('playerAudioMenu')?.classList.remove('open');
+  document.getElementById('playerSubMenu')?.classList.remove('open');
+}
+function togglePlayerTrackMenu(kind){
+  const audio = document.getElementById('playerAudioMenu');
+  const sub = document.getElementById('playerSubMenu');
+  const target = kind === 'audio' ? audio : sub;
+  const other = kind === 'audio' ? sub : audio;
+  if(!target) return;
+  const willOpen = !target.classList.contains('open');
+  other?.classList.remove('open');
+  target.classList.toggle('open', willOpen);
+  if(willOpen) _p2RefreshTopTrackControls();
+}
+function _p2TopTrackOption(label, active, onClick){
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'player-track-option' + (active ? ' active' : '');
+  btn.setAttribute('role', 'menuitemradio');
+  btn.setAttribute('aria-checked', active ? 'true' : 'false');
+  btn.innerHTML = '<span class="player-track-check">' + (active ? '✓' : '') + '</span><span>' + escapeHtml(label) + '</span>';
+  btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onClick();
+    closePlayerTrackMenus();
+    setTimeout(_p2RefreshTopTrackControls, 60);
+  });
+  return btn;
+}
+function _p2RefreshTopTrackControls(){
+  const audioWrap = document.getElementById('playerAudioMenu');
+  const audioLabel = document.getElementById('playerAudioLabel');
+  const audioPop = document.getElementById('playerAudioPop');
+  const subWrap = document.getElementById('playerSubMenu');
+  const subLabel = document.getElementById('playerSubLabel');
+  const subPop = document.getElementById('playerSubPop');
+  if(!audioWrap || !audioPop || !subWrap || !subPop) return;
+
+  const audioItems = _p2AudioMenuItems();
+  if(audioItems.length > 1){
+    audioWrap.style.display = 'inline-flex';
+    const active = audioItems.find(it => it.active) || audioItems[0];
+    if(audioLabel) audioLabel.textContent = active.label || 'Audio';
+    audioPop.innerHTML = '';
+    audioItems.forEach(it => audioPop.appendChild(_p2TopTrackOption(it.label, it.active, it.select)));
+  }else{
+    audioWrap.style.display = 'none';
+    audioWrap.classList.remove('open');
+    audioPop.innerHTML = '';
   }
-  // Audio button (aux multi-dub)
-  if(hasMultiAudio){
-    const label = p2State.audios[p2State.audioIdx]?.name || ('Audio '+(p2State.audioIdx+1));
-    const dd = _p2BuildOverlayDropdown(label, p2State.audios.map((a,i)=>({label:a.name||('Audio '+(i+1)),active:i===p2State.audioIdx,onSelect:()=>{_p2SwitchAudio(i);_p2InjectOverlays();}})));
-    div.appendChild(dd);
+
+  const subs = p2State && Array.isArray(p2State.subtitles) ? p2State.subtitles : [];
+  if(subs.length){
+    subWrap.style.display = 'inline-flex';
+    const activeIdx = Number.isInteger(p2State.subtitleIdx) ? p2State.subtitleIdx : -1;
+    const activeSub = activeIdx >= 0 ? subs[activeIdx] : null;
+    if(subLabel) subLabel.textContent = activeSub ? _p2SubtitleLabel(activeSub, activeIdx) : 'Off';
+    subPop.innerHTML = '';
+    subPop.appendChild(_p2TopTrackOption('Off', activeIdx < 0, () => _p2SelectSubtitle(-1)));
+    subs.forEach((s, i) => {
+      subPop.appendChild(_p2TopTrackOption(_p2SubtitleLabel(s, i), i === activeIdx, () => _p2SelectSubtitle(i)));
+    });
+  }else{
+    subWrap.style.display = 'none';
+    subWrap.classList.remove('open');
+    subPop.innerHTML = '';
   }
-  // Audio button (MSE embedded multi-audio)
-  if(hasMseAudio){
-    const mse=p2State.mse; const at=mse.audioTracks.find(t=>t.id===mse.activeAudioId);
-    const label=(at?.name||at?.language||'').replace(/und/i,'').trim()||'Audio1';
-    const dd=_p2BuildOverlayDropdown(label,mse.audioTracks.map((t,i)=>({label:(t.name||t.language||'A'+(i+1)).replace(/und/i,'').trim().toUpperCase()||'A'+(i+1),active:t.id===mse.activeAudioId,onSelect:()=>{_p2MseSwitchAudio(t.id).catch(console.error);}})));
-    div.appendChild(dd);
-  }
-  // Quality button
-  if(hasMultiVideo){
-    const label=p2State.videos[p2State.qualityIdx]?.name||('Q'+(p2State.qualityIdx+1));
-    const dd=_p2BuildOverlayDropdown(label,p2State.videos.map((v,i)=>({label:v.name||'Kualitas '+(i+1),active:i===p2State.qualityIdx,onSelect:()=>{_p2SwitchQuality(i);_p2InjectOverlays();}})));
-    div.appendChild(dd);
-  }
-  wrap.appendChild(div);
 }
 function _p2SelectSubtitle(index){
   if(!p2State) return;
@@ -3582,6 +3654,7 @@ function _p2SelectSubtitle(index){
       nativeTracks.forEach((t,i) => { t.mode = i === selected ? 'showing' : 'disabled'; });
     }
   }catch(e){}
+  setTimeout(_p2RefreshTopTrackControls, 40);
 }
 function _p2PreferredSubtitleIndex(subtitles){
   if(!Array.isArray(subtitles) || !subtitles.length) return -1;
@@ -3602,6 +3675,74 @@ function _p2PreferredSubtitleIndex(subtitles){
   if(idx >= 0) return idx;
   idx = subtitles.findIndex(isEng);
   return idx >= 0 ? idx : -1;
+}
+function _p2NormalizeLang(lang){
+  const raw = String(lang || '').trim().toLowerCase();
+  if(!raw || raw === 'und' || raw === 'undefined' || raw === 'null') return 'und';
+  if(raw.length > 8 || /[.\s_/\\]/.test(raw)) return 'und';
+  const m = { ind:'id', ina:'id', idn:'id', indonesia:'id', indonesian:'id', eng:'en', english:'en', inggris:'en', rus:'ru', russian:'ru', jpn:'ja', japanese:'ja', kor:'ko', korean:'ko', zho:'zh', chi:'zh', chinese:'zh' };
+  if(m[raw]) return m[raw];
+  return /^[a-z]{2}$/.test(raw) ? raw : 'und';
+}
+function _p2AudioPreferenceScore(item, index){
+  const label = String((item && (item.name || item.label || item.language)) || '').toLowerCase();
+  const lang = _p2NormalizeLang(item && item.language);
+  let score = 1000 - index;
+  if(lang === 'id' || /\b(indonesia|indonesian|bahasa indonesia|indo)\b/.test(label)) score += 500;
+  else if(lang === 'en' || /\b(english|inggris)\b/.test(label)) score += 300;
+  if(/\b(main|utama|default|normal)\b/.test(label)) score += 120;
+  if(/\b(commentary|komentar|descriptive|description|audio description|director|ambient|music|background)\b/.test(label)) score -= 600;
+  return score;
+}
+function _p2PreferredAudioIndex(audios){
+  if(!Array.isArray(audios) || !audios.length) return 0;
+  let best = 0, bestScore = -Infinity;
+  audios.forEach((a, i) => {
+    const score = _p2AudioPreferenceScore(a, i);
+    if(score > bestScore){ bestScore = score; best = i; }
+  });
+  return best;
+}
+function _p2LooksLikeRawSubFilename(label){
+  const s = String(label || '');
+  return /\.(srt|vtt|ass|ssa)$/i.test(s) || /[._-](1080p|720p|x264|x265|h264|h265|web-?dl|bluray|ddp|aac|seik|rarbg|yify)[._-]/i.test(s) || s.length > 32;
+}
+function _p2SubtitleLabel(sub, index){
+  const lang = _p2NormalizeLang(sub && (sub.language || sub.lang));
+  const raw = String(sub && (sub.name || sub.label || '') || '').trim();
+  if(_p2LooksLikeRawSubFilename(raw)) return 'Indonesia';
+  if(lang && lang !== 'und') return _langName(lang, raw);
+  if(/\b(indonesia|indonesian|bahasa indonesia|indo)\b/i.test(raw)) return 'Indonesia';
+  if(/\b(english|inggris)\b/i.test(raw)) return 'English';
+  return raw || ('Subtitle ' + ((index || 0) + 1));
+}
+function _p2AudioLabel(audio, index){
+  const raw = String(audio && (audio.name || audio.label || '') || '').trim();
+  const lang = _p2NormalizeLang(audio && audio.language);
+  if(lang && lang !== 'und') return _langName(lang, raw);
+  if(/\b(indonesia|indonesian|bahasa indonesia|indo|id)\b/i.test(raw)) return 'Bahasa Indonesia';
+  if(/\b(english|inggris|en)\b/i.test(raw)) return 'English';
+  return raw || ('Audio ' + ((index || 0) + 1));
+}
+function _p2MseAudioLabel(track, index){
+  const raw = String(track && (track.name || track.language || '') || '').trim();
+  const lang = _p2NormalizeLang(raw);
+  if(lang === 'id') return 'Bahasa Indonesia';
+  if(lang === 'en') return 'English';
+  return raw.replace(/und/i,'').trim() || ('Audio ' + ((index || 0) + 1));
+}
+function _p2NormalizeSourcesForUi(sources){
+  const clone = Object.assign({}, sources);
+  clone.videos = Array.isArray(sources.videos) ? sources.videos : [];
+  clone.audios = (Array.isArray(sources.audios) ? sources.audios : []).map((a,i)=>Object.assign({}, a, {
+    language: _p2NormalizeLang(a && a.language),
+    name: _p2AudioLabel(a, i),
+  }));
+  clone.subtitles = (Array.isArray(sources.subtitles) ? sources.subtitles : []).map((s,i)=>Object.assign({}, s, {
+    language: _p2NormalizeLang(s && s.language),
+    name: _p2SubtitleLabel(s, i),
+  }));
+  return clone;
 }
 // Build a single dropdown button (label + chevron + dropdown menu)
 function _p2BuildOverlayDropdown(currentLabel, items){
@@ -3632,8 +3773,6 @@ function _p2IsSettingsClick(e){
   }catch(_){ return false; }
 }
 function _p2CloseFullscreenSettingsMenu(){
-  const old = document.getElementById('p2FsSettingsMenu');
-  if(old) old.remove();
   document.getElementById('playerWrap')?.classList.remove('p2-settings-active');
 }
 function _p2SetPlaybackRate(rate){
@@ -3646,101 +3785,407 @@ function _isFullscreen(){
   try { return !!(_fsCurrent && _fsCurrent()); } catch(_) {}
   return !!(document.fullscreenElement || document.webkitFullscreenElement || document.webkitCurrentFullScreenElement || document.msFullscreenElement);
 }
-
-function _p2ClickLooksLikeFullscreenGear(e){
-  if(!e || !_isFullscreen()) return false;
-  const wrap = document.getElementById('playerWrap') || document.getElementById('player2Wrap');
-  const r = (wrap && wrap.getBoundingClientRect) ? wrap.getBoundingClientRect() : { left:0, top:0, width:window.innerWidth, height:window.innerHeight };
-  const x = e.clientX - r.left;
-  const y = e.clientY - r.top;
-  const fromRight = r.width - x;
-  const fromBottom = r.height - y;
-  return fromRight >= 82 && fromRight <= 158 && fromBottom >= 18 && fromBottom <= 92;
+function _p2AudioMenuItems(){
+  if(!p2State) return [];
+  if(p2State.mse && p2State.mse.audioTracks && p2State.mse.audioTracks.length > 1){
+    return p2State.mse.audioTracks.map((t,i)=>({
+      label:_p2MseAudioLabel(t,i),
+      active:t.id === p2State.mse.activeAudioId,
+      select:()=>_p2MseSwitchAudio(t.id).catch(console.error),
+    }));
+  }
+  if(p2State._useAux && p2State.audios && p2State.audios.length > 1){
+    return p2State.audios.map((a,i)=>({
+      label:_p2AudioLabel(a,i),
+      active:i === p2State.audioIdx,
+      select:()=>_p2SwitchAudio(i),
+    }));
+  }
+  return [];
 }
+function _p2AudioMenuValue(label){
+  return String(label || 'Audio').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'audio';
+}
+function _p2UpdateTrackMenuState(menu, items){
+  const active = items.find(it => it.active) || items[0];
+  const hint = menu.querySelector('.p2-vds-audio-track-hint');
+  if(hint) hint.textContent = active ? active.label : 'Default';
+  const group = menu.querySelector('media-audio-radio-group');
+  if(group && active) group.setAttribute('value', _p2AudioMenuValue(active.label));
+  menu.querySelectorAll('media-radio').forEach((radio, idx) => {
+    const on = !!items[idx]?.active;
+    radio.setAttribute('aria-checked', on ? 'true' : 'false');
+    if(on) radio.setAttribute('data-checked', '');
+    else radio.removeAttribute('data-checked');
+    const check = radio.querySelector('.p2-vds-check');
+    if(check) check.textContent = on ? '✓' : '';
+  });
+}
+function _p2BuildVidstackAudioTracksMenu(items){
+  const active = items.find(it => it.active) || items[0];
+  const section = document.createElement('section');
+  section.className = 'vds-menu-section p2-vds-audio-section';
+  section.setAttribute('role', 'group');
+  const body = document.createElement('div');
+  body.className = 'vds-menu-section-body';
+  const menu = document.createElement('media-menu');
+  menu.className = 'vds-audio-tracks-menu vds-menu p2-vds-audio-tracks-menu';
+  menu.setAttribute('data-submenu', '');
+  menu.style.display = 'contents';
 
-function _p2ToggleFullscreenSettingsMenu(){
-  const wrap = document.getElementById('player2Wrap');
-  if(!wrap || !_isFullscreen()) return;
-  const old = document.getElementById('p2FsSettingsMenu');
-  if(old){ old.remove(); document.getElementById('playerWrap')?.classList.remove('p2-settings-active'); return; }
-  const menu = document.createElement('div');
-  menu.id = 'p2FsSettingsMenu';
-  const rate = (()=>{ try{return document.getElementById('p2VsPlayer').playbackRate || 1;}catch(_){return 1;} })();
-  const speeds = [0.5,0.75,1,1.25,1.5,2];
-  const audioItems = (p2State && p2State.audios || []).map((a,i)=>({
-    label:a.name || a.label || a.language || ('Audio ' + (i+1)),
-    active:i === (p2State.audioIdx || 0),
-    action:()=>{ _p2SwitchAudio(i); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); }
-  }));
-  const subItems = [{ label:'Off', active:!p2State || p2State.subtitleIdx < 0, action:()=>{ _p2SelectSubtitle(-1); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); } }]
-    .concat((p2State && p2State.subtitles || []).map((s,i)=>({
-      label:s.name || s.label || s.language || ('Subtitle ' + (i+1)),
-      active:i === p2State.subtitleIdx,
-      action:()=>{ _p2SelectSubtitle(i); _p2InjectOverlays(); _p2CloseFullscreenSettingsMenu(); }
-    })));
-  const section = (title, items) => {
-    const block = document.createElement('div');
-    block.className = 'p2-fs-settings-section';
-    const h = document.createElement('div');
-    h.className = 'p2-fs-settings-title';
-    h.textContent = title;
-    block.appendChild(h);
-    items.forEach(it => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'p2-fs-settings-row' + (it.active ? ' active' : '');
-      row.textContent = (it.active ? '✓ ' : '') + it.label;
-      row.addEventListener('click', ev => { ev.stopPropagation(); it.action(); });
-      block.appendChild(row);
+  const button = document.createElement('media-menu-button');
+  button.className = 'vds-menu-item p2-vds-track-button';
+  button.setAttribute('tabindex', '-1');
+  button.setAttribute('role', 'menuitem');
+  button.setAttribute('aria-haspopup', 'menu');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('data-submenu', '');
+  button.setAttribute('aria-disabled', 'false');
+  button.setAttribute('type', 'button');
+  button.innerHTML = '<span class="vds-menu-item-label">Track</span><span class="vds-menu-item-hint p2-vds-audio-track-hint" data-part="hint">' + escapeHtml(active?.label || 'Default') + '</span><span class="p2-vds-arrow">›</span>';
+
+  const menuItems = document.createElement('media-menu-items');
+  menuItems.className = 'vds-menu-items p2-vds-audio-track-items';
+  menuItems.setAttribute('role', 'menu');
+  menuItems.setAttribute('tabindex', '-1');
+  menuItems.setAttribute('data-submenu', '');
+  menuItems.setAttribute('aria-hidden', 'true');
+  menuItems.style.display = 'none';
+
+  const group = document.createElement('media-audio-radio-group');
+  group.className = 'vds-audio-track-radio-group vds-radio-group';
+  group.setAttribute('empty-label', 'Default');
+  group.setAttribute('value', _p2AudioMenuValue(active?.label));
+  items.forEach((it, idx) => {
+    const radio = document.createElement('media-radio');
+    radio.className = 'vds-audio-track-radio vds-radio p2-vds-audio-radio';
+    radio.setAttribute('value', _p2AudioMenuValue(it.label));
+    radio.setAttribute('tabindex', '-1');
+    radio.setAttribute('role', 'menuitemradio');
+    radio.setAttribute('aria-checked', it.active ? 'true' : 'false');
+    if(it.active) radio.setAttribute('data-checked', '');
+    radio.innerHTML = '<span class="p2-vds-check">' + (it.active ? '✓' : '') + '</span><span class="vds-radio-label" data-part="label">' + escapeHtml(it.label) + '</span>';
+    radio.addEventListener('click', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      items[idx]?.select();
+      setTimeout(() => _p2UpdateTrackMenuState(menu, _p2AudioMenuItems()), 30);
     });
-    return block;
+    group.appendChild(radio);
+  });
+  menuItems.appendChild(group);
+  menu.append(button, menuItems);
+
+  const openTrackMenu = (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const open = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if(open) button.setAttribute('data-open', '');
+    else button.removeAttribute('data-open');
+    menuItems.style.display = open ? '' : 'none';
+    menuItems.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if(open) menuItems.setAttribute('data-open', '');
+    else menuItems.removeAttribute('data-open');
   };
-  menu.appendChild(section('Speed', speeds.map(s => ({ label:s === 1 ? 'Normal' : String(s) + 'x', active:Math.abs(rate-s)<0.01, action:()=>{ _p2SetPlaybackRate(s); _p2CloseFullscreenSettingsMenu(); } }))));
-  if(audioItems.length) menu.appendChild(section('Audio', audioItems));
-  if(subItems.length > 1) menu.appendChild(section('Subtitle', subItems));
-  const fsRoot = _fsCurrent();
-  const p2Player = document.getElementById('p2VsPlayer');
-  const host = (fsRoot && p2Player && (fsRoot === p2Player || p2Player.contains(fsRoot))) ? p2Player : wrap;
-  host.appendChild(menu);
+  button.addEventListener('click', openTrackMenu);
+  body.appendChild(menu);
+  section.appendChild(body);
+  return section;
+}
+function _p2EnsureAudioTrackFallback(){
+  const items = _p2AudioMenuItems();
+  if(!items.length) return;
+  const menus = Array.from(document.querySelectorAll('#player2Wrap media-menu-items, #player2Wrap .vds-menu-items, #player2Wrap [role="menu"]')).filter(el => {
+    try{ return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); }catch(_){ return false; }
+  });
+  const menu = menus.find(el => {
+    const text = String(el.textContent || '').toLowerCase();
+    return text.includes('boost') && !text.includes('speed') && !text.includes('captions');
+  });
+  if(!menu) return;
+  if(menu.querySelector('.p2-audio-track-fallback')) return;
+  const active = items.find(it => it.active) || items[0];
+  const section = document.createElement('section');
+  section.className = 'vds-menu-section p2-audio-track-fallback';
+  section.setAttribute('role', 'group');
+  const body = document.createElement('div');
+  body.className = 'vds-menu-section-body';
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'vds-menu-item p2-fallback-track-row';
+  row.innerHTML = '<span class="vds-menu-item-label">Track</span><span class="vds-menu-item-hint p2-fallback-track-hint" data-part="hint">' + escapeHtml(active.label) + '</span><span class="p2-vds-arrow">›</span>';
+  const list = document.createElement('div');
+  list.className = 'p2-fallback-track-list';
+  list.style.display = 'none';
+  items.forEach((it, idx) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'vds-menu-item p2-fallback-track-option' + (it.active ? ' active' : '');
+    opt.innerHTML = '<span class="p2-vds-check">' + (it.active ? '✓' : '') + '</span><span class="vds-radio-label">' + escapeHtml(it.label) + '</span>';
+    opt.addEventListener('click', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      items[idx]?.select();
+      setTimeout(() => {
+        const next = _p2AudioMenuItems();
+        const now = next.find(x => x.active) || next[0] || it;
+        const hint = section.querySelector('.p2-fallback-track-hint');
+        if(hint) hint.textContent = now.label;
+        section.querySelectorAll('.p2-fallback-track-option').forEach((btn, i) => {
+          const on = !!next[i]?.active;
+          btn.classList.toggle('active', on);
+          const mark = btn.querySelector('.p2-vds-check');
+          if(mark) mark.textContent = on ? '✓' : '';
+        });
+      }, 80);
+    });
+    list.appendChild(opt);
+  });
+  row.addEventListener('click', ev => {
+    ev.preventDefault(); ev.stopPropagation();
+    list.style.display = list.style.display === 'none' ? 'block' : 'none';
+  });
+  body.append(row, list);
+  section.appendChild(body);
+  if(menu.firstChild) menu.insertBefore(section, menu.firstChild);
+  else menu.appendChild(section);
+}
+function _p2FindAudioSettingsMenu(){
+  const sels = [
+    '#player2Wrap media-menu-items',
+    '#player2Wrap .vds-menu-items',
+    '#player2Wrap [role="menu"]',
+    '#player2Wrap [data-part="menu-items"]',
+    '#player2Wrap [data-media-menu-items]'
+  ].join(',');
+  const visible = Array.from(document.querySelectorAll(sels)).filter(el => {
+    try{ return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); }catch(_){ return false; }
+  });
+  return visible.find(el => {
+    const text = String(el.textContent || '').toLowerCase();
+    return text.includes('boost') || (text.includes('audio') && !text.includes('captions') && !text.includes('speed'));
+  }) || visible[0] || null;
+}
+function _p2FindOpenNativeMenu(){
+  const sels = [
+    '#player2Wrap media-menu-items',
+    '#player2Wrap .vds-menu-items',
+    '#player2Wrap [role="menu"]',
+    '#player2Wrap [data-part="menu-items"]',
+    '#player2Wrap [data-media-menu-items]'
+  ].join(',');
+  return Array.from(document.querySelectorAll(sels)).find(el => {
+    try{ return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); }catch(_){ return false; }
+  }) || null;
+}
+function _p2SyncNativeSettingsEnhancements(){
+  const items = _p2AudioMenuItems();
+  const menu = _p2FindAudioSettingsMenu() || _p2FindOpenNativeMenu();
+  if(!menu || !items.length) return;
+  const old = menu.querySelector('.p2-native-audio-block');
+  if(old) old.remove();
+  const text = String(menu.textContent || '').toLowerCase();
+  const isAudioSubmenu = text.includes('boost') || (text.includes('audio') && !text.includes('captions') && !text.includes('speed'));
+  if(!isAudioSubmenu) return;
+  const existing = menu.querySelector('.p2-vds-audio-tracks-menu');
+  if(existing){ _p2UpdateTrackMenuState(existing, items); return; }
+  const trackMenu = _p2BuildVidstackAudioTracksMenu(items);
+  if(menu.firstChild) menu.insertBefore(trackMenu, menu.firstChild);
+  else menu.appendChild(trackMenu);
+  _p2EnsureAudioTrackFallback();
   document.getElementById('playerWrap')?.classList.add('p2-settings-active');
 }
-
-function _p2HasVisibleNativeSettingsMenu(){
-  try{
-    const sels = [
-      '#player2Wrap media-menu-items',
-      '#player2Wrap .vds-menu-items',
-      '#player2Wrap [role="menu"]',
-      '#player2Wrap [data-part="menu-items"]',
-      '#player2Wrap [data-media-menu-items]'
-    ].join(',');
-    return Array.from(document.querySelectorAll(sels)).some(el => {
-      const visible = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-      if(!visible) return false;
-      const txt = String(el.textContent || '').toLowerCase();
-      return txt.includes('speed') || txt.includes('audio') || txt.includes('caption') || txt.includes('subtitle') || txt.includes('normal');
-    });
-  }catch(_){ return false; }
-}
 function _p2ArmFullscreenSettingsFallback(wrap){
-  if(!wrap || wrap._p2SettingsFallbackHooked) return;
-  wrap._p2SettingsFallbackHooked = true;
+  if(!wrap || wrap._p2NativeMenuHooked) return;
+  wrap._p2NativeMenuHooked = true;
+  ['click','pointerup','keyup'].forEach(type => {
+    wrap.addEventListener(type, () => setTimeout(_p2SyncNativeSettingsEnhancements, 120), true);
+  });
+  const obs = new MutationObserver(() => {
+    setTimeout(_p2SyncNativeSettingsEnhancements, 40);
+    setTimeout(_p2SyncNativeSettingsEnhancements, 160);
+  });
+  obs.observe(wrap, { childList:true, subtree:true, attributes:true, attributeFilter:['open','data-open','aria-expanded','style','class'] });
+  wrap._p2MenuPoll = setInterval(() => {
+    try{
+      _p2SyncNativeSettingsEnhancements();
+      _p2EnsureAudioTrackFallback();
+    }catch(_){}
+  }, 300);
+}
+function _p2ArmNativeFullscreenRedirect(wrap){
+  if(!wrap || wrap._p2NativeFsRedirectHooked) return;
+  wrap._p2NativeFsRedirectHooked = true;
   wrap.addEventListener('click', ev => {
-    if(!_isFullscreen() || !_p2IsSettingsClick(ev)) return;
-    if(document.getElementById('p2FsSettingsMenu')){
-      ev.preventDefault();
-      ev.stopPropagation();
-      _p2CloseFullscreenSettingsMenu();
-      return;
-    }
-    setTimeout(() => {
-      if(!_isFullscreen()) return;
-      if(_p2HasVisibleNativeSettingsMenu()) return;
-      _p2ToggleFullscreenSettingsMenu();
-    }, 180);
+    const path = ev.composedPath ? ev.composedPath() : [];
+    const isFs = path.some(el => {
+      if(!el || !el.getAttribute) return false;
+      const tag = String(el.localName || '').toLowerCase();
+      const label = String(el.getAttribute('aria-label') || el.getAttribute('title') || '').toLowerCase();
+      return tag === 'media-fullscreen-button' || label.includes('fullscreen') || label.includes('layar penuh');
+    });
+    if(!isFs) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation && ev.stopImmediatePropagation();
+    toggleWrapFullscreen();
   }, true);
 }
 
+function _p2IsControlTarget(target){
+  try{
+    return !!(target && target.closest && target.closest('button, input, select, textarea, a, media-controls, media-control-bar, media-menu, media-menu-items, media-time-slider, .p2-overlay-dropdown, #p2FsSettingsMenu, .ep-drawer-root'));
+  }catch(_){ return false; }
+}
+function _p2SeekBy(delta){
+  const player = document.getElementById('p2VsPlayer');
+  if(!player) return;
+  const dur = Number(player.duration || 0);
+  const cur = Number(player.currentTime || 0);
+  const next = Math.max(0, dur ? Math.min(dur - 0.1, cur + delta) : cur + delta);
+  try{ player.currentTime = next; }catch{}
+  const aux = document.getElementById('p2AuxAudio');
+  if(p2State && p2State._useAux && aux){ try{ aux.currentTime = next; }catch{} }
+}
+function _p2TogglePlay(){
+  const player = document.getElementById('p2VsPlayer');
+  if(!player) return;
+  try{ player.paused ? player.play().catch(()=>{}) : player.pause(); }catch{}
+}
+function _p2FlashGesture(label, side){
+  const wrap = document.getElementById('player2Wrap');
+  if(!wrap) return;
+  let el = document.getElementById('p2GestureHint');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'p2GestureHint';
+    wrap.appendChild(el);
+  }
+  el.className = 'show ' + (side || 'center');
+  el.textContent = label;
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.classList.remove('show'), 520);
+}
+function _p2ArmTapGestures(wrap){
+  if(!wrap || wrap._p2TapGesturesHooked) return;
+  wrap._p2TapGesturesHooked = true;
+  let last = { t:0, zone:'', x:0, y:0 };
+  let singleTimer = null;
+  wrap.addEventListener('pointerup', ev => {
+    if(ev.button && ev.button !== 0) return;
+    if(_p2IsControlTarget(ev.target)) return;
+    const r = wrap.getBoundingClientRect();
+    const x = ev.clientX - r.left;
+    const y = ev.clientY - r.top;
+    if(y > r.height - 92 || y < 46) return;
+    const zone = x < r.width * 0.36 ? 'left' : (x > r.width * 0.64 ? 'right' : 'center');
+    const now = Date.now();
+    const isDouble = last.zone === zone && now - last.t < 330 && Math.abs(last.x - x) < 90 && Math.abs(last.y - y) < 90;
+    if(isDouble && zone !== 'center'){
+      clearTimeout(singleTimer);
+      last = { t:0, zone:'', x:0, y:0 };
+      const delta = zone === 'right' ? 5 : -5;
+      _p2SeekBy(delta);
+      _p2FlashGesture((delta > 0 ? '+' : '-') + '5s', zone);
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    last = { t:now, zone, x, y };
+    clearTimeout(singleTimer);
+    if(zone === 'center'){
+      ev.preventDefault();
+      ev.stopPropagation();
+      singleTimer = setTimeout(() => {
+        _p2TogglePlay();
+        _p2FlashGesture('Play/Pause', 'center');
+      }, 210);
+    }
+  }, true);
+}
+function _p2FormatTime(seconds){
+  seconds = Math.max(0, Number(seconds || 0));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return h ? (h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')) : (m + ':' + String(s).padStart(2,'0'));
+}
+function _p2ArmPreviewThumb(wrap, player){
+  if(!wrap || wrap._p2PreviewHooked) return;
+  wrap._p2PreviewHooked = true;
+  const box = document.createElement('div');
+  box.id = 'p2SeekPreview';
+  box.innerHTML = '<canvas width="220" height="124"></canvas><span>0:00</span>';
+  wrap.appendChild(box);
+  const canvas = box.querySelector('canvas');
+  const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+  const pv = document.createElement('video');
+  pv.muted = true;
+  pv.playsInline = true;
+  pv.preload = 'metadata';
+  pv.crossOrigin = 'anonymous';
+  pv.style.display = 'none';
+  wrap.appendChild(pv);
+  let lastSrc = '';
+  let seeking = false;
+  const sourceUrl = () => {
+    const raw = player && player.src;
+    return String((raw && (raw.src || raw)) || player?.currentSrc || '');
+  };
+  const ensureSrc = () => {
+    const src = sourceUrl();
+    if(src && src !== lastSrc){ lastSrc = src; pv.src = src; }
+  };
+  pv.addEventListener('seeked', () => {
+    seeking = false;
+    if(ctx && pv.videoWidth){
+      try{ ctx.drawImage(pv, 0, 0, canvas.width, canvas.height); }catch(_){}
+    }
+  });
+  wrap.addEventListener('pointermove', ev => {
+    const path = ev.composedPath ? ev.composedPath() : [];
+    const slider = path.find(el => el && String(el.localName || '').toLowerCase() === 'media-time-slider') || ev.target.closest?.('media-time-slider');
+    if(!slider) return;
+    const r = slider.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (ev.clientX - r.left) / Math.max(1, r.width)));
+    const dur = Number(player.duration || 0);
+    const wanted = pct * dur;
+    box.querySelector('span').textContent = _p2FormatTime(wanted);
+    const wr = wrap.getBoundingClientRect();
+    box.style.left = Math.max(12, Math.min(wr.width - 232, ev.clientX - wr.left - 110)) + 'px';
+    box.classList.add('show');
+    ensureSrc();
+    if(!seeking && dur && pv.readyState >= 1){
+      seeking = true;
+      try{ pv.currentTime = wanted; }catch(_){ seeking = false; }
+    }
+  }, true);
+  wrap.addEventListener('pointerleave', () => box.classList.remove('show'), true);
+}
+
+function _p2PromptResume(player, film, seconds){
+  const wrap = document.getElementById('player2Wrap');
+  if(!wrap || !player || !seconds || seconds <= 5) return;
+  if(wrap.querySelector('.p2-resume-card')) return;
+  try{ player.pause(); }catch{}
+  const card = document.createElement('div');
+  card.className = 'p2-resume-card';
+  card.innerHTML = '<div class="p2-resume-box"><p>Kamu terakhir menonton sampai <b>' + _p2FormatTime(seconds) + '</b>. Mau lanjut dari sana?</p><div><button type="button" class="p2-resume-yes">Lanjutkan</button><button type="button" class="p2-resume-no">Mulai dari awal</button></div></div>';
+  const done = () => { try{ card.remove(); }catch{} };
+  card.querySelector('.p2-resume-yes').addEventListener('click', ev => {
+    ev.stopPropagation();
+    try{ player.currentTime = seconds; }catch{}
+    done();
+    try{ player.play().catch(()=>{}); }catch{}
+  });
+  card.querySelector('.p2-resume-no').addEventListener('click', ev => {
+    ev.stopPropagation();
+    currentResumeFrom = 0;
+    if(film && film.id) _removeContinueWatchingSilent(film.id);
+    try{ player.currentTime = 0; }catch{}
+    done();
+    try{ player.play().catch(()=>{}); }catch{}
+  });
+  wrap.appendChild(card);
+}
 function _p2WireVidstack(player, aux, film){
   // Inject custom audio & quality overlays INTO the player (top-right area)
   if(p2State){
@@ -3765,6 +4210,10 @@ function _p2WireVidstack(player, aux, film){
   const ensureAuxPlaying = (forceSeek)=>{
     if(!p2State || !p2State._useAux) return;
     try{
+      if(player.paused){
+        if(!aux.paused) aux.pause();
+        return;
+      }
       if(forceSeek || Math.abs((aux.currentTime || 0) - (player.currentTime || 0)) > 0.35){
         aux.currentTime = player.currentTime || 0;
       }
@@ -3786,6 +4235,9 @@ function _p2WireVidstack(player, aux, film){
   player.addEventListener('pause', ()=>{
     if(p2State && p2State._useAux){ try{ aux.pause(); }catch{} }
   });
+  player.addEventListener('pausing', ()=>{
+    if(p2State && p2State._useAux){ try{ aux.pause(); }catch{} }
+  });
   player.addEventListener('seeking', ()=>{
     if(p2State && p2State._useAux){ try{ aux.currentTime = player.currentTime; }catch{} }
   });
@@ -3804,6 +4256,7 @@ function _p2WireVidstack(player, aux, film){
   // Save Continue Watching every ~8s + sync aux audio
   player.addEventListener('time-update', ()=>{
     if(!p2State) return;
+    if(p2State._useAux && player.paused){ try{ aux.pause(); }catch{} return; }
     sync();
     ensureAuxPlaying();
     const now = Date.now();
@@ -3824,6 +4277,9 @@ function _p2WireVidstack(player, aux, film){
   }
   if(wrap){
     _p2ArmFullscreenSettingsFallback(wrap);
+    _p2ArmNativeFullscreenRedirect(wrap);
+    _p2ArmTapGestures(wrap);
+    _p2ArmPreviewThumb(wrap, player);
   }
   if(wrap && !wrap._p2FsSettingsHooked){
     wrap._p2FsSettingsHooked = true;
@@ -4164,6 +4620,8 @@ function _p2SwitchAudio(i){
     try{ aux.currentTime = t; }catch{}
     if(wasPlaying){ aux.play().catch(()=>{}); }
   }, { once: true });
+  setTimeout(_p2SyncNativeSettingsEnhancements, 40);
+  setTimeout(_p2RefreshTopTrackControls, 50);
 }
 
 // Convert SRT or ASS subtitle text to WebVTT so it can be assigned to a
@@ -4721,8 +5179,8 @@ async function loadVideoEngine3(film, sources){
       }
     }
   };
-  // For simple R2 (1 video + separate audio), skip Shaka entirely.
-  // Progressive MP4 can't form a valid DASH MPD — Shaka Error 4002 is inevitable.
+  // For R2, skip Shaka. Progressive MP4 R2 with separate audio stays on
+  // Vidstack/native fallback, never Shaka.
   if(film && film.r2_bucket && videos.length === 1 && audios.length >= 1){
     console.log('[Engine3] Simple R2 detected — skipping Shaka MPD, using native fallback (subtitles via _fallbackCtrl)');
     _p3InjectOverlays(wrap, video, videoInits, audios, vttSubs, _fallbackCtrl);
@@ -4821,7 +5279,7 @@ async function loadVideoEngine3(film, sources){
             'quality', 'fullscreen', 'overflow_menu'
           ],
           overflowMenuButtons: [
-            'picture_in_picture'
+            'language', 'captions', 'quality', 'playback_rate', 'picture_in_picture'
           ],
         });
       }catch(uiErr){
@@ -4969,8 +5427,13 @@ function closePlayer(opts){
   // Dismiss the episode drawer if it was open so it doesn't bleed
   // into the next player open or stay floating after navigation.
   try{ closeEpDrawer(); }catch(_){ }
+  try{ closePlayerTrackMenus(); }catch(_){ }
   const _epBtn = document.getElementById('playerEpBtn');
   if(_epBtn) _epBtn.style.display = 'none';
+  const _audioMenu = document.getElementById('playerAudioMenu');
+  const _subMenu = document.getElementById('playerSubMenu');
+  if(_audioMenu) _audioMenu.style.display = 'none';
+  if(_subMenu) _subMenu.style.display = 'none';
   document.getElementById('playerModal').classList.remove('open');
   document.body.style.overflow='';
   // If we pushed a /film/{id} URL, navigate back one step so URL reverts
@@ -6544,3 +7007,4 @@ window.addEventListener('beforeunload', () => {
 })();
 
 bootstrap();
+
