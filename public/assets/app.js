@@ -3526,6 +3526,10 @@ async function loadVideoEngine2(film, sources){
   }
 
   setStreamActions(videos[0].path, film.judul || film.title || '');
+  _p2InjectOverlays();
+  setTimeout(() => {
+    if(gen === _p2LoadGen) _p2RefreshTopTrackControls();
+  }, 250);
 }
 
 /* ─── P2 Overlay Menus — Audio & Quality buttons inside the player ─── */
