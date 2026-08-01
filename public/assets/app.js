@@ -197,15 +197,17 @@ async function handlePaymentReturn(ref){
           // Refresh profil + entitlements supaya VIP/film akses langsung kelihatan.
           try{ if(typeof onAuthSuccess === 'function' && session) await onAuthSuccess(session); }catch(_){}
           try{ if(typeof renderProfilePage === 'function') renderProfilePage(); }catch(_){}
-          // Notifikasi disesuaikan: kalau order film tertentu → sebutkan nama
-          // filmnya + arahkan ke My Collection. Untuk VIP / order tanpa nama
-          // film spesifik, fallback ke pesan generik.
+          // Notifikasi disesuaikan: kalau order film tertentu → redirect langsung
+          // ke My Collection + toast sukses. Untuk VIP / order tanpa nama film
+          // spesifik, fallback ke pesan generik tanpa redirect.
           const order = d.order || {};
           const ptype = String(order.product_type || '').toLowerCase();
           if(ptype === 'film'){
             const titles = extractOrderFilmTitles(order);
             if(titles.length){
-              showPaymentSuccessFilmNotice(titles);
+              // Redirect ke My Collection, lalu tampilkan toast sukses.
+              try{ if(typeof goPage === 'function') goPage('my-collections'); }catch(_){}
+              showToast('Pembayaran berhasil — film sudah ada di koleksi kamu.', 'success');
             } else {
               showToast('Pembayaran berhasil — akses film sudah aktif. Cek di My Collection.', 'success');
             }
